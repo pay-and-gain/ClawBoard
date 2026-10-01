@@ -30,7 +30,7 @@ import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.2.0'
+APP_VER = '1.3.2'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -62,6 +62,7 @@ FONT_SM = ('Microsoft YaHei UI', 8)
 FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
 
 ITEM_H = 52          # 虚拟列表固定行高
+WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
 
 # ---------------- 1. 主题 ----------------
@@ -1068,6 +1069,53 @@ class Tip:
             self.win = None
 
 
+class ScrollFrame(tk.Frame):
+    """可滚动容器：内容放 .inner。滚轮 + 右侧细滚动条，内层宽度自动跟随。"""
+
+    def __init__(self, master, bg=None):
+        bg = bg or T['bg']
+        tk.Frame.__init__(self, master, bg=bg)
+        self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0,
+                                yscrollincrement=24)
+        self.sb = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview,
+                               bg=T['panel'], troughcolor=bg, activebackground=T['acc'],
+                               relief='flat', bd=0, width=6)
+        self.canvas.pack(side='left', fill='both', expand=True)
+        self.sb.pack(side='right', fill='y')
+        self.canvas.configure(yscrollcommand=self.sb.set)
+        self.inner = tk.Frame(self.canvas, bg=bg)
+        self._wid = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
+        self._acc = 0.0
+        self.inner.bind('<Configure>', self._on_inner)
+        self.canvas.bind('<Configure>', self._on_canvas)
+        self.canvas.bind('<MouseWheel>', self._wheel)
+
+    def _on_inner(self, _=None):
+        self.canvas.configure(scrollregion=self.canvas.bbox('all') or (0, 0, 0, 0))
+
+    def _on_canvas(self, e):
+        self.canvas.itemconfigure(self._wid, width=e.width)
+
+    def bind_wheel_tree(self, w=None):
+        """内容建好后调用一次：给所有子控件补上滚轮绑定（含后加的）"""
+        w = w or self.inner
+        for c in w.winfo_children():
+            c.bind('<MouseWheel>', self._wheel)
+            self.bind_wheel_tree(c)
+
+    def _wheel(self, e):
+        d = getattr(e, 'delta', 0)
+        if not d:
+            return 'break'
+        self._acc += d / 120.0
+        steps = int(self._acc)
+        if not steps:
+            return 'break'
+        self._acc -= steps
+        self.canvas.yview_scroll(-steps * WHEEL_LINES, 'units')
+        return 'break'
+
+
 class VirtualList(tk.Frame):
     """固定行高窗口化渲染：5000 条只创建可视区 widget"""
 
@@ -1094,6 +1142,7 @@ class VirtualList(tk.Frame):
                                activebackground=T['acc'], relief='flat', bd=0, width=6)
         self.sb.pack(side='right', fill='y')
         self.canvas.configure(yscrollcommand=self.sb.set)
+        self._acc = 0.0        # 滚轮增量累积：触控板/高精度滚轮的 delta 常小于 120
         self.canvas.bind('<MouseWheel>', self._wheel)
         self.canvas.bind('<Configure>', lambda e: self.update_view())
 
@@ -1124,7 +1173,29 @@ class VirtualList(tk.Frame):
             pass
 
     def _wheel(self, e):
-        self.canvas.yview_scroll(int(-1 * (e.delta / 120)), 'units')
+        """滚轮滚动。delta/120 直接取整会让触控板（delta=40/±1）永远为 0 滚不动，
+        所以先把增量累加起来，攒够一格再滚。"""
+        d = getattr(e, 'delta', 0)
+        if not d:
+            return 'break'
+        self._acc += d / 120.0
+        steps = int(self._acc)
+        if not steps:
+            return 'break'
+        self._acc -= steps
+        self.scroll_rows(-steps * WHEEL_LINES)
+        return 'break'
+
+    def scroll_rows(self, rows):
+        """按行滚动（负值向下），夹在首尾之间，滚到头不会滚出空白"""
+        n = len(self.items)
+        if n <= 0 or not rows:
+            return
+        total = n * ITEM_H
+        h = max(1, self.canvas.winfo_height())
+        top = self.canvas.canvasy(0) + rows * ITEM_H
+        top = max(0.0, min(max(0.0, total - h), top))
+        self.canvas.yview_moveto(top / float(total))
         self.update_view()
 
     def yview_step(self, px):
@@ -1195,6 +1266,8 @@ class VirtualList(tk.Frame):
                                                 self.on_hover(ff._idx, e.x_root, e.y_root)))
             wg.bind('<Leave>', lambda e, ff=f: (self._hover(ff._idx, False),
                                                 self.tip.hide()))
+            # 鼠标停在条目上时事件不会冒泡到 canvas，必须逐个子控件接管滚轮
+            wg.bind('<MouseWheel>', self._wheel)
         return f
 
     def _paint(self, f, c):
@@ -2549,8 +2622,10 @@ class SettingsWindow:
         dark_top(self.win, '设置')
         self.win.attributes('-topmost', True)
         self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
-        body = tk.Frame(self.win, bg=T['bg'])
-        body.pack(fill='both', expand=True, padx=14, pady=10)
+        # 内容放进可滚动容器：选项变多了也不怕窗口装不下
+        self.sc = ScrollFrame(self.win)
+        self.sc.pack(fill='both', expand=True, padx=(14, 8), pady=(10, 0))
+        body = self.sc.inner
         self.row_switch(body, '监听剪贴板', 'listen')
         self.row_switch(body, '单击后自动粘贴到上一窗口', 'autopaste')
         self.row_switch(body, '敏感内容打码显示', 'mask_sensitive')
@@ -2563,8 +2638,8 @@ class SettingsWindow:
         self.row_theme(body)
         self.row_hotkey(body)
         self.row_int(body, '历史最大条数（10-5000）', 'max_items')
-        btns = tk.Frame(body, bg=T['bg'])
-        btns.pack(fill='x', pady=(6, 0))
+        btns = tk.Frame(self.win, bg=T['bg'])    # 固定在窗口底部，不跟着内容滚
+        btns.pack(fill='x', padx=14, pady=(8, 10))
         b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
                      padx=16, pady=5, cursor='hand2')
         b.pack(side='right')
@@ -2576,6 +2651,9 @@ class SettingsWindow:
         q.bind('<Button-1>', lambda e: (app.save(True), safe_release(self.win),
                                         self.win.destroy(), app.quit_app()))
         self.win.bind('<Escape>', lambda e: (safe_release(self.win), self.win.destroy()))
+        self.sc.bind_wheel_tree()          # 所有子控件接管滚轮
+        center_on(self.win, app.root, 380, 470)
+        self.win.after(80, self.sc._on_inner)
 
     def row_close_action(self, master):
         """点 ✕ 的行为：默认隐藏到托盘，也可改成直接退出"""
@@ -2606,7 +2684,6 @@ class SettingsWindow:
             m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
         lb.bind('<Button-1>', menu)
         paint()
-        center_on(self.win, app.root, 380, 430)
 
     def row_switch(self, master, text, key):
         r = tk.Frame(master, bg=T['bg'])
@@ -2767,6 +2844,8 @@ class TransformWindow:
         self.lb.configure(yscrollcommand=sb.set)
         self.lb.pack(side='left', fill='y')
         sb.pack(side='left', fill='y')
+        # Windows 的 Tk Listbox 自带没有任何滚轮绑定，必须自己接管
+        self.lb.bind('<MouseWheel>', self.lb_wheel)
         for _, label, _ in tx().TRANSFORMS:
             self.lb.insert('end', label)
         self.lb.bind('<<ListboxSelect>>', lambda e: self.run())
@@ -2804,6 +2883,19 @@ class TransformWindow:
         b.bind('<Button-1>', lambda e: (safe_release(self.win), self.win.destroy()))
         self.win.bind('<Escape>', lambda e: (safe_release(self.win), self.win.destroy()))
         center_on(self.win, app.root, 760, 540)
+
+    def lb_wheel(self, e):
+        """变换列表的滚轮：同样按 1/120 格累积，触控板不丢事件"""
+        d = getattr(e, 'delta', 0)
+        if not d:
+            return 'break'
+        self._acc = getattr(self, '_acc', 0.0) + d / 120.0
+        steps = int(self._acc)
+        if not steps:
+            return 'break'
+        self._acc -= steps
+        self.lb.yview_scroll(-steps * WHEEL_LINES, 'units')
+        return 'break'
 
     def run(self):
         sel = self.lb.curselection()

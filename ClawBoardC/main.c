@@ -2337,7 +2337,8 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
         int vh = cr.bottom - TOOL_H - list_top_y();
         int maxs = g.nview * ITEM_H - vh;
         if (maxs < 0) maxs = 0;
-        g.scroll -= delta / 120 * ITEM_H;
+        /* 一格滚 3 行；触控板 delta 常小于 120，先乘再除，避免整格被截断成 0 */
+        g.scroll -= (delta * ITEM_H * 3) / 120;
         if (g.scroll < 0) g.scroll = 0;
         if (g.scroll > maxs) g.scroll = maxs;
         InvalidateRect(hw, NULL, FALSE);
