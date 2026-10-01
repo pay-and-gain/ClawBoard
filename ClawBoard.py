@@ -31,7 +31,7 @@ import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.4.0'
+APP_VER = '1.4.1'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -64,6 +64,8 @@ FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
 
 ITEM_H = 52          # 虚拟列表固定行高
 WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
+MIN_W, MIN_H = 280, 340   # 面板最小尺寸。再小的话：标题栏 30 + 标签 32 + 工具条 36 一扣，
+                          # 留给列表的宽度会被徽章/序号列吃掉，正文只剩几十像素 —— 看起来像"没有内容"
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
 NO_SAVE = False      # --bench 压测时置 True：压测实例绝不把任何东西写回存档
                      # （曾经漏了这条，压测把「热键」也写进了存档）
@@ -647,6 +649,21 @@ def match_ignore(app_name, title, apps_raw, titles_raw):
             if pat.lower() in t.lower():
                 return '标题 %s' % pat
     return None
+
+
+def dpi_scale(root):
+    """当前屏幕相对 100% 的缩放系数。
+
+    Tk 在 DPI 感知模式下：`tk scaling` = 每点占多少像素（96 DPI 时 1.333，120 DPI 时 1.667）。
+    125% 缩放下字体被放大 1.25 倍，同样的物理宽度能装下的字会少两成 ——
+    所以「最小尺寸」这类按像素写死的阈值必须乘上这个系数，否则在缩放屏上会显得特别小。
+    """
+    try:
+        s = float(root.tk.call('tk', 'scaling'))
+    except Exception:
+        s = 1.3333333
+    k = s / 1.3333333
+    return k if 0.5 <= k <= 4.0 else 1.0
 
 
 def length_filtered(txt, lo, hi):
@@ -1586,6 +1603,7 @@ class VirtualList(tk.Frame):
                     self.canvas.itemconfig(self.wids[i], width=w)
                     f._vw = w
             f._idx = i
+            self._layout(f, w)          # 宽度变了就重排：窄窗口下给正文让位
             self._fill(f, i)
 
     def _mk_item(self, i):
@@ -1593,6 +1611,8 @@ class VirtualList(tk.Frame):
         f.pack_propagate(False)
         f._idx = i
         f._vw = 0
+        f._lw = None      # 上次布局用的宽度（见 _layout）
+        f._numw = 0       # 当前序号列宽度，0 表示被让位给正文了
         # 序号列：按住 Ctrl 时显示 1..9/0，提示「Ctrl+数字直接粘贴」（Ditto QListCtrl.cpp:610）
         f._num = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['acc'], anchor='w')
         f._num.place(x=6, y=7, width=16, height=16)
@@ -1637,6 +1657,24 @@ class VirtualList(tk.Frame):
             return
         self._paint(f, T['card_h'] if on else T['card'])
 
+    def _layout(self, f, w):
+        """按卡片实际宽度分配横向空间。
+        窄的时候先让序号列和徽章退出：窗口被拖到 192px 宽时，若还固定给徽章留 88px、
+        给序号留 24px，正文只剩 60 多像素，看着就像"面板里没有内容"。"""
+        if getattr(f, '_lw', None) == w:
+            return
+        f._lw = w
+        num = 16 if w >= 190 else 0
+        badge = 80 if w >= 240 else (48 if w >= 180 else 0)
+        x0 = (6 + num + 2) if num else 7
+        right = (badge + 10) if badge else 7
+        f._numw = num
+        f._num.place_configure(x=6, y=7, width=max(1, num), height=16)
+        f._row.place_configure(x=x0, y=6, relwidth=1, width=-(x0 + right), height=18)
+        f._l2.place_configure(x=x0, y=28, relwidth=1, width=-(x0 + 7), height=16)
+        f._badge.place_configure(relx=1.0, x=-10, y=6, anchor='ne', height=18,
+                                 width=max(1, badge))
+
     def _first_hit(self, body):
         """找出该高亮哪个词。
         原实现拿整串 `self.kw` 去 find，搜「hello world」这种多词时永远找不到 → 不高亮。
@@ -1670,8 +1708,8 @@ class VirtualList(tk.Frame):
         if self._maxc != maxc:
             self._maxc = maxc
             self._maxc2 = max(8, int(w / 6.5))
-        f._num.configure(text=('0' if i == 9 else str(i + 1)) if
-                         (self.show_num and i < 10) else '')
+        f._num.configure(text=('0' if i == 9 else str(i + 1))
+                         if (self.show_num and i < 10 and f._numw) else '')
         kw, pos = self._first_hit(body)
         if pos >= 0 and kw:
             s = max(0, pos - 6)
@@ -2090,6 +2128,10 @@ class ClawBoard:
         self.grip.place(relx=1.0, rely=1.0, anchor='se')
         self.grip.bind('<ButtonPress-1>', self.start_resize)
         self.grip.bind('<B1-Motion>', self.do_resize)
+        # 兜住"手滑拖到看不见"：折叠状态下不设下限，否则折不成 210x30
+        if not getattr(self, 'collapsed', False):
+            mw, mh = self.min_size()
+            self.root.minsize(mw, mh)
 
     def mk_tab(self, master, text, key):
         f = tk.Frame(master, bg=T['bg'], cursor='hand2')
@@ -2121,13 +2163,22 @@ class ClawBoard:
                on_ok=lambda v: on_yes(), ok_text='确定').show(430, 200)
 
     # ---------- 几何 ----------
+    def min_size(self):
+        """面板最小**物理**尺寸：按 DPI 换算，保证在 125%/150% 缩放的屏幕上
+        也不会小到"正文装不下几个字"（否则就是用户看到的那种"里面没有内容"）"""
+        k = dpi_scale(self.root)
+        return int(MIN_W * k), int(MIN_H * k)
+
     def apply_geometry(self):
         """恢复位置。必须完整落在某一个显示器内：跨屏缝隙会让面板看起来开着却点不到"""
+        mw, mh = self.min_size()
         g = self.data.get('geom')
         if g:
             m = re.match(r'^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$', g)
             if m:
                 w, h, x, y = (int(v) for v in m.groups())
+                # 存档里的小尺寸自动纠正：曾经被拖成 192x293，恢复出来就看不清内容了
+                w, h = max(mw, w), max(mh, h)
                 w, h, x, y = self.fit_geometry(w, h, x, y)
                 self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
                 return
@@ -2266,10 +2317,20 @@ class ClawBoard:
         if self.collapsed:
             self._restore = self.root.geometry()
             self.body.pack_forget()
+            self.root.minsize(160, 28)      # 先放开最小尺寸，否则折叠不成 210x30
             self.root.geometry('210x30+%d+%d' % (self.root.winfo_x(), self.root.winfo_y()))
         else:
+            mw, mh = self.min_size()
+            self.root.minsize(mw, mh)
+            m = re.match(r'^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$', self._restore or '')
+            if m:
+                w, h, x, y = (int(v) for v in m.groups())
+                w, h = max(mw, w), max(mh, h)
+                w, h, x, y = self.fit_geometry(w, h, x, y)
+                self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+            else:
+                self.root.geometry(self._restore)
             self.body.pack(fill='both', expand=True)
-            self.root.geometry(self._restore)
             self.render()
 
     def hide(self):
@@ -3675,8 +3736,9 @@ def main():
     root = tk.Tk()
     tk_error(root)
     app = ClawBoard(root)
-    app.note('%s v%s 启动（热键 %s，pid %d）' % (APP_NAME, APP_VER, app.st['hotkey'],
-                                                os.getpid()))
+    app.note('%s v%s 启动（热键 %s，pid %d，窗口 %s，最小 %s，tk scaling %s）'
+             % (APP_NAME, APP_VER, app.st['hotkey'], os.getpid(),
+                root.geometry(), root.minsize(), root.tk.call('tk', 'scaling')))
     root.mainloop()
 
 
