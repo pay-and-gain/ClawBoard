@@ -250,3 +250,40 @@ F6 无残留标签=True
 ## 阻塞项
 
 - 无。所有轮次均按替代方案推进并在 PROGRESS 中标注。
+
+---
+
+## 补充：交付形态（打包 / C 版 / 精简）
+
+### Python 版精简（实测对比）
+| 指标 | 精简前 | 精简后 |
+|---|---|---|
+| 启动 | 359 ms | 350 ms |
+| 初始内存 | 66.6 MB | 65.6 MB |
+| 1 万条后内存 | 75.7 MB | 74.4 MB |
+| 滚动刷新 | 17.77 ms | 13.90 ms（-22%） |
+| 搜索 | 9.93 ms | 9.22 ms |
+
+做了什么：定时器 3 个合并成 2 个（前台窗口记录并入主循环）、空值字段不再落盘、
+transform 模块延迟到首次打开变换窗口才导入、bench 内部按需导入 random/string。
+**结论**：Python 版 60 MB 起步是解释器 + tkinter 的固有成本，压不到 C 版的量级，
+能压的主要是启动路径与数据内存。
+
+### 打包 exe
+- 工具：PyInstaller 6.22.3，`--onefile --windowed`
+- **踩坑 1**：用 venv 里的 Python 打包，PyInstaller 报 `missing module named tkinter`，
+  exe 只有 8 MB 且运行即崩。venv 里明明能 `import tkinter`（8.6），但 PyInstaller 收不到。
+  改用**系统 Python + `pip install --target .pytools` 隔离安装** PyInstaller 后正常。
+- **踩坑 2**：onefile 模式下 `__file__` 指向临时解包目录，数据文件写进去退出就消失。
+  改为 frozen 时 `BASE_DIR = dirname(sys.executable)`，数据落在 exe 旁边。
+- 产物：`dist/ClawBoard.exe` 11 MB，已复制到工作区根目录，实测独立运行正常。
+
+### C 语言版（Visual Studio 2026）
+- 项目：`ClawBoardC\ClawBoardC.sln` + `.vcxproj`（工具集 v145，x64，Unicode，/utf-8）
+- 代码：`ClawBoardC\main.c` 约 1300 行，纯 Win32 API + GDI 自绘
+- 编译：`ClawBoardC\build.bat`（手动设置 INCLUDE/LIB 调用 cl.exe，
+  因为 vcvars64.bat 依赖 reg.exe 被安全策略拦住）
+- 产物：205 KB，运行内存约 15 MB，编译零警告
+- 自写迷你 JSON 解析器，因此能直接读 Python 版写的数据文件
+- 功能范围：核心子集（监听 / 历史 / 常用语分组 / 拆词 / 搜索 / 托盘 / 热键 / 单实例 /
+  敏感打码 / 详情）。高级搜索语法、27 项变换、批量导出只在 Python 版。

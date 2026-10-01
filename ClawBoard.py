@@ -21,8 +21,6 @@ import sys
 import json
 import time
 import ctypes
-import random
-import string
 import threading
 import traceback
 import subprocess
@@ -31,15 +29,31 @@ import tkinter as tk
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.1.0'
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+APP_VER = '1.2.0'
+
+if getattr(sys, 'frozen', False):
+    # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
+    # 数据文件必须落在 exe 旁边，否则每次退出历史全丢。
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'ClawBoard数据.json')
 ICON_FILE = os.path.join(BASE_DIR, 'ClawBoard.ico')
 CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
 
 sys.path.insert(0, BASE_DIR)
 import query as Q          # F3 查询解析器（独立模块，可单测）
-import transform as TX     # F4 文本变换（独立模块，可单测）
+
+TX = None                  # F4 变换模块延迟到首次打开变换窗口时再导入
+
+
+def tx():
+    """延迟导入 transform：启动时不必拉起 hashlib/base64/urllib"""
+    global TX
+    if TX is None:
+        import transform
+        TX = transform
+    return TX
 
 FONT = ('Microsoft YaHei UI', 9)
 FONT_B = ('Microsoft YaHei UI', 9, 'bold')
@@ -1181,8 +1195,7 @@ class ClawBoard:
         self.render()
         self.root.after(120, self.render)
         self.poll_clip()
-        self.track_foreground()
-        self.poll_bg()
+        self.poll_bg()          # 前台窗口记录已并入本循环，定时器从 3 个降到 2 个
 
     # ---------- 数据 ----------
     @staticmethod
@@ -1366,7 +1379,13 @@ class ClawBoard:
             self._tray_menu = True
 
     def poll_bg(self):
-        """主线程统一消费后台线程产生的事件标志 + 热键降级轮询"""
+        """主线程统一消费后台线程产生的事件标志 + 热键降级轮询 + 记录前台窗口"""
+        try:
+            h = u32.GetForegroundWindow()
+            if h and h != self.root.winfo_id():
+                self.prev_hwnd = h
+        except Exception:
+            pass
         if self._tray_menu:
             self._tray_menu = False
             self.tray_menu()
@@ -2189,28 +2208,23 @@ class ClawBoard:
             if ts < mx:
                 self.note('系统时钟回拨（新 %d < 库中最大 %d），本次用 seq 兜底排序' % (ts, mx))
                 ts = mx + 1
-            self.data['clip'].insert(0, {
-                'id': uid(), 'text': txt, 'time': now_str(),
-                'created_at': ts, 'updated_at': ts, 'last_used_at': None,
-                'seq': self.next_seq(), 'source_app': src, 'source_title': title,
-                'content_type': detect_content_type(txt),
-                'content_size': byte_size(txt), 'copy_count': 1, 'fav': 0,
-                'sens': hits or None, 'meta': None, 'is_estimated': 0})
+            rec = {'id': uid(), 'text': txt, 'created_at': ts, 'updated_at': ts,
+               'seq': self.next_seq(), 'source_app': src,
+               'content_type': detect_content_type(txt),
+               'content_size': byte_size(txt), 'copy_count': 1, 'fav': 0,
+               'is_estimated': 0}
+        # 空值字段一律不落盘：1 万条能省下 MB 级内存与文件体积
+        if title:
+            rec['source_title'] = title
+        if hits:
+            rec['sens'] = hits
+        self.data['clip'].insert(0, rec)
         lim = int(self.st['max_items'])
         if len(self.data['clip']) > lim:
             self.data['clip'] = self.data['clip'][:lim]
         self.save(True)
         if self.tab == 'clip':
             self.render()
-
-    def track_foreground(self):
-        try:
-            h = u32.GetForegroundWindow()
-            if h and h != self.root.winfo_id():
-                self.prev_hwnd = h
-        except Exception:
-            pass
-        self.root.after(300, self.track_foreground)
 
 
 class SettingsWindow:
@@ -2381,7 +2395,7 @@ class TransformWindow:
         self.lb.configure(yscrollcommand=sb.set)
         self.lb.pack(side='left', fill='y')
         sb.pack(side='left', fill='y')
-        for _, label, _ in TX.TRANSFORMS:
+        for _, label, _ in tx().TRANSFORMS:
             self.lb.insert('end', label)
         self.lb.bind('<<ListboxSelect>>', lambda e: self.run())
 
@@ -2423,7 +2437,7 @@ class TransformWindow:
         sel = self.lb.curselection()
         if not sel:
             return
-        key = TX.TRANSFORMS[int(sel[0])][0]
+        key = tx().TRANSFORMS[int(sel[0])][0]
         src = self.src.get('1.0', 'end-1c')
         if len(src.encode('utf-8')) > 5 * 1024 * 1024:
             self.out.delete('1.0', 'end')
@@ -2434,7 +2448,7 @@ class TransformWindow:
 
     def _work(self, key, src):
         try:
-            res, err = TX.apply(key, src), None
+            res, err = tx().apply(key, src), None
         except Exception as e:
             res, err = '', str(e)
         try:
@@ -2647,7 +2661,9 @@ def single_instance():
 
 
 def bench():
-    """R4 性能实测：跑完输出真实数字后退出"""
+    """性能实测：跑完输出真实数字后退出（压测数据绝不落盘）"""
+    import random
+    import string
     root = tk.Tk()
     app = ClawBoard(root)
     root.geometry('340x480+-2000+-2000')   # 移出屏幕但保持 mapped，保证布局真实
