@@ -25,12 +25,13 @@ import threading
 import traceback
 import subprocess
 import html as _html
+import fnmatch
 import tkinter as tk
 import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.3.3'
+APP_VER = '1.4.0'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -101,7 +102,14 @@ NIIF_INFO = 0x00000001
 MOD_ALT, MOD_CONTROL, MOD_SHIFT = 0x0001, 0x0002, 0x0004
 VK_V = 0x56
 VK_CONTROL = 0x11
+VK_SHIFT, VK_MENU = 0x10, 0x12          # Shift / Alt
+INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
+# Windows 官方的「别把我记进剪贴板历史」标记，KeePassXC / 1Password / Bitwarden 都会设置它。
+# 取自 Ditto src/Clip.cpp:364 与 :400（ExcludeClipboardContentFromMonitorProcessing、
+# CanIncludeInClipboardHistory=0）——这是剪贴板工具该守的礼貌，比任何敏感词正则都准。
+CF_NAME_EXCLUDE = 'ExcludeClipboardContentFromMonitorProcessing'
+CF_NAME_INCLUDE_HISTORY = 'CanIncludeInClipboardHistory'
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
 IMAGE_ICON = 1
@@ -167,6 +175,23 @@ sh32 = ctypes.WinDLL('shell32', use_last_error=True)
 sh32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.c_void_p]
 sh32.Shell_NotifyIconW.restype = wintypes.BOOL
 u32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ctypes.c_ulong]
+u32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
+u32.RegisterClipboardFormatW.restype = wintypes.UINT
+u32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
+u32.IsClipboardFormatAvailable.restype = wintypes.BOOL
+u32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+u32.GetAsyncKeyState.restype = ctypes.c_short
+u32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+u32.SendInput.restype = wintypes.UINT
+u32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+u32.MapVirtualKeyW.restype = wintypes.UINT
+u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+u32.AttachThreadInput.restype = wintypes.BOOL
+u32.BringWindowToTop.argtypes = [wintypes.HWND]
+u32.BringWindowToTop.restype = wintypes.BOOL
+u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+u32.GetWindowThreadProcessId.restype = wintypes.DWORD
+k32.GetCurrentThreadId.restype = wintypes.DWORD
 
 k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
 k32.GlobalAlloc.restype = wintypes.HANDLE
@@ -295,11 +320,156 @@ def clip_write(text):
     return True
 
 
+# ---- 发按键：SendInput + 扫描码（取自 Ditto src/SendKeys.cpp:237 / :326）----
+
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [('wVk', wintypes.WORD), ('wScan', wintypes.WORD),
+                ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD),
+                ('dwExtraInfo', ctypes.c_void_p)]
+
+
+class MOUSEINPUT(ctypes.Structure):
+    """必须原样写出来：INPUT 是联合体，大小取最大成员（64 位下 MOUSEINPUT=32 字节）。
+    少写了它、用 byte*24 顶替，sizeof(INPUT) 就是 32 而不是 40，SendInput 会直接失败。"""
+    _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG),
+                ('mouseData', wintypes.DWORD), ('dwFlags', wintypes.DWORD),
+                ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_void_p)]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [('uMsg', wintypes.DWORD), ('wParamL', wintypes.WORD),
+                ('wParamH', wintypes.WORD)]
+
+
+class _INPUTUNION(ctypes.Union):
+    _fields_ = [('ki', KEYBDINPUT), ('mi', MOUSEINPUT), ('hi', HARDWAREINPUT)]
+
+
+class INPUT(ctypes.Structure):
+    _fields_ = [('type', wintypes.DWORD), ('u', _INPUTUNION)]
+
+
+def _kbd(vk, up=False):
+    inp = INPUT()
+    inp.type = INPUT_KEYBOARD
+    inp.u.ki.wVk = vk
+    inp.u.ki.wScan = u32.MapVirtualKeyW(vk, 0)      # 带扫描码，兼容性更好
+    inp.u.ki.dwFlags = KEYEVENTF_KEYUP if up else 0
+    return inp
+
+
+def send_key(vk, up=False, gap=0.01):
+    try:
+        inp = _kbd(vk, up)
+        u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    except Exception:
+        return
+    if gap:
+        time.sleep(gap)
+
+
+MODIFIER_VKS = (VK_CONTROL, VK_SHIFT, VK_MENU, 0x5B, 0x5C)   # Ctrl/Shift/Alt/LWin/RWin
+
+
+def all_keys_up(gap=0.005):
+    """发键前先抬起所有还按着的修饰键。
+    Ditto SendKeys.cpp:237 的 AllKeysUp：用户按着 Ctrl 唤起面板时，残留的 Ctrl
+    会把我们的 Ctrl+V 变成 Ctrl+Ctrl+V，目标程序收到的是裸 V，粘贴就"失灵"了。"""
+    for vk in MODIFIER_VKS:
+        try:
+            if u32.GetAsyncKeyState(vk) & 0x8000:
+                send_key(vk, up=True, gap=gap)
+        except Exception:
+            pass
+
+
 def send_ctrl_v():
-    u32.keybd_event(VK_CONTROL, 0, 0, 0)
-    u32.keybd_event(VK_V, 0, 0, 0)
-    u32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-    u32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    """Ctrl+V。改用 SendInput：一次一个事件、带扫描码，比已废弃的 keybd_event 可靠"""
+    all_keys_up()
+    send_key(VK_CONTROL, gap=0.008)
+    send_key(VK_V, gap=0.012)
+    send_key(VK_V, up=True, gap=0.008)
+    send_key(VK_CONTROL, up=True, gap=0)
+
+
+def force_foreground(hwnd, timeout=0.35):
+    """把目标窗口抢回前台，并且**等它真的拿到焦点**才返回。
+    Ditto ExternalWindowTracker.cpp:187 的 AttachThreadInput 技巧：Windows 默认禁止
+    后台进程抢焦点（前台锁定），附加到当前前台线程的输入队列后就允许了；
+    :119 的 WaitForActiveWnd 用 Sleep(0) 轮询等焦点真的切过去，比固定 sleep 可靠。"""
+    hwnd = int(hwnd or 0)
+    if not hwnd:
+        return False
+    if u32.GetForegroundWindow() == hwnd:
+        return True
+    attached = False
+    fg_tid = 0
+    me = k32.GetCurrentThreadId()
+    try:
+        fg = u32.GetForegroundWindow()
+        fg_tid = u32.GetWindowThreadProcessId(fg, None) if fg else 0
+        if fg_tid and fg_tid != me:
+            attached = bool(u32.AttachThreadInput(fg_tid, me, True))
+        u32.BringWindowToTop(wintypes.HWND(hwnd))
+        u32.SetForegroundWindow(wintypes.HWND(hwnd))
+    except Exception:
+        pass
+    finally:
+        if attached:
+            try:
+                u32.AttachThreadInput(fg_tid, k32.GetCurrentThreadId(), False)
+            except Exception:
+                pass
+    end = time.time() + timeout
+    while time.time() < end:
+        if u32.GetForegroundWindow() == hwnd:
+            return True
+        time.sleep(0.01)
+    return u32.GetForegroundWindow() == hwnd
+
+
+# ---- 隐私标记：Windows 让应用声明「这条别记进历史」----
+_priv_fmt_cache = {}
+
+
+def _clip_fmt_id(name):
+    if name not in _priv_fmt_cache:
+        try:
+            _priv_fmt_cache[name] = int(u32.RegisterClipboardFormatW(name) or 0)
+        except Exception:
+            _priv_fmt_cache[name] = 0
+    return _priv_fmt_cache[name]
+
+
+def clip_is_private():
+    """剪贴板上带着官方「不要记录」标记时返回 True。
+    CanIncludeInClipboardHistory 存在且前 4 字节为 0，或
+    ExcludeClipboardContentFromMonitorProcessing 存在即忽略 —— 两项都是 Windows 给
+    密码管理器用的信号（Ditto src/Clip.cpp:364 与 :400），比敏感词正则准得多。"""
+    ex = _clip_fmt_id(CF_NAME_EXCLUDE)
+    inc = _clip_fmt_id(CF_NAME_INCLUDE_HISTORY)
+    if not ex and not inc:
+        return False
+    if not u32.OpenClipboard(None):
+        return False
+    try:
+        if ex and u32.IsClipboardFormatAvailable(ex):
+            return True
+        if inc and u32.IsClipboardFormatAvailable(inc):
+            h = u32.GetClipboardData(inc)
+            if h:
+                p = k32.GlobalLock(h)
+                if p:
+                    try:
+                        if ctypes.c_uint32.from_address(p).value == 0:
+                            return True
+                    finally:
+                        k32.GlobalUnlock(h)
+    except Exception:
+        return False
+    finally:
+        u32.CloseClipboard()
+    return False
 
 
 LAST_SEQ = clip_seq()
@@ -438,6 +608,64 @@ def window_title_of(hwnd):
     if any(w in low for w in TITLE_BAD_WORDS):
         return None          # 含敏感词的窗口标题一律不记录
     return t or None
+
+
+def parse_ignore_list(raw):
+    """把忽略名单文本拆成通配模式列表。
+    没写通配符的按「包含」处理（keepass → *keepass*），对齐 Ditto
+    ClipboardViewer.cpp:345 的 WildMatch 语义，但 * / ? 交给 fnmatch，不自己造轮子。"""
+    out = []
+    for p in re.split(r'[,;\n、\r]', raw or ''):
+        p = p.strip().lower()
+        if not p:
+            continue
+        if not any(ch in p for ch in '*?'):
+            p = '*' + p + '*'
+        out.append(p)
+    return out
+
+
+def match_ignore(app_name, title, apps_raw, titles_raw):
+    """命中忽略规则则返回规则描述，否则 None。
+    应用名按通配匹配、窗口标题按正则匹配（对齐 CopyQ predefinedcommands.cpp:151 —— 
+    预设的「忽略标题含 Password 的窗口」就是这么一条 wndre 正则）。"""
+    name = (app_name or '').lower()
+    for pat in parse_ignore_list(apps_raw):
+        if fnmatch.fnmatch(name, pat):
+            return '应用 %s' % (pat.strip('*') or pat)
+    t = title or ''
+    for pat in re.split(r'[\n;\r]', titles_raw or ''):
+        pat = pat.strip()
+        if not pat:
+            continue
+        try:
+            if re.search(pat, t, re.I):
+                return '标题 /%s/' % pat
+        except re.error:
+            if pat.lower() in t.lower():
+                return '标题 %s' % pat
+    return None
+
+
+def length_filtered(txt, lo, hi):
+    """按长度上下限判断是否入库，返回提示语；None 表示放行。
+    对应 PasteBar settingsStore.ts:285 的 clipTextMinLength / clipTextMaxLength ——
+    一个滤噪声（单个字母、误触），一个挡超长（几 MB 的日志正文）。"""
+    n = len(txt or '')
+    if lo and n < lo:
+        return '内容只有 %d 字符（下限 %d），按设置不入库' % (n, lo)
+    if hi and n > hi:
+        return '内容有 %d 字符（上限 %d），按设置不入库' % (n, hi)
+    return None
+
+
+def crop_items(items, lim):
+    """裁剪到 lim 条：从最旧的一端删，但收藏项永不自动删。
+    Ditto DatabaseUtilities.cpp:844 的 RemoveOldEntries 会跳过 lDontAutoDelete，
+    CopyQ itemfactory.cpp:328 的 cropToSize 用 canDropItem 豁免置顶项 —— 同一个道理。"""
+    if len(items) <= lim:
+        return items
+    return list(items[:lim]) + [x for x in items[lim:] if x.get('fav')]
 
 
 def capture_source(self_hwnd, delay_retry=True):
@@ -1253,6 +1481,7 @@ class VirtualList(tk.Frame):
         self.canvas.pack(side='left', fill='both', expand=True)
         self.canvas.configure(yscrollcommand=self.sb.set)
         self._acc = 0.0        # 滚轮增量累积：触控板/高精度滚轮的 delta 常小于 120
+        self.show_num = False  # 按住 Ctrl 时在行首显示 1..9/0
         self.canvas.bind('<MouseWheel>', self._wheel)
         self.canvas.bind('<Configure>', lambda e: self.update_view())
 
@@ -1362,8 +1591,11 @@ class VirtualList(tk.Frame):
         f.pack_propagate(False)
         f._idx = i
         f._vw = 0
+        # 序号列：按住 Ctrl 时显示 1..9/0，提示「Ctrl+数字直接粘贴」（Ditto QListCtrl.cpp:610）
+        f._num = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['acc'], anchor='w')
+        f._num.place(x=6, y=7, width=16, height=16)
         row = tk.Frame(f, bg=T['card'])
-        row.place(x=8, y=6, relwidth=1, width=-96, height=18)
+        row.place(x=24, y=6, relwidth=1, width=-112, height=18)
         f._row = row
         f._l1a = tk.Label(row, bg=T['card'], font=FONT, anchor='w')
         f._l1b = tk.Label(row, bg=T['card'], font=FONT, anchor='w', fg=T['acc'])
@@ -1373,8 +1605,8 @@ class VirtualList(tk.Frame):
         f._badge = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['fg2'], anchor='e')
         f._badge.place(relx=1.0, x=-10, y=6, anchor='ne', height=18, width=80)
         f._l2 = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['fg2'], anchor='w')
-        f._l2.place(x=8, y=28, relwidth=1, width=-16, height=16)
-        for wg in (f, row, f._l1a, f._l1b, f._l1c, f._l2, f._badge):
+        f._l2.place(x=24, y=28, relwidth=1, width=-32, height=16)
+        for wg in (f, row, f._num, f._l1a, f._l1b, f._l1c, f._l2, f._badge):
             wg.bind('<Button-1>', lambda e, ff=f: self.on_click(ff._idx, e))
             wg.bind('<Button-3>', lambda e, ff=f: self.on_menu(e, ff._idx))
             wg.bind('<Enter>', lambda e, ff=f: (self._hover(ff._idx, True),
@@ -1388,6 +1620,7 @@ class VirtualList(tk.Frame):
     def _paint(self, f, c):
         f.configure(bg=c)
         f._row.configure(bg=c)
+        f._num.configure(bg=c)
         f._l1a.configure(bg=c)
         f._l1b.configure(bg=c)
         f._l1c.configure(bg=c)
@@ -1401,6 +1634,24 @@ class VirtualList(tk.Frame):
         if self.items[i].get('id') == self.sel:
             return
         self._paint(f, T['card_h'] if on else T['card'])
+
+    def _first_hit(self, body):
+        """找出该高亮哪个词。
+        原实现拿整串 `self.kw` 去 find，搜「hello world」这种多词时永远找不到 → 不高亮。
+        CopyQ filterlineedit.cpp:198 是按空白拆词逐词匹配的（AND），这里照做：
+        整串命中就整串高亮，否则取第一个能命中的词。"""
+        kw = (self.kw or '').strip()
+        if not kw:
+            return '', -1
+        low = body.lower()
+        p = low.find(kw.lower())
+        if p >= 0:
+            return kw, p
+        for w in kw.split():
+            p = low.find(w.lower())
+            if p >= 0:
+                return w, p
+        return '', -1
 
     def _fill(self, f, i):
         it = self.items[i]
@@ -1417,15 +1668,15 @@ class VirtualList(tk.Frame):
         if self._maxc != maxc:
             self._maxc = maxc
             self._maxc2 = max(8, int(w / 6.5))
-        pos = -1
-        if self.kw:
-            pos = body.lower().find(self.kw.lower())
-        if pos >= 0:
+        f._num.configure(text=('0' if i == 9 else str(i + 1)) if
+                         (self.show_num and i < 10) else '')
+        kw, pos = self._first_hit(body)
+        if pos >= 0 and kw:
             s = max(0, pos - 6)
             seg = body[s:s + maxc]
             a = seg[:pos - s]
-            b = seg[pos - s:pos - s + len(self.kw)]
-            cc = seg[pos - s + len(self.kw):]
+            b = seg[pos - s:pos - s + len(kw)]
+            cc = seg[pos - s + len(kw):]
             f._l1a.configure(text=a, fg=T['fg'])
             f._l1b.configure(text=b)
             f._l1c.configure(text=preview(cc, max(1, maxc - len(a) - len(b))), fg=T['fg'])
@@ -1443,7 +1694,16 @@ DEFAULT_SETTINGS = dict(theme='dark', hotkey='ctrl+shift+v', max_items=500,
                         listen=True, autopaste=True, mask_sensitive=True,
                         skip_sensitive=False, show_time=False, record_title=False,
                         group_by_time=False, edge_hide=False, edge_delay=8,
-                        close_action='hide')     # hide=隐藏到托盘 / quit=直接退出
+                        close_action='hide')      # hide=隐藏到托盘 / quit=直接退出
+# v1.4.0 补齐项（对照 Ditto / PasteBar 的同类设置）
+DEFAULT_SETTINGS.update(
+    ignore_apps='keepass,1password,bitwarden,lastpass',   # 通配名单，命中不记录
+    ignore_titles='',                                     # 正则名单（窗口标题）
+    min_len=1,          # 短于这个长度不入库（0=不限），滤掉单个字母之类的噪声
+    max_len=0,          # 长于这个长度不入库（0=不限，仍受 MAX_TEXT 硬上限保护）
+    smart_private=True,  # 遵守 Windows「别记录我」剪贴板标记
+    keep_on_clear=True,  # 清空历史时保留收藏项
+)
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
 
@@ -1493,6 +1753,16 @@ class ClawBoard:
         root.bind('<Control-t>', lambda e: self.open_transform())
         root.bind('<Control-e>', lambda e: self.open_export())
         root.bind('<Control-q>', lambda e: self.quit_app())
+        # Ctrl+1..9 / Ctrl+0 → 直接粘贴第 1..10 项
+        # （PasteBar ClipboardHistoryQuickPastePage.tsx:307，0 表示第 10 项）
+        for _i in range(1, 10):
+            root.bind('<Control-Key-%d>' % _i,
+                      lambda e, n=_i: self.quick_paste(n))
+        root.bind('<Control-Key-0>', lambda e: self.quick_paste(10))
+        # 按住 Ctrl 时行首显示序号，把这组快捷键亮出来（Ditto QListCtrl.cpp:610）
+        for _k in ('Control_L', 'Control_R'):
+            root.bind('<KeyPress-%s>' % _k, lambda e: self.set_num_hint(True))
+            root.bind('<KeyRelease-%s>' % _k, lambda e: self.set_num_hint(False))
         root.protocol('WM_DELETE_WINDOW', self.hide)
 
         self.build_ui()
@@ -1998,6 +2268,7 @@ class ClawBoard:
     def hide(self):
         """关闭按钮 / Esc：默认隐藏到托盘并气泡告知，也可在设置里改成直接退出"""
         self.save()
+        self.set_num_hint(False)     # 面板藏起来时，Ctrl 的 KeyRelease 可能收不到
         if self.st.get('close_action') == 'quit':
             self.quit_app()
             return
@@ -2306,6 +2577,31 @@ class ClawBoard:
                 x['mask_off'] = not x.get('mask_off')
         self.render()
 
+    def set_num_hint(self, on):
+        """按住 Ctrl 时在每行行首显示 1..9/0，把这组快捷键亮出来"""
+        on = bool(on)
+        if bool(getattr(self.vlist, 'show_num', False)) == on:
+            return
+        self.vlist.show_num = on
+        self.vlist.update_view()
+
+    def quick_paste(self, n):
+        """Ctrl+1..9 / Ctrl+0：直接粘贴第 1..10 项，不必先按 ↑↓ 再回车。
+        序号映射来自 PasteBar（index 9 显示成 0），下标减一取第 n 项。"""
+        items = self.vlist.items
+        if n > len(items):
+            self.tip('当前列表只有 %d 条' % len(items))
+            return 'break'
+        it = items[n - 1]
+        self.vlist.sel = it['id']
+        if self.tab == 'clip':
+            self.sel_clip = it['id']
+        else:
+            self.sel_phrase = it['id']
+        self.vlist.update_view()
+        self.paste(it.get('text') or '', cid=it['id'])
+        return 'break'
+
     def paste(self, text, force=False, cid=None):
         """粘贴出去：只刷新 last_used_at，绝不改写 created_at"""
         if cid:
@@ -2335,19 +2631,21 @@ class ClawBoard:
                 self.render()
 
     def _paste_worker(self, hwnd):
-        """返回是否真的把焦点抢回来了；UAC/管理员窗口会失败，需降级提示"""
+        """把焦点还给原窗口，再模拟 Ctrl+V。
+        时序照 Ditto：① AttachThreadInput 绕过 Windows 的前台锁定；② **等**目标窗口真的
+        拿到焦点再发键（Ditto WaitForActiveWnd），不再用固定 sleep —— 那个值在慢机器上
+        不够、在快机器上白等；③ 发键前先抬掉残留修饰键（见 all_keys_up）。"""
         ok = False
         try:
             if hwnd:
-                time.sleep(0.08)
-                u32.SetForegroundWindow(wintypes.HWND(hwnd))
-                time.sleep(0.10)
-                ok = (u32.GetForegroundWindow() == hwnd)
+                time.sleep(0.06)
+                ok = force_foreground(hwnd, timeout=0.4)
                 if ok:
+                    time.sleep(0.05)        # 给目标程序处理 WM_SETFOCUS 的时间
                     send_ctrl_v()
         except Exception:
             ok = False
-        time.sleep(0.15)
+        time.sleep(0.12)
         self._need_show = True
         self._paste_fail = not ok
 
@@ -2427,14 +2725,17 @@ class ClawBoard:
 
     def clear_list(self):
         if self.tab == 'clip':
+            favs = [x for x in self.data['clip'] if x.get('fav')] if self.st.get('keep_on_clear') else []
+
             def do_clear():
-                self.data['clip'] = []
+                self.data['clip'] = favs
                 self.sel_clip = None
                 self.save(True)
                 self.render()
-                self.tip('剪贴板历史已清空')
-            self.confirm('清空全部剪贴板历史？共 %d 条，不可撤销。' %
-                         len(self.data['clip']), do_clear)
+                self.tip('已清空，保留 %d 条收藏' % len(favs) if favs else '剪贴板历史已清空')
+            extra = '，其中 %d 条收藏会保留' % len(favs) if favs else ''
+            self.confirm('清空全部剪贴板历史？共 %d 条%s，不可撤销。' %
+                         (len(self.data['clip']), extra), do_clear)
         else:
             g = self.cur_group()
 
@@ -2639,15 +2940,19 @@ class ClawBoard:
             seq = clip_seq()
             if seq != LAST_SEQ:
                 LAST_SEQ = seq
-                txt = clip_read()
-                if txt and txt.strip():
-                    if len(txt) > MAX_TEXT:
-                        txt = txt[:MAX_TEXT] + '\n…（内容超长已截断）'
-                    hits = scan_sensitive(txt)
-                    if hits and self.st['skip_sensitive']:
-                        self.tip('检测到%s，按设置不入库' % '/'.join(hits))
-                    else:
-                        self.ingest(txt, hits)
+                if self.st.get('smart_private', True) and clip_is_private():
+                    # 密码管理器用这个标记告诉所有监听者「这条别记」
+                    self.tip('这条带了「不要记录」标记，已跳过')
+                else:
+                    txt = clip_read()
+                    if txt and txt.strip():
+                        if len(txt) > MAX_TEXT:
+                            txt = txt[:MAX_TEXT] + '\n…（内容超长已截断）'
+                        hits = scan_sensitive(txt)
+                        if hits and self.st['skip_sensitive']:
+                            self.tip('检测到%s，按设置不入库' % '/'.join(hits))
+                        else:
+                            self.ingest(txt, hits)
         except Exception as e:
             self.note('监听异常：%s' % e)
         self.root.after(400, self.poll_clip)
@@ -2656,12 +2961,28 @@ class ClawBoard:
         self._seq += 1
         return self._seq
 
-    def ingest(self, txt, hits=None):
-        """入库：重复内容只刷新 updated_at / copy_count，created_at 永不改写"""
+    def ingest(self, txt, hits=None, manual=False):
+        """入库：重复内容只刷新 updated_at / copy_count，created_at 永不改写。
+        manual=True 是用户手动添加（拆词、变换存新条目），此时跳过忽略规则与长度过滤。"""
         ts = now_ms()
         # 不在这里做 50ms 延迟重试：那会卡住 UI 线程。抓不到就交给后台线程补抓。
         src, src_hwnd = capture_source(self.root.winfo_id(), delay_retry=False)
-        title = window_title_of(src_hwnd) if (src_hwnd and self.st['record_title']) else None
+        # 只在真的要用标题时才去取（取标题是有开销的）
+        title = None
+        if src_hwnd and (self.st['record_title'] or (self.st.get('ignore_titles') or '').strip()):
+            title = window_title_of(src_hwnd)
+        if not manual:
+            lo = int(self.st.get('min_len') or 0)
+            hi = int(self.st.get('max_len') or 0)
+            msg = length_filtered(txt, lo, hi)
+            if msg:
+                self.tip(msg)
+                return
+            hit = match_ignore(src, title, self.st.get('ignore_apps'),
+                               self.st.get('ignore_titles'))
+            if hit:
+                self.tip('命中忽略规则（%s），未记录' % hit)
+                return
         dup = None
         for x in self.data['clip']:
             if x.get('text') == txt:
@@ -2687,7 +3008,7 @@ class ClawBoard:
                'content_size': byte_size(txt), 'copy_count': 1, 'fav': 0,
                'is_estimated': 0}
         # 空值字段一律不落盘：1 万条能省下 MB 级内存与文件体积
-        if title:
+        if title and self.st['record_title']:
             rec['source_title'] = title
         if hits:
             rec['sens'] = hits
@@ -2697,7 +3018,7 @@ class ClawBoard:
                              daemon=True).start()
         lim = int(self.st['max_items'])
         if len(self.data['clip']) > lim:
-            self.data['clip'] = self.data['clip'][:lim]
+            self.data['clip'] = crop_items(self.data['clip'], lim)
         self.save(True)
         if self.tab == 'clip':
             self.render()
@@ -2753,6 +3074,14 @@ class SettingsWindow:
         self.row_theme(body)
         self.row_hotkey(body)
         self.row_int(body, '历史最大条数（10-5000）', 'max_items')
+        self.row_int(body, '捕获长度下限（0=不限）', 'min_len', lo=0, hi=1000)
+        self.row_int(body, '捕获长度上限（0=不限）', 'max_len', lo=0, hi=200000, width=9)
+        self.row_switch(body, '遵守「别记录我」标记（密码管理器用）', 'smart_private')
+        self.row_switch(body, '清空历史时保留收藏项', 'keep_on_clear')
+        self.row_text(body, '忽略这些程序（逗号分隔，支持 * ?）', 'ignore_apps',
+                      '例：keepass, *bitwarden*, 微信')
+        self.row_text(body, '忽略标题匹配的窗口（正则，分号分隔）', 'ignore_titles',
+                      '例：密码; Password; ^私密')
         btns = tk.Frame(self.win, bg=T['bg'])    # 固定在窗口底部，不跟着内容滚
         btns.pack(fill='x', padx=14, pady=(8, 10))
         b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
@@ -2866,20 +3195,20 @@ class SettingsWindow:
         safe_release(self.win)
         self.win.destroy()
 
-    def row_int(self, master, text, key):
+    def row_int(self, master, text, key, lo=10, hi=5000, width=7):
         r = tk.Frame(master, bg=T['bg'])
         r.pack(fill='x', pady=3)
         tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
         v = tk.StringVar(value=str(self.app.st.get(key)))
         e = tk.Entry(r, textvariable=v, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
-                     relief='flat', font=FONT, bd=0, width=7, justify='right',
+                     relief='flat', font=FONT, bd=0, width=width, justify='right',
                      highlightthickness=1, highlightbackground=T['line'],
                      highlightcolor=T['acc'])
         e.pack(side='right')
 
         def commit(_=None):
             try:
-                n = min(5000, max(10, int(v.get())))
+                n = min(hi, max(lo, int(v.get())))
             except Exception:
                 n = int(DEFAULT_SETTINGS[key])
             self.app.st[key] = n
@@ -2887,6 +3216,28 @@ class SettingsWindow:
             self.app.save(True)
         e.bind('<Return>', commit)
         e.bind('<FocusOut>', commit)
+
+    def row_text(self, master, text, key, hint=''):
+        """文本型设置：忽略名单这类可能写很长，占一整行，回车或失焦时提交"""
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT,
+                 anchor='w').pack(fill='x')
+        if hint:
+            tk.Label(r, text=hint, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                     anchor='w').pack(fill='x')
+        v = tk.StringVar(value=str(self.app.st.get(key) or ''))
+        e = tk.Entry(r, textvariable=v, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+                     relief='flat', font=FONT_SM, bd=0, highlightthickness=1,
+                     highlightbackground=T['line'], highlightcolor=T['acc'])
+        e.pack(fill='x', ipady=3, pady=(2, 0))
+
+        def commit(_=None):
+            self.app.st[key] = v.get().strip()
+            self.app.save(True)
+        e.bind('<Return>', commit)
+        e.bind('<FocusOut>', commit)
+        return e
 
     def row_autostart_switch(self, master):
         """开机自启：直接读写当前用户注册表 Run 项，状态以注册表真实值为准"""

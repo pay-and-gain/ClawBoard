@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## v1.4.0 · 读三个开源剪贴板工具，取其可取之处
+
+参考对象：**CopyQ**（12.3k★，C++/Qt）、**Ditto**（Windows 原生 C++）、
+**PasteBar**（Tauri + React）。下面每条都标了出处，改的是**实现方式**，不是照抄代码。
+
+### 隐私（这次最值钱的部分）
+- **遵守 Windows 官方的「别记录我」标记**：读剪贴板的
+  `ExcludeClipboardContentFromMonitorProcessing` 与 `CanIncludeInClipboardHistory`（值为 0），
+  命中就整条跳过。这是 KeePassXC / 1Password / Bitwarden 用来告诉监听者「别记」的标准做法，
+  比任何敏感词正则都准。**出处：Ditto `src/Clip.cpp:364` 与 `:400`**
+- **忽略名单**：可配置「不记录哪些程序」（通配符，`keepass`→`*keepass*`）和
+  「忽略标题匹配的窗口」（正则）。**出处：Ditto `src/ClipboardViewer.cpp:345` 的
+  include/exclude 通配、CopyQ `src/common/predefinedcommands.cpp:151` 的 wndre 正则**
+- 默认名单已预置 keepass / 1password / bitwarden / lastpass
+
+### 粘贴可靠性
+- **发键前先抬掉所有按着的修饰键**：按着 Ctrl 唤起面板时，残留的 Ctrl 会让我们的
+  Ctrl+V 变成 Ctrl+Ctrl+V，目标程序收到的是裸 V —— 这正是"有时粘贴没反应"的原因。
+  **出处：Ditto `src/SendKeys.cpp:237` 的 `AllKeysUp()`**
+- **用 AttachThreadInput 绕过 Windows 前台锁定**，并**轮询等目标窗口真的拿到焦点**再发键，
+  替换原来的固定 `sleep(0.10)`（慢机器不够、快机器白等）。
+  **出处：Ditto `src/ExternalWindowTracker.cpp:187` 与 `:119`**
+- **按键改用 `SendInput` + 扫描码**（`MapVirtualKey`），替代已废弃的 `keybd_event`。
+  **出处：Ditto `src/SendKeys.cpp:326`**
+- 修掉一个自己埋的坑：`INPUT` 是联合体，少写 `MOUSEINPUT` 会让 `sizeof(INPUT)` 变成 32
+  而不是 40，`SendInput` 会直接失败 —— 已按真实定义补齐（自测断言 40）
+
+### 交互
+- **`Ctrl+1..9` 直接粘贴第 1..9 项，`Ctrl+0` 贴第 10 项**；**按住 Ctrl 时行首显示序号**
+  把这组快捷键亮出来。**出处：PasteBar `ClipboardHistoryQuickPastePage.tsx:307`
+  与 `ClipboardHistoryRow.tsx:702`（第 10 项显示 0）、Ditto `src/QListCtrl.cpp:610`**
+- **多词搜索现在会高亮**：原来拿整串 `hello world` 去找，多词时永远匹配不到所以不高亮；
+  改成按空白拆词（CopyQ `src/gui/filterlineedit.cpp:198` 的 AND 语义），
+  整串命中就整串标蓝，否则标第一个命中的词
+
+### 存储与清理
+- **裁剪与清空都跳过收藏项**。**出处：Ditto `DatabaseUtilities.cpp:844`
+  （跳过 `lDontAutoDelete`）、CopyQ `src/item/itemfactory.cpp:328`（`canDropItem` 豁免置顶）**
+- 新增**捕获长度上下限**（`min_len` / `max_len`，0=不限），滤掉单字符噪声与超长正文。
+  **出处：PasteBar `settingsStore.ts:285` 的 `clipTextMinLength` / `clipTextMaxLength`**
+- 新增「清空历史时保留收藏项」开关，**出处：PasteBar `isKeepStarredOnClearEnabled`**
+
+### 明确没抄的
+- CopyQ 的「超 1KB 正文外置成独立文件（SHA256 内容寻址）」——我们用 JSON + 原子替换，
+  只有文本条目，收益不抵复杂度，先不做
+- Ditto 的 `SPI_SETFOREGROUNDLOCKTIMEOUT=0`（改全局前台锁定超时）—— 会短暂影响系统里
+  所有程序，风险大于收益，改用 `AttachThreadInput` 达到同样效果
+- 图片 / 文件剪贴板（三者都支持）—— 本项目定位是纯文本，暂不扩边界
+
 ## v1.3.3 · 右侧细滑动条
 
 ### 新增
