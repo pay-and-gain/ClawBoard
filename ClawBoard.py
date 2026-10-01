@@ -1,46 +1,94 @@
 # -*- coding: utf-8 -*-
 """
-ClawBoard - 悬浮剪切板 & 常用语面板
-零第三方依赖，仅用 Python 自带 tkinter + ctypes(Win32)
-适配 Windows 10
+ClawBoard - Windows 悬浮剪切板 & 常用语面板
+零第三方依赖：Python 标准库 tkinter + ctypes(Win32)
+适配 Windows 10 / 11
+
+模块分区：
+  1. 主题与常量
+  2. Win32 声明（剪贴板 / 热键 / 托盘 / 互斥 / 内存统计）
+  3. 剪贴板读写 + 敏感内容识别
+  4. 图标生成（运行时生成 ClawBoard.ico，不依赖外部资源）
+  5. 隐藏消息窗口（热键 + 托盘回调，独立线程）
+  6. 通用控件与弹窗
+  7. 虚拟滚动列表（固定行高窗口化渲染）
+  8. 主程序 ClawBoard
+  9. bench 压测入口 / main
 """
 import os
 import re
+import sys
 import json
 import time
 import ctypes
+import random
+import string
 import threading
+import traceback
+import subprocess
+import html as _html
 import tkinter as tk
-from tkinter import messagebox
 from ctypes import wintypes
 
-# ---------------- 主题 ----------------
-BG      = '#1e2027'
-PANEL   = '#252831'
-CARD    = '#2c303b'
-CARD_H  = '#39404f'
-CARD_S  = '#33465f'
-FG      = '#e6e8ee'
-FG2     = '#9aa0ad'
-ACC     = '#4f8cff'
-ACC2    = '#2f6fe0'
-DANGER  = '#e05c5c'
-LINE    = '#333844'
-
-FONT      = ('Microsoft YaHei UI', 9)
-FONT_B    = ('Microsoft YaHei UI', 9, 'bold')
-FONT_SM   = ('Microsoft YaHei UI', 8)
-FONT_TITLE= ('Microsoft YaHei UI', 10, 'bold')
-
+APP_NAME = 'ClawBoard'
+APP_VER = '1.1.0'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'ClawBoard数据.json')
+ICON_FILE = os.path.join(BASE_DIR, 'ClawBoard.ico')
+CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
 
-# ---------------- Win32 剪贴板 ----------------
+FONT = ('Microsoft YaHei UI', 9)
+FONT_B = ('Microsoft YaHei UI', 9, 'bold')
+FONT_SM = ('Microsoft YaHei UI', 8)
+FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
+
+ITEM_H = 52          # 虚拟列表固定行高
+MAX_TEXT = 200000    # 单条文本入库上限（字符）
+
+# ---------------- 1. 主题 ----------------
+DARK = dict(bg='#1e2027', panel='#252831', card='#2c303b', card_h='#39404f',
+            card_s='#33465f', fg='#e6e8ee', fg2='#9aa0ad', acc='#4f8cff',
+            acc2='#2f6fe0', line='#333844', danger='#e05c5c')
+LIGHT = dict(bg='#f4f5f8', panel='#e9ebf0', card='#ffffff', card_h='#eef1f7',
+             card_s='#dbe7ff', fg='#1f2430', fg2='#6b7280', acc='#2563eb',
+             acc2='#1d4ed8', line='#d6dae3', danger='#c0392b')
+T = dict(DARK)
+
+
+def set_theme(name):
+    T.clear()
+    T.update(DARK if name == 'dark' else LIGHT)
+
+
+# ---------------- 2. Win32 ----------------
 u32 = ctypes.WinDLL('user32', use_last_error=True)
 k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+psapi = ctypes.WinDLL('psapi')
 
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
+HWND_MESSAGE = wintypes.HWND(-3)
+WM_HOTKEY = 0x0312
+WM_USER = 0x0400
+WM_TRAY = WM_USER + 1
+WM_LBUTTONUP = 0x0202
+WM_RBUTTONUP = 0x0205
+WM_DESTROY = 0x0002
+WM_APP_REG = WM_USER + 2      # 请求注册热键（必须在消息线程内执行）
+WM_APP_UNREG = WM_USER + 3
+MOD_ALT, MOD_CONTROL, MOD_SHIFT = 0x0001, 0x0002, 0x0004
+VK_V = 0x56
+VK_CONTROL = 0x11
+KEYEVENTF_KEYUP = 0x0002
+NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
+NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
+IMAGE_ICON = 1
+LR_LOADFROMFILE = 0x0010
+LR_DEFAULTSIZE = 0x0040
+
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT,
+                             wintypes.WPARAM, wintypes.LPARAM)
 
 u32.GetClipboardSequenceNumber.restype = wintypes.DWORD
 u32.GetClipboardSequenceNumber.argtypes = []
@@ -55,9 +103,40 @@ u32.SetClipboardData.restype = wintypes.HANDLE
 u32.GetForegroundWindow.restype = wintypes.HWND
 u32.SetForegroundWindow.argtypes = [wintypes.HWND]
 u32.SetForegroundWindow.restype = wintypes.BOOL
+u32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+u32.ShowWindow.restype = wintypes.BOOL
+u32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+u32.FindWindowW.restype = wintypes.HWND
+u32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+u32.RegisterHotKey.restype = wintypes.BOOL
+u32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+u32.UnregisterHotKey.restype = wintypes.BOOL
+u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+u32.PostMessageW.restype = wintypes.BOOL
+k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+k32.CreateMutexW.restype = wintypes.HANDLE
+u32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
+                                wintypes.DWORD, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, wintypes.HWND,
+                                wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p]
+u32.CreateWindowExW.restype = wintypes.HWND
+u32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+u32.DefWindowProcW.restype = LRESULT
+u32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND,
+                            wintypes.UINT, wintypes.UINT]
+u32.GetMessageW.restype = wintypes.BOOL
+u32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+u32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+u32.PostQuitMessage.argtypes = [ctypes.c_int]
+u32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
+                           ctypes.c_int, ctypes.c_int, wintypes.UINT]
+u32.LoadImageW.restype = wintypes.HANDLE
+u32.DestroyIcon.argtypes = [wintypes.HICON]
+u32.DestroyIcon.restype = wintypes.BOOL
+sh32 = ctypes.WinDLL('shell32', use_last_error=True)
+sh32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.c_void_p]
+sh32.Shell_NotifyIconW.restype = wintypes.BOOL
 u32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ctypes.c_ulong]
-u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-u32.GetWindowThreadProcessId.restype = wintypes.DWORD
 
 k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
 k32.GlobalAlloc.restype = wintypes.HANDLE
@@ -65,11 +144,76 @@ k32.GlobalLock.argtypes = [wintypes.HANDLE]
 k32.GlobalLock.restype = ctypes.c_void_p
 k32.GlobalUnlock.argtypes = [wintypes.HANDLE]
 k32.GlobalUnlock.restype = wintypes.BOOL
-k32.GlobalSize.argtypes = [wintypes.HANDLE]
-k32.GlobalSize.restype = ctypes.c_size_t
+k32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+k32.GetModuleHandleW.restype = wintypes.HMODULE
+k32.GetCurrentProcess.restype = wintypes.HANDLE
+k32.GetProcessTimes.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
+                                ctypes.POINTER(wintypes.FILETIME),
+                                ctypes.POINTER(wintypes.FILETIME),
+                                ctypes.POINTER(wintypes.FILETIME)]
+k32.GetProcessTimes.restype = wintypes.BOOL
 
-VK_CONTROL = 0x11
-KEYEVENTF_KEYUP = 0x0002
+
+class WNDCLASS(ctypes.Structure):
+    _fields_ = [('style', wintypes.UINT), ('lpfnWndProc', WNDPROC),
+                ('cbClsExtra', ctypes.c_int), ('cbWndExtra', ctypes.c_int),
+                ('hInstance', wintypes.HINSTANCE), ('hIcon', wintypes.HICON),
+                ('hCursor', wintypes.HANDLE), ('hbrBackground', wintypes.HANDLE),
+                ('lpszMenuName', wintypes.LPCWSTR), ('lpszClassName', wintypes.LPCWSTR)]
+
+
+u32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]
+u32.RegisterClassW.restype = wintypes.ATOM
+
+
+class NOTIFYICONDATA(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.DWORD), ('hWnd', wintypes.HWND), ('uID', wintypes.UINT),
+                ('uFlags', wintypes.UINT), ('uCallbackMessage', wintypes.UINT),
+                ('hIcon', wintypes.HICON), ('szTip', wintypes.WCHAR * 128),
+                ('dwState', wintypes.DWORD), ('dwStateMask', wintypes.DWORD),
+                ('szInfo', wintypes.WCHAR * 256), ('uTimeout', wintypes.UINT),
+                ('uVersion', wintypes.UINT), ('szInfoTitle', wintypes.WCHAR * 64),
+                ('dwInfoFlags', wintypes.DWORD), ('guidItem', ctypes.c_byte * 16),
+                ('hBalloonIcon', wintypes.HICON)]
+
+
+class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+    _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
+                ('PeakWorkingSetSize', ctypes.c_size_t), ('WorkingSetSize', ctypes.c_size_t),
+                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                ('PagefileUsage', ctypes.c_size_t), ('PeakPagefileUsage', ctypes.c_size_t)]
+
+
+psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE,
+                                       ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
+                                       wintypes.DWORD]
+psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+
+
+def mem_mb():
+    c = PROCESS_MEMORY_COUNTERS()
+    c.cb = ctypes.sizeof(c)
+    if psapi.GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
+        return c.WorkingSetSize / 1048576.0
+    return -1.0
+
+
+def cpu_ms():
+    a, b, c, d = (wintypes.FILETIME(), wintypes.FILETIME(),
+                  wintypes.FILETIME(), wintypes.FILETIME())
+    if k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(a),
+                           ctypes.byref(b), ctypes.byref(c), ctypes.byref(d)):
+        t = ((c.dwHighDateTime << 32) + c.dwLowDateTime +
+             (d.dwHighDateTime << 32) + d.dwLowDateTime)
+        return t / 10000.0
+    return -1.0
+
+
+# ---------------- 3. 剪贴板 + 敏感内容 ----------------
+LAST_SEQ = 0
 
 
 def clip_seq():
@@ -80,7 +224,6 @@ def clip_seq():
 
 
 def clip_read():
-    """读取系统剪贴板文本，失败返回 None"""
     if not u32.OpenClipboard(None):
         return None
     try:
@@ -99,13 +242,14 @@ def clip_read():
 
 
 def clip_write(text):
-    """写入系统剪贴板文本"""
+    """写入剪贴板。成功后同步 LAST_SEQ，避免自己的回写被监听重复入库。"""
+    global LAST_SEQ
     data = text.encode('utf-16-le') + b'\x00\x00'
     if not u32.OpenClipboard(None):
         return False
     try:
         u32.EmptyClipboard()
-        h = k32.GlobalAlloc(GMEM_MOVEABLE, len(data))
+        h = k32.GlobalAlloc(GMEM_MOVEABLE, len(data) + 2)
         if not h:
             return False
         p = k32.GlobalLock(h)
@@ -113,102 +257,523 @@ def clip_write(text):
             return False
         ctypes.memmove(p, data, len(data))
         k32.GlobalUnlock(h)
-        u32.SetClipboardData(CF_UNICODETEXT, h)
-        return True
+        if not u32.SetClipboardData(CF_UNICODETEXT, h):
+            return False
     finally:
         u32.CloseClipboard()
-        global LAST_SEQ
-        LAST_SEQ = clip_seq()
-
-
-LAST_SEQ = clip_seq()
+    LAST_SEQ = clip_seq()
+    return True
 
 
 def send_ctrl_v():
     u32.keybd_event(VK_CONTROL, 0, 0, 0)
-    u32.keybd_event(ord('V'), 0, 0, 0)
-    u32.keybd_event(ord('V'), 0, KEYEVENTF_KEYUP, 0)
+    u32.keybd_event(VK_V, 0, 0, 0)
+    u32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
     u32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
 
-# ---------------- 小工具 ----------------
-_uid_seq = [0]
+LAST_SEQ = clip_seq()
+
+SENS_PATTERNS = [
+    ('身份证', re.compile(r'(?<!\d)\d{17}[\dXx](?!\d)')),
+    ('银行卡', re.compile(r'(?<!\d)\d{16,19}(?!\d)')),
+    ('手机号', re.compile(r'(?<!\d)1[3-9]\d{9}(?!\d)')),
+    ('邮箱', re.compile(r'[\w.+-]+@[\w-]+\.[\w.]{2,}')),
+    ('Token', re.compile(r'(?:sk-|ghp_|xox[baprs]-|Bearer\s+)[A-Za-z0-9_\-]{8,}')),
+    ('密码', re.compile(r'(?i)(password|passwd|pwd|密码|口令)\s*[:：=]\s*\S{4,}')),
+]
+
+
+def scan_sensitive(text):
+    try:
+        return [name for name, pat in SENS_PATTERNS if pat.search(text or '')]
+    except Exception:
+        return []
+
+
+def mask_text(text, hits):
+    def rep(m):
+        s = m.group(0)
+        return s[:3] + '*' * max(3, len(s) - 5) + s[-2:]
+    out = text
+    for name, pat in SENS_PATTERNS:
+        if name in hits:
+            out = pat.sub(rep, out)
+    return out
+
+
+# ---------------- 时间 / 来源 / 迁移（M0·F0·F1） ----------------
+SCHEMA_VERSION = 3
+
+
+def now_ms():
+    return int(time.time() * 1000)
+
+
+def rel_time(ms, estimated=False):
+    """相对时间文案：<1min 刚刚 / <60min N 分钟前 / 今天 HH:MM / 昨天 / 更早"""
+    if not ms:
+        return '未知时间'
+    pre = '约 ' if estimated else ''
+    now = now_ms()
+    if ms > now + 60000:
+        return pre + '时间异常'
+    diff = (now - ms) / 1000.0
+    if diff < 60:
+        return pre + '刚刚'
+    if diff < 3600:
+        return pre + '%d 分钟前' % int(diff / 60)
+    lt = time.localtime(ms / 1000.0)
+    n = time.localtime()
+    if lt.tm_year == n.tm_year and lt.tm_yday == n.tm_yday:
+        return pre + time.strftime('%H:%M', lt)
+    if (n.tm_yday - lt.tm_yday) == 1 and lt.tm_year == n.tm_year:
+        return pre + '昨天 ' + time.strftime('%H:%M', lt)
+    return pre + time.strftime('%m-%d %H:%M', lt)
+
+
+def full_time(ms):
+    if not ms:
+        return '—'
+    return time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ms / 1000.0))
+
+
+k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+k32.OpenProcess.restype = wintypes.HANDLE
+k32.CloseHandle.argtypes = [wintypes.HANDLE]
+k32.CloseHandle.restype = wintypes.BOOL
+k32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                           wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+u32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+u32.GetWindowTextW.restype = ctypes.c_int
+
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+TITLE_BAD_WORDS = ('密码', '银行卡', '登录', 'password', 'bank')
+
+
+def proc_name_of(hwnd):
+    pid = wintypes.DWORD(0)
+    u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return 'unknown'
+    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not h:
+        return 'unknown'
+    try:
+        buf = ctypes.create_unicode_buffer(512)
+        size = wintypes.DWORD(512)
+        if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            base = os.path.basename(buf.value)
+            return os.path.splitext(base)[0] or 'unknown'
+    finally:
+        k32.CloseHandle(h)
+    return 'unknown'
+
+
+def window_title_of(hwnd):
+    buf = ctypes.create_unicode_buffer(512)
+    u32.GetWindowTextW(hwnd, buf, 512)
+    t = (buf.value or '').strip()
+    low = t.lower()
+    if any(w in low for w in TITLE_BAD_WORDS):
+        return None          # 含敏感词的窗口标题一律不记录
+    return t or None
+
+
+def capture_source(self_hwnd, delay_retry=True):
+    """抓取当前前台进程名。竞态：抓到自己/空 → 延迟 50ms 重试一次"""
+    for attempt in range(2):
+        hwnd = u32.GetForegroundWindow()
+        if hwnd and hwnd != self_hwnd:
+            name = proc_name_of(hwnd)
+            if name != 'unknown':
+                return name, (hwnd if delay_retry else None)
+        if attempt == 0 and delay_retry:
+            time.sleep(0.05)
+    return 'unknown', None
+
+
+def detect_content_type(text):
+    """我们只监听 CF_UNICODETEXT，这里判定文本的形态用于徽章与 type: 过滤"""
+    t = (text or '').strip()
+    if not t:
+        return 'empty'
+    if re.match(r'^https?://\S+$', t) and ' ' not in t:
+        return 'url'
+    try:
+        if (t.startswith('{') and t.endswith('}')) or (t.startswith('[') and t.endswith(']')):
+            json.loads(t)
+            return 'json'
+    except Exception:
+        pass
+    if '\n' in t:
+        return 'multiline'
+    return 'text'
+
+
+def byte_size(text):
+    try:
+        return len(text.encode('utf-8'))
+    except Exception:
+        return 0
+
+
+def human_size(n):
+    if n < 1024:
+        return '%d B' % n
+    if n < 1024 * 1024:
+        return '%.1f KB' % (n / 1024.0)
+    return '%.1f MB' % (n / 1048576.0)
+
+
+def to_plain(text):
+    """F6：剥成纯文本。<br>/<p>/<li>/表格 要变成换行或制表符，实体要解码"""
+    s = text or ''
+    if re.search(r'<\s*(br|p|div|li|tr|table|h[1-6]|td|th)', s, re.I):
+        s = re.sub(r'<\s*br\s*/?\s*>', '\n', s, flags=re.I)
+        s = re.sub(r'</\s*(p|div|li|tr|h[1-6])\s*>', '\n', s, flags=re.I)
+        s = re.sub(r'</\s*t[dh]\s*>', '\t', s, flags=re.I)
+        s = re.sub(r'<[^>]+>', '', s)
+        s = _html.unescape(s)
+    s = s.replace('\xa0', ' ')
+    s = s.replace('\r\n', '\n').replace('\r', '\n')
+    s = re.sub(r'[ \t]+\n', '\n', s)
+    s = re.sub(r'\n{3,}', '\n\n', s)
+    s = '\n'.join(x.rstrip() for x in s.split('\n'))
+    return s.strip('\n')
+
+
+def backup_data():
+    """迁移前备份，返回备份路径（失败返回 None）"""
+    if not os.path.exists(DATA_FILE):
+        return None
+    bak = DATA_FILE + '.bak'
+    try:
+        with open(DATA_FILE, 'rb') as a:
+            with open(bak, 'wb') as b:
+                b.write(a.read())
+        return bak
+    except Exception:
+        return None
+
+
+def migrate(d, note=None):
+    """版本化迁移：1 → 2 → 3，幂等可重复执行"""
+    v = d.get('schema_version', 1)
+    if not isinstance(v, int):
+        v = 1
+
+    def pools():
+        out = []
+        if isinstance(d.get('clip'), list):
+            out.append(d['clip'])
+        for g in d.get('groups') or []:
+            if isinstance(g, dict) and isinstance(g.get('items'), list):
+                out.append(g['items'])
+        return out
+
+    if v < 2:
+        # v1 → v2：补 created_at / seq，老数据没有真实时间戳，按倒序估算并标记
+        seq = 0
+        for pool in pools():
+            for it in pool:
+                if not isinstance(it, dict):
+                    continue
+                seq += 1
+                has_ts = bool(it.get('created_at'))
+                if not has_ts:
+                    it['created_at'] = now_ms() - seq * 1000
+                it['is_estimated'] = 0 if has_ts else 1
+                it.setdefault('seq', seq)
+        v = 2
+    if v < 3:
+        # v2 → v3：补 F0/F1/F2 全部字段
+        for pool in pools():
+            for it in pool:
+                if not isinstance(it, dict):
+                    continue
+                it.setdefault('updated_at', it.get('created_at'))
+                it.setdefault('last_used_at', None)
+                it.setdefault('source_app', 'unknown')
+                it.setdefault('source_title', None)
+                it.setdefault('copy_count', 1)
+                it.setdefault('fav', 0)
+                it.setdefault('meta', None)
+                if not it.get('content_type'):
+                    it['content_type'] = detect_content_type(it.get('text', ''))
+                if not it.get('content_size'):
+                    it['content_size'] = byte_size(it.get('text', ''))
+        v = 3
+    d['schema_version'] = v
+    return d
+
+
+# ---------------- 4. 图标生成 ----------------
+def make_ico(path, size=32):
+    """纯 stdlib 生成 32x32 32bpp ICO：蓝底圆角 + 白色剪贴板"""
+    w = h = size
+    bg = (79, 140, 255, 255)
+    white = (255, 255, 255, 255)
+    px = [[(0, 0, 0, 0) for _ in range(w)] for _ in range(h)]
+    r = 6
+    corners = ((r, r), (w - 1 - r, r), (r, h - 1 - r), (w - 1 - r, h - 1 - r))
+    for y in range(h):
+        for x in range(w):
+            inside = True
+            for cx, cy in corners:
+                if ((cx == r and x < r and y < r) or
+                        (cx == w - 1 - r and x > w - 1 - r and y < r) or
+                        (cy == h - 1 - r and x < r and y > h - 1 - r) or
+                        (cx == w - 1 - r and cy == h - 1 - r and
+                         x > w - 1 - r and y > h - 1 - r)):
+                    if (x - cx) ** 2 + (y - cy) ** 2 > r * r:
+                        inside = False
+            if inside:
+                px[y][x] = bg
+    for y in range(7, 27):
+        for x in range(9, 23):
+            px[y][x] = white
+    for y in range(5, 8):
+        for x in range(12, 20):
+            px[y][x] = white
+    for y in (15, 18, 21):
+        for x in range(11, 21):
+            px[y][x] = bg
+    xor = bytearray()
+    for y in range(h - 1, -1, -1):
+        for x in range(w):
+            b, g, rr, a = px[y][x]
+            xor += bytes((b, g, rr, a))
+    and_mask = bytes(((w + 31) // 32) * 4 * h)
+    dib = bytearray()
+    dib += (40).to_bytes(4, 'little')
+    dib += w.to_bytes(4, 'little', signed=True)
+    dib += (h * 2).to_bytes(4, 'little', signed=True)
+    dib += (1).to_bytes(2, 'little') + (32).to_bytes(2, 'little')
+    dib += (0).to_bytes(4, 'little') + len(bytes(xor) + and_mask).to_bytes(4, 'little')
+    dib += bytes(16)
+    img = bytes(dib) + bytes(xor) + and_mask
+    entry = bytearray()
+    entry += bytes((w, h, 0, 0)) + (1).to_bytes(2, 'little') + (32).to_bytes(2, 'little')
+    entry += len(img).to_bytes(4, 'little') + (22).to_bytes(4, 'little')
+    with open(path, 'wb') as f:
+        f.write((0).to_bytes(2, 'little') + (1).to_bytes(2, 'little') +
+                (1).to_bytes(2, 'little') + bytes(entry) + img)
+    return path
+
+
+# ---------------- 5. 隐藏消息窗口（热键 + 托盘） ----------------
+class HiddenWindow(threading.Thread):
+    """独立线程创建 message-only 窗口，承载 RegisterHotKey 与托盘回调"""
+
+    def __init__(self, on_hotkey, on_tray):
+        threading.Thread.__init__(self, daemon=True)
+        self.on_hotkey = on_hotkey
+        self.on_tray = on_tray
+        self.hwnd = None
+        self.ready = threading.Event()
+        self.hotkey_id = 1
+        self.hotkey_ok = False
+        self._proc = None
+        self._icon = None
+        self._hk_evt = threading.Event()
+
+    def wndproc(self, hwnd, msg, wp, lp):
+        try:
+            if msg == WM_APP_REG:
+                self._do_reg(int(wp), int(lp))
+            elif msg == WM_APP_UNREG:
+                self._do_unreg()
+            elif msg == WM_TRAY:
+                if lp == WM_LBUTTONUP:
+                    self.on_tray('left')
+                elif lp == WM_RBUTTONUP:
+                    self.on_tray('right')
+            elif msg == WM_DESTROY:
+                u32.PostQuitMessage(0)
+                return 0
+        except Exception:
+            pass
+        return u32.DefWindowProcW(hwnd, msg, wp, lp)
+
+    def run(self):
+        try:
+            self._proc = WNDPROC(self.wndproc)
+            wc = WNDCLASS()
+            wc.lpfnWndProc = self._proc
+            wc.lpszClassName = 'ClawBoardMsgWindow'
+            wc.hInstance = k32.GetModuleHandleW(None)
+            u32.RegisterClassW(ctypes.byref(wc))
+            self.hwnd = u32.CreateWindowExW(0, 'ClawBoardMsgWindow', 'ClawBoardMsg',
+                                            0, 0, 0, 0, 0, HWND_MESSAGE,
+                                            None, wc.hInstance, None)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            self.ready.set()
+        if not self.hwnd:
+            return
+        try:
+            msg = wintypes.MSG()
+            while u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                # 用 NULL 句柄注册的热键没有目标窗口，必须在循环里直接截获
+                if msg.message == WM_HOTKEY:
+                    self.on_hotkey()
+                    continue
+                u32.TranslateMessage(ctypes.byref(msg))
+                u32.DispatchMessageW(ctypes.byref(msg))
+        except Exception:
+            pass
+
+    def _do_reg(self, vk, mod):
+        """必须在消息线程内调用，hwnd 传 NULL：热键消息直接进本线程队列"""
+        self._do_unreg()
+        self.hotkey_ok = bool(u32.RegisterHotKey(None, self.hotkey_id, mod, vk))
+        self._hk_evt.set()
+
+    def _do_unreg(self):
+        try:
+            u32.UnregisterHotKey(None, self.hotkey_id)
+        except Exception:
+            pass
+        self.hotkey_ok = False
+
+    def reg_hotkey(self, mod, vk, timeout=0.6):
+        """主线程调用：投递消息让消息线程注册，等结果回来"""
+        if not self.hwnd:
+            return False
+        self._hk_evt.clear()
+        self.hotkey_ok = False
+        if not u32.PostMessageW(self.hwnd, WM_APP_REG, vk, mod):
+            return False
+        self._hk_evt.wait(timeout)
+        return self.hotkey_ok
+
+    def unreg_hotkey(self):
+        if self.hwnd:
+            try:
+                self._hk_evt.clear()
+                u32.PostMessageW(self.hwnd, WM_APP_UNREG, 0, 0)
+            except Exception:
+                pass
+        self.hotkey_ok = False
+
+    def tray_add(self):
+        if not self.hwnd:
+            return False
+        try:
+            if not os.path.exists(ICON_FILE):
+                make_ico(ICON_FILE)
+            self._icon = u32.LoadImageW(None, ICON_FILE, IMAGE_ICON, 0, 0,
+                                        LR_LOADFROMFILE | LR_DEFAULTSIZE)
+            nid = NOTIFYICONDATA()
+            nid.cbSize = ctypes.sizeof(nid)
+            nid.hWnd = self.hwnd
+            nid.uID = 1
+            nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+            nid.uCallbackMessage = WM_TRAY
+            nid.hIcon = self._icon
+            nid.szTip = APP_NAME + ' 剪切板'
+            return bool(sh32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid)))
+        except Exception:
+            return False
+
+    def tray_del(self):
+        try:
+            nid = NOTIFYICONDATA()
+            nid.cbSize = ctypes.sizeof(nid)
+            nid.hWnd = self.hwnd
+            nid.uID = 1
+            sh32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+        except Exception:
+            pass
+        if self._icon:
+            u32.DestroyIcon(self._icon)
+            self._icon = None
+
+    def stop(self):
+        try:
+            if self.hwnd:
+                u32.PostQuitMessage(0)
+        except Exception:
+            pass
+
+
+# ---------------- 6. 通用控件 ----------------
+_seq = [0]
 
 
 def uid():
-    _uid_seq[0] += 1
-    return '%d_%d' % (int(time.time() * 1000), _uid_seq[0])
+    _seq[0] += 1
+    return '%d_%d' % (int(time.time() * 1000), _seq[0])
 
 
 def now_str():
-    return time.strftime('%H:%M')
+    return time.strftime('%m-%d %H:%M')
 
 
 def preview(text, n=90):
-    t = ' '.join(text.split())
+    t = ' '.join((text or '').split())
     return t if len(t) <= n else t[:n] + '…'
 
 
 def dark_top(win, title):
-    """把一个 Toplevel 变成暗色无边框小窗"""
-    win.configure(bg=BG)
+    win.configure(bg=T['bg'])
     win.overrideredirect(True)
     win.attributes('-topmost', True)
-    bar = tk.Frame(win, bg=PANEL, height=30)
+    bar = tk.Frame(win, bg=T['panel'], height=30)
     bar.pack(fill='x')
     bar.pack_propagate(False)
-    tk.Label(bar, text=title, bg=PANEL, fg=FG, font=FONT_B).pack(side='left', padx=10)
+    tk.Label(bar, text=title, bg=T['panel'], fg=T['fg'], font=FONT_B).pack(side='left', padx=10)
     return bar
 
 
 def center_on(win, parent, w, h):
     win.update_idletasks()
-    px = parent.winfo_rootx()
-    py = parent.winfo_rooty()
-    pw = parent.winfo_width()
-    ph = parent.winfo_height()
-    x = px + (pw - w) // 2
-    y = py + (ph - h) // 2
-    win.geometry('%dx%d+%d+%d' % (w, h, max(x, 0), max(y, 0)))
+    px, py = parent.winfo_rootx(), parent.winfo_rooty()
+    pw, ph = parent.winfo_width(), parent.winfo_height()
+    win.geometry('%dx%d+%d+%d' % (w, h, max(px + (pw - w) // 2, 0), max(py + (ph - h) // 2, 0)))
 
 
 class Dialog:
-    """通用暗色输入对话框"""
+    """非模态输入对话框：on_ok 回调，绝不阻塞主循环"""
 
     def __init__(self, parent, title, fields, on_ok=None, ok_text='确定'):
-        """on_ok 不为 None 时走非模态回调，不会卡住主循环"""
         self.result = None
         self.on_ok = on_ok
         self.parent = parent
         self.win = tk.Toplevel(parent)
         self.win.transient(parent)
-        bar = dark_top(self.win, title)
+        dark_top(self.win, title)
         self.win.grab_set()
-        body = tk.Frame(self.win, bg=BG)
+        body = tk.Frame(self.win, bg=T['bg'])
         body.pack(fill='both', expand=True, padx=12, pady=10)
         self.vars = {}
-        for i, (label, default, multi) in enumerate(fields):
-            tk.Label(body, text=label, bg=BG, fg=FG2, font=FONT_SM, anchor='w').pack(fill='x')
+        for label, default, multi in fields:
+            if label:
+                tk.Label(body, text=label, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                         anchor='w').pack(fill='x')
             if multi:
-                w = tk.Text(body, height=5, bg=CARD, fg=FG, insertbackground=FG,
-                            relief='flat', font=FONT, wrap='word', bd=0,
-                            highlightthickness=1, highlightbackground=LINE,
-                            highlightcolor=ACC)
+                w = tk.Text(body, height=5, bg=T['card'], fg=T['fg'],
+                            insertbackground=T['fg'], relief='flat', font=FONT,
+                            wrap='word', bd=0, highlightthickness=1,
+                            highlightbackground=T['line'], highlightcolor=T['acc'])
                 w.insert('1.0', default or '')
                 w.pack(fill='x', pady=(2, 8))
+                self.vars[label] = (None, w)
             else:
                 v = tk.StringVar(value=default or '')
-                e = tk.Entry(body, textvariable=v, bg=CARD, fg=FG, insertbackground=FG,
-                             relief='flat', font=FONT, bd=0,
-                             highlightthickness=1, highlightbackground=LINE,
-                             highlightcolor=ACC)
+                e = tk.Entry(body, textvariable=v, bg=T['card'], fg=T['fg'],
+                             insertbackground=T['fg'], relief='flat', font=FONT, bd=0,
+                             highlightthickness=1, highlightbackground=T['line'],
+                             highlightcolor=T['acc'])
                 e.pack(fill='x', ipady=4, pady=(2, 8))
-            self.vars[label] = (v if not multi else None, w if multi else None)
-
-        btns = tk.Frame(self.win, bg=BG)
+                self.vars[label] = (v, None)
+        btns = tk.Frame(self.win, bg=T['bg'])
         btns.pack(fill='x', padx=12, pady=(0, 12))
-        self._mk_btn(btns, ok_text, ACC, self._ok).pack(side='right', padx=(6, 0))
-        self._mk_btn(btns, '取消', '#3a3f4d', self._cancel).pack(side='right')
+        self._mk_btn(btns, ok_text, T['acc'], self._ok).pack(side='right', padx=(6, 0))
+        self._mk_btn(btns, '取消', T['card_h'], self._cancel).pack(side='right')
         self.win.bind('<Return>', lambda e: self._ok())
         self.win.bind('<Escape>', lambda e: self._cancel())
         self.win.protocol('WM_DELETE_WINDOW', self._cancel)
@@ -217,14 +782,13 @@ class Dialog:
         b = tk.Label(master, text=text, bg=color, fg='#ffffff', font=FONT_B,
                      padx=14, pady=5, cursor='hand2')
         b.bind('<Button-1>', lambda e: cmd())
-        b.bind('<Enter>', lambda e: b.configure(bg=ACC2 if color == ACC else '#4a5060'))
+        b.bind('<Enter>', lambda e: b.configure(bg=T['acc2'] if color == T['acc'] else T['line']))
         b.bind('<Leave>', lambda e: b.configure(bg=color))
         return b
 
     def _ok(self):
-        out = []
-        for label, (v, w) in self.vars.items():
-            out.append(w.get('1.0', 'end-1c') if w is not None else v.get())
+        out = [w.get('1.0', 'end-1c') if w is not None else v.get()
+               for v, w in self.vars.values()]
         self.result = out
         self.win.grab_release()
         self.win.destroy()
@@ -237,231 +801,692 @@ class Dialog:
         self.win.destroy()
 
     def show(self, w=380, h=None):
-        if h:
-            center_on(self.win, self.parent, w, h)
-        else:
+        if h is None:
             self.win.update_idletasks()
-            center_on(self.win, self.parent, w, self.win.winfo_reqheight())
-        if self.on_ok is None:
-            self.parent.wait_window(self.win)
+            h = self.win.winfo_reqheight()
+        center_on(self.win, self.parent, w, h)
         return self.result
 
 
-# ---------------- 可滚动列表 ----------------
-class ScrollList(tk.Frame):
-    def __init__(self, master, **kw):
-        tk.Frame.__init__(self, master, bg=BG, **kw)
-        self.canvas = tk.Canvas(self, bg=BG, highlightthickness=0, bd=0)
+class SplitDialog:
+    MODES = ['自动（换行/逗号/分号/顿号/空格）', '按换行', '按逗号', '按空格', '按分号', '自定义分隔符']
+
+    def __init__(self, app, text):
+        self.app = app
+        self.win = tk.Toplevel(app.root)
+        self.win.transient(app.root)
+        dark_top(self.win, '拆词')
+        self.win.grab_set()
+        body = tk.Frame(self.win, bg=T['bg'])
+        body.pack(fill='both', expand=True, padx=12, pady=8)
+        tk.Label(body, text='源文本', bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w').pack(fill='x')
+        self.txt = tk.Text(body, height=5, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+                           relief='flat', font=FONT, wrap='word', bd=0,
+                           highlightthickness=1, highlightbackground=T['line'],
+                           highlightcolor=T['acc'])
+        self.txt.insert('1.0', text)
+        self.txt.pack(fill='x', pady=(2, 8))
+        row = tk.Frame(body, bg=T['bg'])
+        row.pack(fill='x', pady=(0, 6))
+        tk.Label(row, text='分隔方式', bg=T['bg'], fg=T['fg2'], font=FONT_SM).pack(side='left')
+        self.mode = tk.StringVar(value=self.MODES[0])
+        mb = tk.Label(row, text='▾ 选择', bg=T['card'], fg=T['fg'], font=FONT_SM,
+                      padx=8, pady=3, cursor='hand2')
+        mb.pack(side='right')
+        mb.bind('<Button-1>', lambda e: self.mode_menu(mb))
+        self.custom = tk.Entry(body, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+                               relief='flat', font=FONT, bd=0, highlightthickness=1,
+                               highlightbackground=T['line'], highlightcolor=T['acc'])
+        self.custom.insert(0, '|')
+        self.custom.pack(fill='x', pady=(0, 6))
+        self.prev = tk.Label(body, text='', bg=T['bg'], fg=T['acc'], font=FONT_SM,
+                             anchor='w', wraplength=330, justify='left')
+        self.prev.pack(fill='x', pady=(0, 6))
+        btns = tk.Frame(body, bg=T['bg'])
+        btns.pack(fill='x')
+        self.mk(btns, '拆成常用语', T['acc'], self.ok).pack(side='right', padx=(6, 0))
+        self.mk(btns, '预览', T['card_h'], self.do_preview).pack(side='right')
+        self.mk(btns, '取消', T['card_h'], self.cancel).pack(side='left')
+        self.win.bind('<Escape>', lambda e: self.cancel())
+        self.win.protocol('WM_DELETE_WINDOW', self.cancel)
+        self.do_preview()
+        center_on(self.win, self.app.root, 380, 360)
+
+    def mk(self, master, text, color, cmd):
+        b = tk.Label(master, text=text, bg=color, fg='#fff', font=FONT_B,
+                     padx=12, pady=5, cursor='hand2')
+        b.bind('<Button-1>', lambda e: cmd())
+        return b
+
+    def mode_menu(self, anchor):
+        m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
+                    font=FONT, relief='flat')
+        for x in self.MODES:
+            m.add_command(label=x, command=lambda x=x: (self.mode.set(x), self.do_preview()))
+        m.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+
+    def do_split(self):
+        raw = self.txt.get('1.0', 'end-1c')
+        m = self.mode.get()
+        table = {self.MODES[0]: r'[\r\n,;；，、\s]+', self.MODES[1]: r'[\r\n]+',
+                 self.MODES[2]: r'[,，]+', self.MODES[3]: r'[ \t]+', self.MODES[4]: r'[;；]+'}
+        if m in table:
+            parts = re.split(table[m], raw)
+        else:
+            sep = self.custom.get()
+            parts = raw.split(sep) if sep else [raw]
+        return [p.strip() for p in parts if p.strip()]
+
+    def do_preview(self):
+        parts = self.do_split()
+        self.prev.configure(text='预览：共 %d 条 → %s' %
+                            (len(parts), ' | '.join(parts[:6]) + (' …' if len(parts) > 6 else '')))
+
+    def ok(self):
+        parts = self.do_split()
+        if not parts:
+            self.prev.configure(text='没拆出任何内容', fg=T['danger'])
+            return
+        g = self.app.cur_group()
+        for p in parts:
+            g['items'].insert(0, {'id': uid(), 'name': preview(p, 12), 'text': p})
+        self.app.save(True)
+        self.app.tab = 'phrase'
+        self.app.render()
+        self.app.tip('已拆出 %d 条常用语' % len(parts))
+        self.win.grab_release()
+        self.win.destroy()
+
+    def cancel(self):
+        self.win.grab_release()
+        self.win.destroy()
+
+
+# ---------------- 7. 虚拟滚动列表 ----------------
+class Tip:
+    """悬停提示：延迟 450ms 弹出，移开立即销毁"""
+
+    def __init__(self, root):
+        self.root = root
+        self.win = None
+        self.job = None
+
+    def show(self, text, x, y):
+        self.hide()
+        self.job = self.root.after(450, lambda: self._pop(text, x, y))
+
+    def _pop(self, text, x, y):
+        self.hide()
+        w = tk.Toplevel(self.root)
+        w.overrideredirect(True)
+        w.attributes('-topmost', True)
+        tk.Label(w, text=text, bg=T['panel'], fg=T['fg'], font=FONT_SM,
+                 justify='left', padx=8, pady=5, bd=1, relief='solid').pack()
+        w.geometry('+%d+%d' % (x + 18, y + 18))
+        self.win = w
+
+    def hide(self):
+        if self.job:
+            try:
+                self.root.after_cancel(self.job)
+            except Exception:
+                pass
+            self.job = None
+        if self.win:
+            try:
+                self.win.destroy()
+            except Exception:
+                pass
+            self.win = None
+
+
+class VirtualList(tk.Frame):
+    """固定行高窗口化渲染：5000 条只创建可视区 widget"""
+
+    def __init__(self, master, on_click, on_menu, on_hover):
+        tk.Frame.__init__(self, master, bg=T['bg'])
+        self.on_click = on_click
+        self.on_menu = on_menu
+        self.on_hover = on_hover
+        self.tip = Tip(self.winfo_toplevel())
+        self.items = []
+        self.sel = None
+        self.kw = ''
+        self.pool = {}
+        self.wids = {}
+        self.canvas = tk.Canvas(self, bg=T['bg'], highlightthickness=0, bd=0)
         self.canvas.pack(side='left', fill='both', expand=True)
         self.sb = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview,
-                               bg=PANEL, troughcolor=BG, activebackground=ACC,
-                               relief='flat', bd=0, width=6)
+                               bg=T['panel'], troughcolor=T['bg'],
+                               activebackground=T['acc'], relief='flat', bd=0, width=6)
         self.sb.pack(side='right', fill='y')
         self.canvas.configure(yscrollcommand=self.sb.set)
-        self.inner = tk.Frame(self.canvas, bg=BG)
-        self.win_id = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
-        self.inner.bind('<Configure>',
-                        lambda e: self.canvas.configure(scrollregion=self.canvas.bbox('all')))
-        self.canvas.bind('<Configure>',
-                         lambda e: self.canvas.itemconfig(self.win_id, width=e.width))
-        self.canvas.bind_all('<MouseWheel>', self._wheel)
+        self.canvas.bind('<MouseWheel>', self._wheel)
+        self.canvas.bind('<Configure>', lambda e: self.update_view())
+
+    def set_data(self, items, sel, kw):
+        self.items = items
+        self.sel = sel
+        self.kw = kw
+        self.clear_pool()
+        self.canvas.yview_moveto(0)
+        self.update_view()
+
+    def clear_pool(self):
+        for i in list(self.pool):
+            self._drop(i)
+
+    def _drop(self, i):
+        w = self.pool.pop(i, None)
+        wid = self.wids.pop(i, None)
+        try:
+            if wid:
+                self.canvas.delete(wid)
+        except Exception:
+            pass
+        try:
+            if w:
+                w.destroy()
+        except Exception:
+            pass
 
     def _wheel(self, e):
-        w = self.winfo_containing(e.x_root, e.y_root)
-        node = w
-        while node is not None:
-            if node == self.canvas:
-                self.canvas.yview_scroll(int(-1 * (e.delta / 120)), 'units')
-                return
-            node = getattr(node, 'master', None)
+        self.canvas.yview_scroll(int(-1 * (e.delta / 120)), 'units')
+        self.update_view()
 
-    def clear(self):
-        for c in self.inner.winfo_children():
-            c.destroy()
+    def yview_step(self, px):
+        """按像素步进滚动（bench 与键盘翻页用）"""
+        self.canvas.yview_scroll(max(1, int(px / ITEM_H)), 'units')
 
-    def width(self):
-        self.update_idletasks()
-        return self.canvas.winfo_width()
+    def scroll_to_index(self, i):
+        total = max(1, len(self.items) * ITEM_H)
+        h = max(1, self.canvas.winfo_height())
+        self.canvas.yview_moveto(max(0.0, min(1.0, (i * ITEM_H - h / 2.0) / float(total))))
+        self.update_view()
+
+    def update_view(self):
+        n = len(self.items)
+        w = max(60, self.canvas.winfo_width())
+        self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
+        if n == 0:
+            self.clear_pool()
+            return
+        h = max(ITEM_H, self.canvas.winfo_height())
+        top = self.canvas.canvasy(0)
+        start = max(0, int(top // ITEM_H))
+        end = min(n, int((top + h) // ITEM_H) + 2)
+        for i in list(self.pool):
+            if i < start or i >= end:
+                self._drop(i)
+        for i in range(start, end):
+            f = self.pool.get(i)
+            if f is None:
+                f = self._mk_item(i)
+                self.pool[i] = f
+                self.wids[i] = self.canvas.create_window((0, i * ITEM_H), window=f,
+                                                         anchor='nw', width=w, height=ITEM_H)
+            else:
+                self.canvas.coords(self.wids[i], 0, i * ITEM_H)
+                self.canvas.itemconfig(self.wids[i], width=w)
+            f._idx = i
+            self._fill(f, i)
+
+    def _mk_item(self, i):
+        f = tk.Frame(self.canvas, bg=T['card'], height=ITEM_H, cursor='hand2')
+        f.pack_propagate(False)
+        f._idx = i
+        row = tk.Frame(f, bg=T['card'])
+        row.place(x=8, y=6, relwidth=1, width=-96, height=18)
+        f._row = row
+        f._l1a = tk.Label(row, bg=T['card'], font=FONT, anchor='w')
+        f._l1b = tk.Label(row, bg=T['card'], font=FONT, anchor='w', fg=T['acc'])
+        f._l1c = tk.Label(row, bg=T['card'], font=FONT, anchor='w')
+        for lb in (f._l1a, f._l1b, f._l1c):
+            lb.pack(side='left')
+        f._badge = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['fg2'], anchor='e')
+        f._badge.place(relx=1.0, x=-10, y=6, anchor='ne', height=18, width=80)
+        f._l2 = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['fg2'], anchor='w')
+        f._l2.place(x=8, y=28, relwidth=1, width=-16, height=16)
+        for wg in (f, row, f._l1a, f._l1b, f._l1c, f._l2, f._badge):
+            wg.bind('<Button-1>', lambda e, ff=f: self.on_click(ff._idx))
+            wg.bind('<Button-3>', lambda e, ff=f: self.on_menu(e, ff._idx))
+            wg.bind('<Enter>', lambda e, ff=f: (self._hover(ff._idx, True),
+                                                self.on_hover(ff._idx, e.x_root, e.y_root)))
+            wg.bind('<Leave>', lambda e, ff=f: (self._hover(ff._idx, False),
+                                                self.tip.hide()))
+        return f
+
+    def _paint(self, f, c):
+        f.configure(bg=c)
+        f._row.configure(bg=c)
+        f._l1a.configure(bg=c)
+        f._l1b.configure(bg=c)
+        f._l1c.configure(bg=c)
+        f._l2.configure(bg=c)
+        f._badge.configure(bg=c)
+
+    def _hover(self, i, on):
+        f = self.pool.get(i)
+        if not f or not (0 <= i < len(self.items)):
+            return
+        if self.items[i].get('id') == self.sel:
+            return
+        self._paint(f, T['card_h'] if on else T['card'])
+
+    def _fill(self, f, i):
+        it = self.items[i]
+        c = T['card_s'] if it.get('id') == self.sel else T['card']
+        self._paint(f, c)
+        body = it.get('disp') or it.get('text', '')
+        w = max(60, self.canvas.winfo_width())
+        maxc = max(8, int(w / 7.2))
+        pos = -1
+        if self.kw:
+            pos = body.lower().find(self.kw.lower())
+        if pos >= 0:
+            s = max(0, pos - 6)
+            seg = body[s:s + maxc]
+            a = seg[:pos - s]
+            b = seg[pos - s:pos - s + len(self.kw)]
+            cc = seg[pos - s + len(self.kw):]
+            f._l1a.configure(text=a, fg=T['fg'])
+            f._l1b.configure(text=b)
+            f._l1c.configure(text=preview(cc, max(1, maxc - len(a) - len(b))), fg=T['fg'])
+        else:
+            f._l1a.configure(text=preview(body, maxc), fg=T['fg'])
+            f._l1b.configure(text='')
+            f._l1c.configure(text='')
+        f._l2.configure(text=preview(it.get('sub', ''), max(8, int(w / 6.5))),
+                        fg=T['acc'] if it.get('kind') == 'phrase' else T['fg2'])
+        f._badge.configure(text=it.get('badge', ''))
 
 
-# ---------------- 主程序 ----------------
+# ---------------- 8. 主程序 ----------------
+DEFAULT_SETTINGS = dict(theme='dark', hotkey='ctrl+shift+v', max_items=500,
+                        listen=True, autopaste=True, mask_sensitive=True,
+                        skip_sensitive=False, show_time=False, record_title=False,
+                        group_by_time=False)
+
+
 class ClawBoard:
     def __init__(self, root):
         self.root = root
-        self.tab = 'clip'           # clip | phrase
+        self.tab = 'clip'
         self.sel_clip = None
         self.sel_phrase = None
         self.search = tk.StringVar()
-        self.autopaste = True
         self.collapsed = False
         self.prev_hwnd = None
         self.save_timer = None
         self._need_show = False
+        self._tray_menu = False
+        self.hidden = False
+        self.hotkey_ok = False
+        self.hotkey_fallback = False
+        self._hk_down = False
+        self._paste_fail = False
+        self.t0 = time.time()
 
         self.data = self.load_data()
+        self.st = self.data['settings']
+        self._seq = max([int(x.get('seq') or 0) for x in self.data['clip']] or [0])
+        set_theme(self.st['theme'])
 
-        root.title('ClawBoard')
+        root.title(APP_NAME)
         root.overrideredirect(True)
         root.attributes('-topmost', True)
         root.attributes('-alpha', 0.97)
-        root.configure(bg=BG)
+        root.configure(bg=T['bg'])
+        root.bind('<Escape>', lambda e: self.hide())
+        root.bind('<Up>', lambda e: self.move_sel(-1))
+        root.bind('<Down>', lambda e: self.move_sel(1))
+        root.bind('<Return>', lambda e: self.enter_sel())
+        root.bind('<Control-f>', lambda e: self.focus_search())
+        root.bind('<Delete>', lambda e: self.del_sel())
+        root.bind('<Control-Shift-Return>', lambda e: self.paste_plain_sel())
+        root.protocol('WM_DELETE_WINDOW', self.hide)
 
         self.build_ui()
         self.apply_geometry()
+        self.setup_system()
         self.render()
-        self.root.after(120, self.render)   # 尺寸稳定后重排一次换行
+        self.root.after(120, self.render)
         self.poll_clip()
         self.track_foreground()
+        self.poll_bg()
 
     # ---------- 数据 ----------
+    @staticmethod
+    def norm_item(it, seq):
+        """保证单条记录字段齐全（任何缺字段都在这里兜住）"""
+        if not isinstance(it, dict):
+            return None
+        if not isinstance(it.get('text'), str):
+            return None
+        if not it.get('created_at'):
+            it['created_at'] = now_ms() - seq * 1000
+            it['is_estimated'] = 1
+        it.setdefault('is_estimated', 0)
+        it.setdefault('seq', seq)
+        it.setdefault('updated_at', it.get('created_at'))
+        it.setdefault('last_used_at', None)
+        it.setdefault('source_app', 'unknown')
+        it.setdefault('source_title', None)
+        it.setdefault('copy_count', 1)
+        it.setdefault('fav', 0)
+        it.setdefault('meta', None)
+        it.setdefault('sens', None)
+        it.setdefault('time', time.strftime('%m-%d %H:%M',
+                                            time.localtime(it['created_at'] / 1000.0)))
+        if not it.get('content_type'):
+            it['content_type'] = detect_content_type(it.get('text', ''))
+        if not it.get('content_size'):
+            it['content_size'] = byte_size(it.get('text', ''))
+        it.setdefault('id', uid())
+        return it
+
     def load_data(self):
-        d = {'clip': [], 'groups': [{'name': '默认', 'items': []}],
-             'gi': 0, 'geom': None, 'autopaste': True}
+        d = {'clip': [], 'groups': [{'name': '默认', 'items': []}], 'gi': 0,
+             'geom': None, 'settings': dict(DEFAULT_SETTINGS),
+             'schema_version': SCHEMA_VERSION}
         if os.path.exists(DATA_FILE):
             try:
                 with open(DATA_FILE, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
-                for k in d:
+                for k in list(d):
                     if k in loaded:
                         d[k] = loaded[k]
             except Exception:
-                pass
-        if not d['groups']:
-            d['groups'] = [{'name': '默认', 'items': []}]
-        d['gi'] = min(max(0, d.get('gi', 0)), len(d['groups']) - 1)
-        self.autopaste = d.get('autopaste', True)
+                self.note('数据文件读取失败，已用默认值启动（原文件未改动）')
+        d = self.validate(d)
+        if int(d.get('schema_version', 1)) < SCHEMA_VERSION:
+            bak = backup_data()
+            try:
+                d = self.validate(migrate(d))
+                self.save_now(d)
+                self.note('数据已迁移到 v%d（备份：%s）' % (SCHEMA_VERSION, bak))
+            except Exception as e:
+                self.note('迁移失败，已回滚备份：%s' % e)
+                if bak and os.path.exists(bak):
+                    try:
+                        with open(bak, 'rb') as a:
+                            with open(DATA_FILE, 'wb') as b:
+                                b.write(a.read())
+                    except Exception:
+                        pass
+                d = self.validate(json.load(open(DATA_FILE, 'r', encoding='utf-8'))
+                                  if os.path.exists(DATA_FILE) else d)
+        return d
+
+    def save_now(self, d=None):
+        """同步落盘（迁移后立即写回用）"""
+        d = d or self.data
+        tmp = DATA_FILE + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(d, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, DATA_FILE)
+            return True
+        except Exception as e:
+            self.note('保存失败：%s' % e)
+            return False
+
+    @staticmethod
+    def validate(d):
+        """配置 schema 校验：任何非法字段回退默认值，绝不崩溃"""
+        if not isinstance(d.get('clip'), list):
+            d['clip'] = []
+        seq = 0
+        normed = []
+        for x in d['clip']:
+            seq += 1
+            it = ClawBoard.norm_item(x, seq)
+            if it:
+                normed.append(it)
+        d['clip'] = normed
+        gs = []
+        raw_groups = d.get('groups')
+        if not isinstance(raw_groups, list):
+            raw_groups = []
+        for g in raw_groups:
+            if not isinstance(g, dict) or not isinstance(g.get('name'), str):
+                continue
+            items = []
+            for x in g.get('items', []):
+                seq += 1
+                it = ClawBoard.norm_item(x, seq)
+                if it:
+                    items.append(it)
+            gs.append({'name': g['name'], 'items': items})
+        d['groups'] = gs or [{'name': '默认', 'items': []}]
+        try:
+            gi = int(d.get('gi', 0))
+        except Exception:
+            gi = 0
+        d['gi'] = min(max(0, gi), len(d['groups']) - 1)
+        s = d.get('settings') if isinstance(d.get('settings'), dict) else {}
+        fixed = dict(DEFAULT_SETTINGS)
+        for k, v in fixed.items():
+            if k in s and isinstance(s[k], type(v)):
+                fixed[k] = s[k]
+        if fixed['theme'] not in ('dark', 'light'):
+            fixed['theme'] = 'dark'
+        try:
+            fixed['max_items'] = min(5000, max(10, int(fixed['max_items'])))
+        except Exception:
+            fixed['max_items'] = 500
+        d['settings'] = fixed
+        if not isinstance(d.get('geom'), str):
+            d['geom'] = None
         return d
 
     def save(self, later=False):
         def do():
-            self.data['autopaste'] = self.autopaste
             self.data['geom'] = self.root.geometry()
+            tmp = DATA_FILE + '.tmp'
             try:
-                with open(DATA_FILE, 'w', encoding='utf-8') as f:
+                with open(tmp, 'w', encoding='utf-8') as f:
                     json.dump(self.data, f, ensure_ascii=False, indent=1)
-            except Exception:
-                pass
+                os.replace(tmp, DATA_FILE)
+            except Exception as e:
+                self.note('保存失败：%s' % e)
             self.save_timer = None
         if later:
             if self.save_timer:
                 self.root.after_cancel(self.save_timer)
-            self.save_timer = self.root.after(600, do)
+            self.save_timer = self.root.after(300, do)
         else:
             do()
 
-    # ---------- UI 骨架 ----------
+    def note(self, msg):
+        """写运行日志。绝不写入剪贴板原文。"""
+        try:
+            with open(CRASH_LOG, 'a', encoding='utf-8') as f:
+                f.write('[%s] %s\n' % (time.strftime('%F %T'), msg))
+        except Exception:
+            pass
+
+    # ---------- 系统接入 ----------
+    def setup_system(self):
+        self.hw = HiddenWindow(self.on_hotkey, self.on_tray)
+        self.hw.start()
+        self.hw.ready.wait(3)
+        if not self.hw.tray_add():
+            self.note('托盘图标添加失败')
+        self.apply_hotkey()
+
+    def apply_hotkey(self):
+        table = {'ctrl+shift+v': (MOD_CONTROL | MOD_SHIFT, VK_V),
+                 'alt+v': (MOD_ALT, VK_V),
+                 'ctrl+alt+v': (MOD_CONTROL | MOD_ALT, VK_V)}
+        key = self.st.get('hotkey', 'ctrl+shift+v')
+        ok = self.hw.reg_hotkey(*table[key]) if key in table else False
+        self.hotkey_ok = ok
+        self.hotkey_fallback = (not ok and key != 'none')
+        if self.hotkey_fallback:
+            self.note('全局热键 %s 注册失败（被占用），降级为轮询检测' % key)
+            self.tip('热键被占用，已启用降级检测')
+
+    def on_hotkey(self):
+        self.root.after(0, self.toggle_show)
+
+    def on_tray(self, which):
+        if which == 'left':
+            self.root.after(0, self.toggle_show)
+        else:
+            self._tray_menu = True
+
+    def poll_bg(self):
+        """主线程统一消费后台线程产生的事件标志 + 热键降级轮询"""
+        if self._tray_menu:
+            self._tray_menu = False
+            self.tray_menu()
+        if self._need_show:
+            self._need_show = False
+            self.root.deiconify()
+            self.root.attributes('-topmost', True)
+            self.render()
+        if getattr(self, '_paste_fail', False):
+            self._paste_fail = False
+            self.tip('目标窗口拒绝焦点（可能是管理员权限），已复制，请手动 Ctrl+V')
+        if self.hotkey_fallback:
+            self._poll_hotkey()
+        self.root.after(120, self.poll_bg)
+
+    def _poll_hotkey(self):
+        """RegisterHotKey 失败时的降级：轮询检测组合键（带按下防抖）"""
+        try:
+            down = ((u32.GetAsyncKeyState(VK_CONTROL) & 0x8000) and
+                    (u32.GetAsyncKeyState(0x10) & 0x8000) and      # VK_SHIFT
+                    (u32.GetAsyncKeyState(VK_V) & 0x8000))
+        except Exception:
+            return
+        if down and not self._hk_down:
+            self._hk_down = True
+            self.toggle_show()
+        elif not down:
+            self._hk_down = False
+
+    # ---------- UI ----------
     def build_ui(self):
         r = self.root
-        # 标题栏
-        self.bar = tk.Frame(r, bg=PANEL, height=30, cursor='fleur')
+        for w in list(r.winfo_children()):
+            w.destroy()
+        self.bar = tk.Frame(r, bg=T['panel'], height=30, cursor='fleur')
         self.bar.pack(fill='x')
         self.bar.pack_propagate(False)
-        tk.Label(self.bar, text='⚡ ClawBoard', bg=PANEL, fg=ACC, font=FONT_TITLE).pack(side='left', padx=8)
+        self.title_lb = tk.Label(self.bar, text='⚡ ' + APP_NAME, bg=T['panel'],
+                                 fg=T['acc'], font=FONT_TITLE)
+        self.title_lb.pack(side='left', padx=8)
         self.bar.bind('<ButtonPress-1>', self.start_move)
         self.bar.bind('<B1-Motion>', self.do_move)
         self.bar.bind('<Double-Button-1>', lambda e: self.toggle_collapse())
-
-        for txt, cmd in (('✕', self.quit), ('📌', self.toggle_pin), ('—', self.toggle_collapse)):
-            b = tk.Label(self.bar, text=txt, bg=PANEL, fg=FG2, font=FONT, width=3, cursor='hand2')
+        for txt, cmd, col in (('✕', self.hide, T['danger']),
+                              ('📌', self.toggle_pin, None),
+                              ('—', self.toggle_collapse, None)):
+            b = tk.Label(self.bar, text=txt, bg=T['panel'], fg=T['fg2'], font=FONT,
+                         width=3, cursor='hand2')
             b.pack(side='right')
             b.bind('<Button-1>', lambda e, c=cmd: c())
-            b.bind('<Enter>', lambda e, b=b: b.configure(fg=FG))
-            b.bind('<Leave>', lambda e, b=b: b.configure(fg=FG2))
+            b.bind('<Enter>', lambda e, b=b, c=col: b.configure(fg=c or T['fg']))
+            b.bind('<Leave>', lambda e, b=b: b.configure(fg=T['fg2']))
 
-        # 主体容器（折叠时整体隐藏，避免 pack 顺序错乱）
-        self.body = tk.Frame(r, bg=BG)
+        self.body = tk.Frame(r, bg=T['bg'])
         self.body.pack(fill='both', expand=True)
 
-        # Tab 栏
-        tabs = tk.Frame(self.body, bg=BG, height=32)
+        tabs = tk.Frame(self.body, bg=T['bg'], height=32)
         tabs.pack(fill='x')
         tabs.pack_propagate(False)
         self.tab_clip = self.mk_tab(tabs, '剪贴板', 'clip')
         self.tab_phr = self.mk_tab(tabs, '常用语', 'phrase')
 
-        # 分组条（仅常用语）
-        self.gbar = tk.Frame(self.body, bg=BG, height=28)
-        self.gname = tk.Label(self.gbar, text='', bg=BG, fg=FG, font=FONT_B, cursor='hand2')
+        self.gbar = tk.Frame(self.body, bg=T['bg'], height=28)
+        self.gname = tk.Label(self.gbar, text='', bg=T['bg'], fg=T['fg'],
+                              font=FONT_B, cursor='hand2')
         self.gname.pack(side='left', padx=(8, 2))
         self.gname.bind('<Button-1>', lambda e: self.group_menu())
-        tk.Label(self.gbar, text='▾', bg=BG, fg=FG2, font=FONT_SM, cursor='hand2').pack(side='left')
-        self.gbar.bind('<Button-1>', lambda e: self.group_menu())
+        tk.Label(self.gbar, text='▾', bg=T['bg'], fg=T['fg2'], font=FONT_SM).pack(side='left')
 
-        # 列表
-        self.list = ScrollList(self.body)
-        self.list.pack(fill='both', expand=True, padx=(6, 0), pady=4)
+        self.vlist = VirtualList(self.body, self.on_click_item,
+                                 self.on_menu_item, self.on_hover_item)
+        self.vlist.pack(fill='both', expand=True, padx=(6, 0), pady=4)
 
-        # 底部工具条
-        self.tool = tk.Frame(self.body, bg=PANEL, height=36)
+        self.tool = tk.Frame(self.body, bg=T['panel'], height=36)
         self.tool.pack(fill='x')
         self.tool.pack_propagate(False)
+        self.search_entry = tk.Entry(self.tool, textvariable=self.search, bg=T['card'],
+                                     fg=T['fg'], insertbackground=T['fg'], relief='flat',
+                                     font=FONT_SM, bd=0, highlightthickness=1,
+                                     highlightbackground=T['line'], highlightcolor=T['acc'])
+        self.search_entry.pack(side='left', padx=6, ipady=3, fill='x', expand=True)
+        self.search_entry.bind('<KeyRelease>', lambda e: self.render())
+        self.search_entry.bind('<Escape>', lambda e: self.hide())
+        for txt, tip, cmd in (('＋', '新增常用语', self.add_phrase),
+                              ('拆', '拆词：把一段文字拆成多条常用语', self.split_words),
+                              ('删', '删除选中项', self.del_sel),
+                              ('清', '清空当前列表', self.clear_list),
+                              ('⚙', '设置', self.open_settings)):
+            self.mk_tool_btn(txt, tip, cmd)
 
-        e = tk.Entry(self.tool, textvariable=self.search, bg=CARD, fg=FG, insertbackground=FG,
-                     relief='flat', font=FONT_SM, bd=0,
-                     highlightthickness=1, highlightbackground=LINE, highlightcolor=ACC)
-        e.pack(side='left', padx=6, ipady=3, fill='x', expand=True)
-        e.bind('<KeyRelease>', lambda ev: self.render())
-        self.search.set('')
-        tk.Label(self.tool, text='搜索', bg=PANEL, fg=FG2, font=FONT_SM).pack(side='left', padx=(0, 6))
-
-        self.mk_tool_btn('＋', '新增常用语', self.add_phrase)
-        self.mk_tool_btn('拆', '拆词：把一段文字拆成多条常用语', self.split_words)
-        self.mk_tool_btn('删', '删除选中项', self.del_sel)
-        self.mk_tool_btn('清', '清空当前列表', self.clear_list)
-
-        # 右下拉伸把手
-        self.grip = tk.Label(r, text='◢', bg=BG, fg=LINE, font=('Consolas', 9), cursor='sizing')
+        self.grip = tk.Label(r, text='◢', bg=T['bg'], fg=T['line'], font=('Consolas', 9),
+                             cursor='sizing')
         self.grip.place(relx=1.0, rely=1.0, anchor='se')
         self.grip.bind('<ButtonPress-1>', self.start_resize)
         self.grip.bind('<B1-Motion>', self.do_resize)
 
     def mk_tab(self, master, text, key):
-        f = tk.Frame(master, bg=BG, cursor='hand2')
+        f = tk.Frame(master, bg=T['bg'], cursor='hand2')
         f.pack(side='left', fill='y')
-        lb = tk.Label(f, text=text, bg=BG, fg=FG2, font=FONT_B, padx=14, pady=6)
+        lb = tk.Label(f, text=text, bg=T['bg'], fg=T['fg2'], font=FONT_B, padx=14, pady=6)
         lb.pack()
-        bar = tk.Frame(f, bg=BG, height=2)
+        bar = tk.Frame(f, bg=T['bg'], height=2)
         bar.pack(fill='x', side='bottom')
         for w in (f, lb):
             w.bind('<Button-1>', lambda e: self.set_tab(key))
-        f._lb = lb
-        f._bar = bar
-        f._key = key
+        f._lb, f._bar, f._key = lb, bar, key
         return f
 
     def mk_tool_btn(self, text, tip, cmd):
-        b = tk.Label(self.tool, text=text, bg=CARD, fg=FG, font=FONT_B, width=3, cursor='hand2')
+        b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
+                     width=3, cursor='hand2')
         b.pack(side='left', padx=2, pady=5)
         b.bind('<Button-1>', lambda e: cmd())
-        b.bind('<Enter>', lambda e: (b.configure(bg=CARD_H), self.tip(tip)))
-        b.bind('<Leave>', lambda e: b.configure(bg=CARD))
+        b.bind('<Enter>', lambda e: (b.configure(bg=T['card_h']), self.tip(tip)))
+        b.bind('<Leave>', lambda e: b.configure(bg=T['card']))
         return b
 
     def tip(self, text):
-        self.bar.winfo_children()[0].configure(text='⚡ ' + text)
+        self.title_lb.configure(text='⚡ ' + text)
+        self.root.after(2500, lambda: self.title_lb.configure(text='⚡ ' + APP_NAME))
 
-    # ---------- 布局 / 交互 ----------
+    def confirm(self, text, on_yes):
+        Dialog(self.root, '确认', [('', text, True)],
+               on_ok=lambda v: on_yes(), ok_text='确定').show(430, 200)
+
+    # ---------- 几何 ----------
     def apply_geometry(self):
         g = self.data.get('geom')
-        ok = False
         if g and re.match(r'^\d+x\d+\+\d+\+\d+$', g):
-            self.root.geometry(g)
-            ok = True
-        if not ok:
-            w, h = 340, 470
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-            self.root.geometry('%dx%d+%d+%d' % (w, h, sw - w - 14, sh - h - 62))
+            try:
+                parts = g.split('+')
+                x, y = int(parts[1]), int(parts[2])
+                sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+                if -80 <= x <= sw and -80 <= y <= sh:
+                    self.root.geometry(g)
+                    return
+            except Exception:
+                pass
+        w, h = 340, 480
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.root.geometry('%dx%d+%d+%d' % (w, h, sw - w - 14, sh - h - 62))
 
     def start_move(self, e):
         self._mx, self._my = e.x_root, e.y_root
 
     def do_move(self, e):
-        dx = e.x_root - self._mx
-        dy = e.y_root - self._my
-        x = self.root.winfo_x() + dx
-        y = self.root.winfo_y() + dy
-        self.root.geometry('+%d+%d' % (x, y))
+        self.root.geometry('+%d+%d' % (self.root.winfo_x() + e.x_root - self._mx,
+                                       self.root.winfo_y() + e.y_root - self._my))
         self._mx, self._my = e.x_root, e.y_root
 
     def start_resize(self, e):
@@ -470,9 +1495,9 @@ class ClawBoard:
 
     def do_resize(self, e):
         w = max(240, self._rw + (e.x_root - self._rx))
-        h = max(200, self._rh + (e.y_root - self._ry))
+        h = max(160, self._rh + (e.y_root - self._ry))
         self.root.geometry('%dx%d' % (w, h))
-        self.render()
+        self.vlist.update_view()
 
     def toggle_pin(self):
         cur = bool(self.root.attributes('-topmost'))
@@ -483,16 +1508,43 @@ class ClawBoard:
         self.collapsed = not self.collapsed
         if self.collapsed:
             self._restore = self.root.geometry()
-            x = self.root.winfo_x()
-            y = self.root.winfo_y()
             self.body.pack_forget()
-            self.root.geometry('210x30+%d+%d' % (x, y))
+            self.root.geometry('210x30+%d+%d' % (self.root.winfo_x(), self.root.winfo_y()))
         else:
             self.body.pack(fill='both', expand=True)
             self.root.geometry(self._restore)
             self.render()
 
-    def quit(self):
+    def hide(self):
+        """关闭按钮 / Esc = 隐藏到托盘，不是退出"""
+        self.save()
+        self.root.withdraw()
+        self.hidden = True
+
+    def toggle_show(self):
+        if self.hidden:
+            self.hidden = False
+            self.root.deiconify()
+            self.root.attributes('-topmost', True)
+            self.root.lift()
+            self.focus_search()
+            self.render()
+        else:
+            self.hide()
+
+    def focus_search(self):
+        try:
+            self.search_entry.focus_force()
+        except Exception:
+            pass
+
+    def quit_app(self):
+        try:
+            self.hw.unreg_hotkey()
+            self.hw.tray_del()
+            self.hw.stop()
+        except Exception:
+            pass
         self.save()
         self.root.destroy()
 
@@ -501,9 +1553,12 @@ class ClawBoard:
         self.tab = key
         self.render()
 
+    def cur_group(self):
+        return self.data['groups'][self.data['gi']]
+
     def group_menu(self):
-        m = tk.Menu(self.root, tearoff=0, bg=PANEL, fg=FG, bd=0,
-                    activebackground=CARD_H, activeforeground=FG,
+        m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
                     font=FONT, relief='flat')
         for i, g in enumerate(self.data['groups']):
             m.add_command(label=('● ' if i == self.data['gi'] else '   ') + g['name'],
@@ -540,224 +1595,315 @@ class ClawBoard:
 
     def del_group(self):
         if len(self.data['groups']) <= 1:
-            messagebox.showinfo('提示', '至少要保留一个分组')
+            self.tip('至少要保留一个分组')
             return
         g = self.cur_group()
-        if not messagebox.askyesno('确认', '删除分组「%s」及其 %d 条常用语？' % (g['name'], len(g['items']))):
-            return
-        i = self.data['gi']
-        del self.data['groups'][i]
-        self.data['gi'] = max(0, i - 1)
-        self.save(True)
-        self.render()
 
-    def cur_group(self):
-        return self.data['groups'][self.data['gi']]
+        def do_del():
+            i = self.data['gi']
+            del self.data['groups'][i]
+            self.data['gi'] = max(0, i - 1)
+            self.save(True)
+            self.render()
+        self.confirm('删除分组「%s」及其 %d 条常用语？此操作不可撤销。' %
+                     (g['name'], len(g['items'])), do_del)
 
     # ---------- 渲染 ----------
+    def visible_items(self):
+        q = self.search.get().strip().lower()
+        out = []
+        pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
+        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        for it in pool:
+            text = it['text']
+            name = it.get('name') or ''
+            if q and q not in text.lower() and q not in name.lower():
+                continue
+            hits = it.get('sens') or []
+            disp = text
+            if hits and self.st['mask_sensitive'] and not it.get('mask_off'):
+                disp = mask_text(text, hits)
+            size = int(it.get('content_size') or 0)
+            if self.tab == 'phrase':
+                sub = name or preview(text, 28)
+                badge = human_size(byte_size(text))
+            else:
+                parts = []
+                if self.st['show_time']:
+                    parts.append(rel_time(it.get('created_at'), it.get('is_estimated')))
+                parts.append(it.get('source_app') or 'unknown')
+                if int(it.get('copy_count') or 1) > 1:
+                    parts.append('×%d' % it['copy_count'])
+                if hits:
+                    parts.append('⚠' + '/'.join(hits))
+                sub = ' · '.join(parts)
+                badge = '%s · %s' % (it.get('content_type') or 'text', human_size(size))
+            if it.get('fav'):
+                disp = '★ ' + disp
+            out.append({'id': it['id'], 'disp': disp, 'text': text, 'sub': sub,
+                        'badge': badge, 'kind': self.tab, 'sens': hits,
+                        'created_at': it.get('created_at'),
+                        'est': it.get('is_estimated'),
+                        'app': it.get('source_app') or 'unknown'})
+        return out, sel, q
+
     def render(self):
-        # tab 高亮
         for t in (self.tab_clip, self.tab_phr):
             on = (t._key == self.tab)
-            t._lb.configure(fg=FG if on else FG2)
-            t._bar.configure(bg=ACC if on else BG)
-        # 分组条
+            t._lb.configure(fg=T['fg'] if on else T['fg2'])
+            t._bar.configure(bg=T['acc'] if on else T['bg'])
         if self.tab == 'phrase':
             if not self.gbar.winfo_ismapped():
-                self.gbar.pack(fill='x', before=self.list)
+                self.gbar.pack(fill='x', before=self.vlist)
             self.gname.configure(text=self.cur_group()['name'])
         else:
             if self.gbar.winfo_ismapped():
                 self.gbar.pack_forget()
+        items, sel, kw = self.visible_items()
+        self.vlist.set_data(items, sel, kw)
 
-        self.list.clear()
-        q = self.search.get().strip().lower()
-        wrap = max(120, self.list.width() - 26)
-
-        if self.tab == 'clip':
-            items = self.data['clip']
-            for it in items:
-                if q and q not in it['text'].lower():
-                    continue
-                self.mk_card(it['id'], preview(it['text'], 140), it.get('time', ''),
-                             selected=(it['id'] == self.sel_clip), wrap=wrap, kind='clip')
-            if not self.list.inner.winfo_children():
-                self.empty_tip('还没有复制记录\n去任意地方 Ctrl+C 试试')
-        else:
-            items = self.cur_group()['items']
-            for it in items:
-                if q and q not in (it['name'] + it['text']).lower():
-                    continue
-                head = it['name'] if it['name'] else preview(it['text'], 30)
-                self.mk_card(it['id'], preview(it['text'], 140), head,
-                             selected=(it['id'] == self.sel_phrase), wrap=wrap, kind='phrase')
-            if not self.list.inner.winfo_children():
-                self.empty_tip('这个分组还是空的\n点底部「＋」添加常用语')
-
-    def empty_tip(self, text):
-        tk.Label(self.list.inner, text=text, bg=BG, fg=FG2, font=FONT,
-                 justify='left', pady=30).pack(anchor='w', padx=10)
-
-    def mk_card(self, cid, body, sub, selected, wrap, kind):
-        c = tk.Frame(self.list.inner, bg=CARD_S if selected else CARD, cursor='hand2')
-        c.pack(fill='x', padx=6, pady=3)
-        inner = tk.Frame(c, bg=c['bg'])
-        inner.pack(fill='x', padx=8, pady=6)
-        if kind == 'phrase':
-            tk.Label(inner, text=sub, bg=c['bg'], fg=ACC, font=FONT_B,
-                     anchor='w', wraplength=wrap, justify='left').pack(fill='x')
-            tk.Label(inner, text=body, bg=c['bg'], fg=FG, font=FONT,
-                     anchor='w', wraplength=wrap, justify='left').pack(fill='x')
-        else:
-            tk.Label(inner, text=body, bg=c['bg'], fg=FG, font=FONT,
-                     anchor='w', wraplength=wrap, justify='left').pack(fill='x')
-            tk.Label(inner, text=sub, bg=c['bg'], fg=FG2, font=FONT_SM,
-                     anchor='w').pack(fill='x')
-
-        def set_bg(w, color):
-            try:
-                w.configure(bg=color)
-            except Exception:
-                pass
-            for ch in w.winfo_children():
-                set_bg(ch, color)
-
-        def enter(_):
-            if cid != (self.sel_clip if kind == 'clip' else self.sel_phrase):
-                set_bg(c, CARD_H)
-
-        def leave(_):
-            if cid != (self.sel_clip if kind == 'clip' else self.sel_phrase):
-                set_bg(c, CARD)
-
-        def click(_):
-            self.on_click(cid, kind)
-
-        def menu(e):
-            self.item_menu(e, cid, kind)
-
-        for w in (c, inner) + tuple(inner.winfo_children()):
-            w.bind('<Button-1>', click)
-            w.bind('<Button-3>', menu)
-            w.bind('<Enter>', enter)
-            w.bind('<Leave>', leave)
-
-    # ---------- 行为 ----------
-    def on_click(self, cid, kind):
-        if kind == 'clip':
-            self.sel_clip = cid
-            it = self.find(cid, 'clip')
-        else:
-            self.sel_phrase = cid
-            it = self.find(cid, 'phrase')
-        if not it:
+    # ---------- 交互 ----------
+    def on_click_item(self, i):
+        items = self.vlist.items
+        if not (0 <= i < len(items)):
             return
+        it = items[i]
+        if self.tab == 'clip':
+            self.sel_clip = it['id']
+        else:
+            self.sel_phrase = it['id']
+        self.vlist.sel = it['id']
+        self.vlist.update_view()
+        self.paste(it['text'], cid=it['id'])
+
+    def on_menu_item(self, e, i):
+        items = self.vlist.items
+        if not (0 <= i < len(items)):
+            return
+        it = items[i]
+        kind = self.tab
         text = it['text']
+        m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
+                    font=FONT, relief='flat')
+        m.add_command(label='复制', command=lambda: clip_write(text))
+        m.add_command(label='粘贴到上一窗口', command=lambda: self.paste(text, True, it['id']))
+        m.add_command(label='粘贴为纯文本', command=lambda: self.paste_plain(it))
+        m.add_separator()
+        if kind == 'clip':
+            m.add_command(label='＋ 存为常用语', command=lambda: self.save_as_phrase(text))
+        else:
+            m.add_command(label='✎ 编辑内容', command=lambda: self.edit_phrase(it['id']))
+            m.add_command(label='🏷 命名', command=lambda: self.rename_phrase(it['id']))
+        m.add_command(label='拆 拆词', command=lambda: self.split_words(text))
+        m.add_command(label='★ 收藏' if not it.get('fav') else '☆ 取消收藏',
+                      command=lambda: self.toggle_fav(it['id']))
+        m.add_command(label='🕘 查看详情', command=lambda: self.show_detail(it))
+        if it.get('sens'):
+            m.add_command(label='👁 切换原文/打码', command=lambda: self.toggle_sens(it['id']))
+        m.add_separator()
+        m.add_command(label='✕ 删除', command=lambda: self.del_item(it['id'], kind))
+        m.tk_popup(e.x_root, e.y_root)
+
+    def on_hover_item(self, i, x, y):
+        """F0：列表里默认不显示时间，悬停才给相对时间"""
+        items = self.vlist.items
+        if not (0 <= i < len(items)):
+            return
+        it = items[i]
+        txt = '复制于 %s\n来源 %s\n%s' % (rel_time(it.get('created_at'), it.get('est')),
+                                         it.get('app', 'unknown'), it.get('badge', ''))
+        self.vlist.tip.show(txt, x, y)
+
+    def toggle_fav(self, cid):
+        pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
+        for x in pool:
+            if x['id'] == cid:
+                x['fav'] = 0 if x.get('fav') else 1
+        self.save(True)
         self.render()
-        clip_write(text)
-        if self.autopaste:
+
+    def show_detail(self, it):
+        """F0：隐藏时间戳的查询入口，三个时间语义不混用"""
+        src = it.get('source_app') or 'unknown'
+        body = '\n'.join([
+            '首次复制：%s%s' % (full_time(it.get('created_at')),
+                                '（估算值）' if it.get('is_estimated') else ''),
+            '再次复制：%s（共 %s 次）' % (full_time(it.get('updated_at')),
+                                        it.get('copy_count', 1)),
+            '最近粘贴：%s' % full_time(it.get('last_used_at')),
+            '来源应用：%s' % src,
+            '窗口标题：%s' % (it.get('source_title') or '（未记录）'),
+            '类型/大小：%s / %s（%d 字符）' % (it.get('content_type'),
+                                            human_size(int(it.get('content_size') or 0)),
+                                            len(it.get('text') or '')),
+            '序号 seq：%s' % it.get('seq'),
+            '',
+            '内容预览：',
+            preview(it.get('text'), 200),
+        ])
+        Dialog(self.root, '条目详情', [('', body, True)],
+               on_ok=lambda v: None, ok_text='关闭').show(460, 380)
+
+    def toggle_sens(self, cid):
+        pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
+        for x in pool:
+            if x['id'] == cid:
+                x['mask_off'] = not x.get('mask_off')
+        self.render()
+
+    def paste(self, text, force=False, cid=None):
+        """粘贴出去：只刷新 last_used_at，绝不改写 created_at"""
+        if cid:
+            pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
+            for x in pool:
+                if x['id'] == cid:
+                    x['last_used_at'] = now_ms()
+                    break
+            self.save(True)
+        if not clip_write(text):
+            self.tip('剪贴板被占用，写入失败')
+            return False
+        if (self.st['autopaste'] or force) and not self.hidden:
             hwnd = self.prev_hwnd
             self.root.withdraw()
             self.root.update()
             threading.Thread(target=self._paste_worker, args=(hwnd,), daemon=True).start()
+        return True
 
     def _paste_worker(self, hwnd):
-        """后台线程：把焦点还给上一个窗口再按 Ctrl+V"""
+        """返回是否真的把焦点抢回来了；UAC/管理员窗口会失败，需降级提示"""
+        ok = False
         try:
             if hwnd:
                 time.sleep(0.08)
                 u32.SetForegroundWindow(wintypes.HWND(hwnd))
                 time.sleep(0.10)
-                send_ctrl_v()
+                ok = (u32.GetForegroundWindow() == hwnd)
+                if ok:
+                    send_ctrl_v()
         except Exception:
-            pass
+            ok = False
         time.sleep(0.15)
         self._need_show = True
+        self._paste_fail = not ok
 
-    def find(self, cid, kind):
-        pool = self.data['clip'] if kind == 'clip' else self.cur_group()['items']
-        for it in pool:
-            if it['id'] == cid:
-                return it
-        return None
+    def paste_plain_sel(self):
+        items = self.vlist.items
+        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        if not sel and items:
+            sel = items[0]['id']
+        for it in items:
+            if it['id'] == sel:
+                self.paste_plain(it)
+                return
+        self.tip('先选中一条再按 Ctrl+Shift+Enter')
 
-    def item_menu(self, e, cid, kind):
-        it = self.find(cid, kind)
-        if not it:
+    def paste_plain(self, it):
+        """F6：粘贴为纯文本。三个坑全处理：不污染历史 / 还原焦点 / 失败降级提示"""
+        text = to_plain(it.get('text') or '')
+        if len(text.encode('utf-8')) > 5 * 1024 * 1024:
+            clip_write(text)
+            self.tip('文本超 5MB，已放入剪贴板，请手动 Ctrl+V')
             return
-        m = tk.Menu(self.root, tearoff=0, bg=PANEL, fg=FG, bd=0,
-                    activebackground=CARD_H, activeforeground=FG, font=FONT, relief='flat')
-        m.add_command(label='复制', command=lambda: clip_write(it['text']))
-        m.add_command(label='粘贴到上一窗口', command=lambda: self.on_click(cid, kind))
-        m.add_separator()
-        if kind == 'clip':
-            m.add_command(label='＋ 存为常用语', command=lambda: self.save_as_phrase(it['text']))
+        if not self.paste(text, True, it.get('id')):
+            self.tip('剪贴板被占用，已尝试复制，请手动 Ctrl+V')
+
+    def move_sel(self, delta):
+        items = self.vlist.items
+        if not items:
+            return
+        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        cur = 0
+        for i, it in enumerate(items):
+            if it['id'] == sel:
+                cur = i
+                break
+        nxt = min(len(items) - 1, max(0, cur + delta))
+        tgt = items[nxt]['id']
+        if self.tab == 'clip':
+            self.sel_clip = tgt
         else:
-            m.add_command(label='✎ 编辑内容', command=lambda: self.edit_phrase(cid))
-            m.add_command(label='🏷 命名', command=lambda: self.rename_phrase(cid))
-        m.add_command(label='拆 拆词', command=lambda: self.split_words(it['text']))
-        m.add_separator()
-        m.add_command(label='✕ 删除', command=lambda: self.del_item(cid, kind))
-        m.tk_popup(e.x_root, e.y_root)
+            self.sel_phrase = tgt
+        self.vlist.sel = tgt
+        self.vlist.scroll_to_index(nxt)
+
+    def enter_sel(self):
+        items = self.vlist.items
+        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        if not sel and items:
+            sel = items[0]['id']
+            if self.tab == 'clip':
+                self.sel_clip = sel
+            else:
+                self.sel_phrase = sel
+        for it in items:
+            if it['id'] == sel:
+                self.paste(it['text'], True, it['id'])
+                return
 
     def del_item(self, cid, kind):
         if kind == 'clip':
             self.data['clip'] = [x for x in self.data['clip'] if x['id'] != cid]
+            if self.sel_clip == cid:
+                self.sel_clip = None
         else:
             g = self.cur_group()
             g['items'] = [x for x in g['items'] if x['id'] != cid]
+            if self.sel_phrase == cid:
+                self.sel_phrase = None
         self.save(True)
         self.render()
 
     def del_sel(self):
-        if self.tab == 'clip':
-            if not self.sel_clip:
-                return self.tip('先选中一条')
-            self.del_item(self.sel_clip, 'clip')
-            self.sel_clip = None
-        else:
-            if not self.sel_phrase:
-                return self.tip('先选中一条')
-            self.del_item(self.sel_phrase, 'phrase')
-            self.sel_phrase = None
+        cid = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        if not cid:
+            self.tip('先选中一条')
+            return
+        self.del_item(cid, self.tab)
 
     def clear_list(self):
         if self.tab == 'clip':
-            if not messagebox.askyesno('确认', '清空全部剪贴板历史？'):
-                return
-            self.data['clip'] = []
-            self.sel_clip = None
+            def do_clear():
+                self.data['clip'] = []
+                self.sel_clip = None
+                self.save(True)
+                self.render()
+                self.tip('剪贴板历史已清空')
+            self.confirm('清空全部剪贴板历史？共 %d 条，不可撤销。' %
+                         len(self.data['clip']), do_clear)
         else:
-            if not messagebox.askyesno('确认', '清空分组「%s」？' % self.cur_group()['name']):
-                return
-            self.cur_group()['items'] = []
-            self.sel_phrase = None
-        self.save(True)
-        self.render()
+            g = self.cur_group()
 
-    # ---------- 常用语增删改 ----------
+            def do_clear():
+                g['items'] = []
+                self.sel_phrase = None
+                self.save(True)
+                self.render()
+                self.tip('分组已清空')
+            self.confirm('清空分组「%s」？共 %d 条，不可撤销。' %
+                         (g['name'], len(g['items'])), do_clear)
+
+    # ---------- 常用语 ----------
     def add_phrase(self):
         init = clip_read() or ''
 
         def done(v):
-            name, text = v[0].strip(), v[1]
-            if text.strip():
-                self.push_phrase(name, text)
+            if v and v[1].strip():
+                self.push_phrase(v[0].strip(), v[1])
         Dialog(self.root, '新增常用语',
-               [('名称（可留空，留空则自动取开头）', '', False),
-                ('内容', init, True)], on_ok=done).show(400, 300)
+               [('名称（可留空）', '', False), ('内容', init, True)], on_ok=done).show(400, 300)
 
     def save_as_phrase(self, text):
         def done(v):
             if v and v[1].strip():
                 self.push_phrase(v[0].strip(), v[1])
         Dialog(self.root, '存为常用语',
-               [('名称（可留空）', preview(text, 20), False),
-                ('内容', text, True)], on_ok=done).show(400, 300)
+               [('名称（可留空）', preview(text, 20), False), ('内容', text, True)],
+               on_ok=done).show(400, 300)
 
     def push_phrase(self, name, text):
-        g = self.cur_group()
-        g['items'].insert(0, {'id': uid(), 'name': name, 'text': text})
+        self.cur_group()['items'].insert(0, {'id': uid(), 'name': name, 'text': text})
         self.save(True)
         self.tab = 'phrase'
         self.render()
@@ -784,47 +1930,126 @@ class ClawBoard:
                 it['name'] = v[0].strip()
                 self.save(True)
                 self.render()
-        Dialog(self.root, '命名', [('名称', it.get('name', ''), False)], on_ok=done).show(340)
+        Dialog(self.root, '命名', [('名称', it.get('name') or '', False)],
+               on_ok=done).show(340)
 
-    # ---------- 拆词 ----------
+    def find(self, cid, kind):
+        pool = self.data['clip'] if kind == 'clip' else self.cur_group()['items']
+        for it in pool:
+            if it['id'] == cid:
+                return it
+        return None
+
     def split_words(self, text=None):
         if text is None:
-            if self.tab == 'clip' and self.sel_clip:
-                it = self.find(self.sel_clip, 'clip')
-                text = it['text'] if it else (clip_read() or '')
-            elif self.tab == 'phrase' and self.sel_phrase:
-                it = self.find(self.sel_phrase, 'phrase')
-                text = it['text'] if it else (clip_read() or '')
-            else:
-                text = clip_read() or ''
+            sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+            it = self.find(sel, self.tab) if sel else None
+            text = it['text'] if it else (clip_read() or '')
         SplitDialog(self, text)
 
-    # ---------- 剪贴板监听 ----------
+    # ---------- 设置 ----------
+    def open_settings(self):
+        SettingsWindow(self)
+
+    def rebuild(self):
+        self.root.configure(bg=T['bg'])
+        self.build_ui()
+        self.render()
+        self.root.after(120, self.render)
+
+    # ---------- 托盘 ----------
+    def tray_menu(self):
+        m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
+                    font=FONT, relief='flat')
+        m.add_command(label='打开面板', command=self.toggle_show)
+        m.add_command(label=('⏸ 暂停监听' if self.st['listen'] else '▶ 恢复监听'),
+                      command=self.toggle_listen)
+        m.add_command(label='⚙ 设置', command=self.open_settings)
+        m.add_command(label='ℹ 关于', command=self.about)
+        m.add_separator()
+        m.add_command(label='✕ 退出', command=self.quit_app)
+        try:
+            m.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        except Exception:
+            pass
+
+    def toggle_listen(self):
+        self.st['listen'] = not self.st['listen']
+        self.save(True)
+        self.tip('监听已暂停' if not self.st['listen'] else '监听已恢复')
+
+    def about(self):
+        Dialog(self.root, '关于 ' + APP_NAME,
+               [('', '%s %s\n\n零依赖 Python / tkinter\n数据文件：%s\n\n唤起热键：%s' %
+                 (APP_NAME, APP_VER, DATA_FILE, self.st['hotkey']), True)],
+               on_ok=lambda v: None, ok_text='知道了').show(430, 260)
+
+    # ---------- 循环 ----------
     def poll_clip(self):
         global LAST_SEQ
-        if self._need_show:
-            self._need_show = False
-            self.root.deiconify()
-            self.root.attributes('-topmost', True)
-            self.render()
+        if not self.st['listen']:
+            LAST_SEQ = clip_seq()
+            self.root.after(400, self.poll_clip)
+            return
         try:
             seq = clip_seq()
             if seq != LAST_SEQ:
                 LAST_SEQ = seq
                 txt = clip_read()
                 if txt and txt.strip():
-                    dup = [x for x in self.data['clip'] if x['text'] == txt]
-                    if dup:
-                        self.data['clip'].remove(dup[0])
-                    self.data['clip'].insert(0, {'id': uid(), 'text': txt, 'time': now_str()})
-                    if len(self.data['clip']) > 200:
-                        self.data['clip'] = self.data['clip'][:200]
-                    self.save(True)
-                    if self.tab == 'clip':
-                        self.render()
-        except Exception:
-            pass
+                    if len(txt) > MAX_TEXT:
+                        txt = txt[:MAX_TEXT] + '\n…（内容超长已截断）'
+                    hits = scan_sensitive(txt)
+                    if hits and self.st['skip_sensitive']:
+                        self.tip('检测到%s，按设置不入库' % '/'.join(hits))
+                    else:
+                        self.ingest(txt, hits)
+        except Exception as e:
+            self.note('监听异常：%s' % e)
         self.root.after(400, self.poll_clip)
+
+    def next_seq(self):
+        self._seq += 1
+        return self._seq
+
+    def ingest(self, txt, hits=None):
+        """入库：重复内容只刷新 updated_at / copy_count，created_at 永不改写"""
+        ts = now_ms()
+        src, src_hwnd = capture_source(self.root.winfo_id())
+        title = window_title_of(src_hwnd) if (src_hwnd and self.st['record_title']) else None
+        dup = None
+        for x in self.data['clip']:
+            if x.get('text') == txt:
+                dup = x
+                break
+        if dup is not None:
+            dup['copy_count'] = int(dup.get('copy_count') or 1) + 1
+            dup['updated_at'] = ts
+            dup['time'] = now_str()
+            if src != 'unknown':
+                dup['source_app'] = src
+            self.data['clip'].remove(dup)
+            self.data['clip'].insert(0, dup)
+        else:
+            exist = [int(x.get('created_at') or 0) for x in self.data['clip']]
+            mx = max(exist) if exist else 0
+            if ts < mx:
+                self.note('系统时钟回拨（新 %d < 库中最大 %d），本次用 seq 兜底排序' % (ts, mx))
+                ts = mx + 1
+            self.data['clip'].insert(0, {
+                'id': uid(), 'text': txt, 'time': now_str(),
+                'created_at': ts, 'updated_at': ts, 'last_used_at': None,
+                'seq': self.next_seq(), 'source_app': src, 'source_title': title,
+                'content_type': detect_content_type(txt),
+                'content_size': byte_size(txt), 'copy_count': 1, 'fav': 0,
+                'sens': hits or None, 'meta': None, 'is_estimated': 0})
+        lim = int(self.st['max_items'])
+        if len(self.data['clip']) > lim:
+            self.data['clip'] = self.data['clip'][:lim]
+        self.save(True)
+        if self.tab == 'clip':
+            self.render()
 
     def track_foreground(self):
         try:
@@ -836,120 +2061,252 @@ class ClawBoard:
         self.root.after(300, self.track_foreground)
 
 
-# ---------------- 拆词窗口 ----------------
-class SplitDialog:
-    MODES = ['自动（换行/逗号/分号/顿号/空格）', '按换行', '按逗号', '按空格', '按分号', '自定义分隔符']
+class SettingsWindow:
+    HKS = [('Ctrl+Shift+V（默认）', 'ctrl+shift+v'), ('Alt+V', 'alt+v'),
+           ('Ctrl+Alt+V', 'ctrl+alt+v'), ('不启用', 'none')]
 
-    def __init__(self, app, text):
+    def __init__(self, app):
         self.app = app
-        self.src = text
+        st = app.st
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
-        dark_top(self.win, '拆词')
-        self.win.configure(bg=BG)
+        dark_top(self.win, '设置')
         self.win.grab_set()
+        body = tk.Frame(self.win, bg=T['bg'])
+        body.pack(fill='both', expand=True, padx=14, pady=10)
+        self.row_switch(body, '监听剪贴板', 'listen')
+        self.row_switch(body, '单击后自动粘贴到上一窗口', 'autopaste')
+        self.row_switch(body, '敏感内容打码显示', 'mask_sensitive')
+        self.row_switch(body, '敏感内容不入库', 'skip_sensitive')
+        self.row_switch(body, '列表中显示时间', 'show_time')
+        self.row_switch(body, '记录来源窗口标题（隐私）', 'record_title')
+        self.row_theme(body)
+        self.row_hotkey(body)
+        self.row_int(body, '历史最大条数（10-5000）', 'max_items')
+        self.row_autostart(body)
+        btns = tk.Frame(body, bg=T['bg'])
+        btns.pack(fill='x', pady=(6, 0))
+        b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
+                     padx=16, pady=5, cursor='hand2')
+        b.pack(side='right')
+        b.bind('<Button-1>', lambda e: (app.save(True), self.win.grab_release(),
+                                        self.win.destroy()))
+        self.win.bind('<Escape>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        center_on(self.win, app.root, 380, 430)
 
-        body = tk.Frame(self.win, bg=BG)
-        body.pack(fill='both', expand=True, padx=12, pady=8)
+    def row_switch(self, master, text, key):
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(side='left')
+        st = self.app.st
+        lb = tk.Label(r, text='', bg=T['card'], font=FONT_B, width=6, cursor='hand2')
+        lb.pack(side='right')
 
-        tk.Label(body, text='源文本', bg=BG, fg=FG2, font=FONT_SM, anchor='w').pack(fill='x')
-        self.txt = tk.Text(body, height=5, bg=CARD, fg=FG, insertbackground=FG, relief='flat',
-                           font=FONT, wrap='word', bd=0, highlightthickness=1,
-                           highlightbackground=LINE, highlightcolor=ACC)
-        self.txt.insert('1.0', text)
-        self.txt.pack(fill='x', pady=(2, 8))
+        def paint():
+            on = bool(st.get(key))
+            lb.configure(text='开' if on else '关',
+                         fg='#fff' if on else T['fg2'],
+                         bg=T['acc'] if on else T['card'])
 
-        row = tk.Frame(body, bg=BG)
-        row.pack(fill='x', pady=(0, 6))
-        tk.Label(row, text='分隔方式', bg=BG, fg=FG2, font=FONT_SM).pack(side='left')
-        self.mode = tk.StringVar(value=self.MODES[0])
-        mb = tk.Label(row, text='▾ 选择', bg=CARD, fg=FG, font=FONT_SM, padx=8, pady=3, cursor='hand2')
-        mb.pack(side='right')
-        mb.bind('<Button-1>', lambda e: self.mode_menu(mb))
+        def toggle(_=None):
+            st[key] = not st.get(key)
+            paint()
+            self.app.save(True)
+        lb.bind('<Button-1>', toggle)
+        paint()
 
-        self.custom = tk.Entry(body, bg=CARD, fg=FG, insertbackground=FG, relief='flat',
-                               font=FONT, bd=0, highlightthickness=1,
-                               highlightbackground=LINE, highlightcolor=ACC)
-        self.custom.insert(0, '|')
-        self.custom.pack(fill='x', pady=(0, 6))
+    def row_theme(self, master):
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text='主题', bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
+        for name, label in (('dark', '暗色'), ('light', '亮色')):
+            lb = tk.Label(r, text=label, bg=T['card'], fg=T['fg'], font=FONT,
+                          padx=8, pady=2, cursor='hand2')
+            lb.pack(side='right', padx=2)
+            lb.bind('<Button-1>', lambda e, n=name: self.set_theme(n))
 
-        self.prev = tk.Label(body, text='', bg=BG, fg=ACC, font=FONT_SM, anchor='w',
-                             wraplength=330, justify='left')
-        self.prev.pack(fill='x', pady=(0, 6))
+    def set_theme(self, name):
+        self.app.st['theme'] = name
+        self.app.save(True)
+        set_theme(name)
+        self.app.rebuild()
+        self.win.grab_release()
+        self.win.destroy()
 
-        btns = tk.Frame(body, bg=BG)
-        btns.pack(fill='x')
-        self.mk(btns, '拆成常用语', ACC, self.ok).pack(side='right', padx=(6, 0))
-        self.mk(btns, '预览', '#3a3f4d', self.do_preview).pack(side='right')
-        self.mk(btns, '取消', '#3a3f4d', self.cancel).pack(side='left')
-        self.win.bind('<Escape>', lambda e: self.cancel())
-        self.win.protocol('WM_DELETE_WINDOW', self.cancel)
-        self.do_preview()
-        center_on(self.win, self.app.root, 380, 360)
+    def row_hotkey(self, master):
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text='全局唤起热键', bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
+        cur = [l for l, v in self.HKS if v == self.app.st.get('hotkey')]
+        lb = tk.Label(r, text=cur[0] if cur else '未设置', bg=T['card'], fg=T['fg'],
+                      font=FONT_SM, padx=8, pady=2, cursor='hand2')
+        lb.pack(side='right')
+        lb.bind('<Button-1>', lambda e: self.hk_menu(lb))
 
-    def mk(self, master, text, color, cmd):
-        b = tk.Label(master, text=text, bg=color, fg='#fff', font=FONT_B, padx=12, pady=5, cursor='hand2')
-        b.bind('<Button-1>', lambda e: cmd())
-        return b
-
-    def mode_menu(self, anchor):
-        m = tk.Menu(self.win, tearoff=0, bg=PANEL, fg=FG, bd=0,
-                    activebackground=CARD_H, activeforeground=FG, font=FONT, relief='flat')
-        for x in self.MODES:
-            m.add_command(label=x, command=lambda x=x: (self.mode.set(x), self.do_preview()))
+    def hk_menu(self, anchor):
+        m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
+                    font=FONT, relief='flat')
+        for label, val in self.HKS:
+            m.add_command(label=label, command=lambda v=val: self.set_hk(v))
         m.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
 
-    def do_split(self):
-        raw = self.txt.get('1.0', 'end-1c')
-        m = self.mode.get()
-        if m == self.MODES[0]:
-            parts = re.split(r'[\r\n,;；，、\s]+', raw)
-        elif m == self.MODES[1]:
-            parts = re.split(r'[\r\n]+', raw)
-        elif m == self.MODES[2]:
-            parts = re.split(r'[,，]+', raw)
-        elif m == self.MODES[3]:
-            parts = re.split(r'[ \t]+', raw)
-        elif m == self.MODES[4]:
-            parts = re.split(r'[;；]+', raw)
-        else:
-            sep = self.custom.get()
-            parts = raw.split(sep) if sep else [raw]
-        return [p.strip() for p in parts if p.strip()]
-
-    def do_preview(self):
-        parts = self.do_split()
-        self.prev.configure(text='预览：共 %d 条 → %s' % (len(parts), ' | '.join(parts[:6]) + (' …' if len(parts) > 6 else '')))
-
-    def ok(self):
-        parts = self.do_split()
-        if not parts:
-            self.prev.configure(text='没拆出任何内容', fg=DANGER)
-            return
-        g = self.app.cur_group()
-        for p in parts:
-            g['items'].insert(0, {'id': uid(), 'name': preview(p, 12), 'text': p})
+    def set_hk(self, val):
+        self.app.st['hotkey'] = val
         self.app.save(True)
-        self.app.tab = 'phrase'
-        self.app.render()
-        self.app.tip('已拆出 %d 条常用语' % len(parts))
+        self.app.apply_hotkey()
+        self.app.rebuild()
+        self.app.tip('热键已更新' if val != 'none' else '热键已关闭')
         self.win.grab_release()
         self.win.destroy()
 
-    def cancel(self):
-        self.win.grab_release()
-        self.win.destroy()
+    def row_int(self, master, text, key):
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
+        v = tk.StringVar(value=str(self.app.st.get(key)))
+        e = tk.Entry(r, textvariable=v, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+                     relief='flat', font=FONT, bd=0, width=7, justify='right',
+                     highlightthickness=1, highlightbackground=T['line'],
+                     highlightcolor=T['acc'])
+        e.pack(side='right')
+
+        def commit(_=None):
+            try:
+                n = min(5000, max(10, int(v.get())))
+            except Exception:
+                n = int(DEFAULT_SETTINGS[key])
+            self.app.st[key] = n
+            v.set(str(n))
+            self.app.save(True)
+        e.bind('<Return>', commit)
+        e.bind('<FocusOut>', commit)
+
+    def row_autostart(self, master):
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=6)
+        tk.Label(r, text='开机自启：把快捷方式放进启动文件夹（不改注册表）',
+                 bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w').pack(fill='x')
+        b = tk.Label(r, text='打开启动文件夹', bg=T['card'], fg=T['fg'], font=FONT,
+                     padx=10, pady=4, cursor='hand2')
+        b.pack(anchor='w', pady=(4, 0))
+        b.bind('<Button-1>', lambda e: self.open_startup())
+
+    @staticmethod
+    def open_startup():
+        path = os.path.join(os.environ.get('APPDATA', ''),
+                            r'Microsoft\Windows\Start Menu\Programs\Startup')
+        try:
+            if os.path.isdir(path):
+                os.startfile(path)
+            else:
+                subprocess.Popen(['explorer', path])
+        except Exception:
+            pass
 
 
-# ---------------- 入口 ----------------
+# ---------------- 崩溃兜底 ----------------
+def install_excepthook():
+    def hook(etype, val, tb):
+        try:
+            with open(CRASH_LOG, 'a', encoding='utf-8') as f:
+                f.write('\n==== 未捕获异常 %s ====\n' % time.strftime('%F %T'))
+                f.write(''.join(traceback.format_exception(etype, val, tb)))
+        except Exception:
+            pass
+        sys.__excepthook__(etype, val, tb)
+    sys.excepthook = hook
+
+
+def tk_error(root):
+    def cb(exc, val, tb):
+        try:
+            with open(CRASH_LOG, 'a', encoding='utf-8') as f:
+                f.write('\n==== Tk 回调异常 %s ====\n' % time.strftime('%F %T'))
+                f.write(''.join(traceback.format_exception(exc, val, tb)))
+        except Exception:
+            pass
+    root.report_callback_exception = cb
+
+
+# ---------------- 9. 入口 ----------------
+MUTEX = [None]
+
+
+def single_instance():
+    """互斥体：二次启动聚焦已有实例后退出"""
+    MUTEX[0] = k32.CreateMutexW(None, True, 'ClawBoard_SingleInstance_Mutex')
+    if ctypes.get_last_error() == 183:      # ERROR_ALREADY_EXISTS
+        try:
+            hwnd = u32.FindWindowW(None, APP_NAME)
+            if hwnd:
+                u32.ShowWindow(hwnd, 9)     # SW_RESTORE
+                u32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+        return False
+    return True
+
+
+def bench():
+    """R4 性能实测：跑完输出真实数字后退出"""
+    root = tk.Tk()
+    root.withdraw()
+    app = ClawBoard(root)
+    root.update()
+    print('启动到可响应: %.0f ms' % ((time.time() - app.t0) * 1000))
+    print('初始常驻内存: %.1f MB' % mem_mb())
+
+    base = ''.join(random.choice(string.ascii_letters + '测试中文') for _ in range(60))
+    n = 5000
+    t0 = time.time()
+    for i in range(n):
+        app.data['clip'].append({'id': uid(), 'text': base + str(i), 'time': now_str()})
+    print('灌入 %d 条耗时: %.0f ms' % (n, (time.time() - t0) * 1000))
+
+    t0 = time.time()
+    app.render()
+    root.update()
+    print('%d 条首次渲染: %.0f ms' % (n, (time.time() - t0) * 1000))
+
+    t0 = time.time()
+    for _ in range(30):
+        app.vlist.yview_step(60)
+        app.vlist.update_view()
+        root.update()
+    print('滚动刷新 x30 平均: %.2f ms/次' % ((time.time() - t0) / 30 * 1000))
+
+    t0 = time.time()
+    for i in range(200):
+        app.search.set(str(random.randint(0, n)))
+        app.render()
+    print('搜索 200 次平均: %.2f ms/次' % ((time.time() - t0) / 200 * 1000))
+    app.search.set('')
+    app.render()
+
+    c0 = cpu_ms()
+    w0 = time.time()
+    time.sleep(3)
+    print('空闲 3 秒 CPU 占用: %.2f %%' % ((cpu_ms() - c0) / ((time.time() - w0) * 10.0)))
+    print('%d 条后内存: %.1f MB' % (n, mem_mb()))
+    print('虚拟列表实际 widget 数: %d / %d 条' % (len(app.vlist.pool), n))
+    app.quit_app()
+
+
 def main():
     try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
         pass
+    install_excepthook()
+    if '--bench' in sys.argv:
+        bench()
+        return
+    if not single_instance():
+        sys.exit(0)
     root = tk.Tk()
-    app = ClawBoard(root)
-    root.protocol('WM_DELETE_WINDOW', app.quit)
+    tk_error(root)
+    ClawBoard(root)
     root.mainloop()
 
 
