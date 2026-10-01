@@ -30,7 +30,7 @@ import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.3.2'
+APP_VER = '1.3.3'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -1069,6 +1069,112 @@ class Tip:
             self.win = None
 
 
+class ThinBar(tk.Canvas):
+    """自绘细滑动条：没有两端箭头，滑块颜色看得见、拖得动。
+
+    直接实现 tk 的 yscrollcommand 协议，谁都能接：
+        canvas.configure(yscrollcommand=bar.set)
+    """
+
+    MIN_THUMB = 28          # 滑块最小高度，再短就抓不住了
+
+    def __init__(self, master, on_move, width=8, on_wheel=None):
+        tk.Canvas.__init__(self, master, width=width, bg=T['bg'],
+                           highlightthickness=0, bd=0)
+        self.on_move = on_move
+        self.w = width
+        self._first = 0.0
+        self._last = 1.0
+        self._grab = None       # 按住滑块时，记录鼠标相对滑块顶端的偏移
+        self._mode = 0          # 0 静默 1 悬停 2 拖动
+        self.bind('<Configure>', lambda e: self._draw())
+        self.bind('<Button-1>', self._press)
+        self.bind('<B1-Motion>', self._move)
+        self.bind('<ButtonRelease-1>', self._release)
+        self.bind('<Enter>', lambda e: self._paint(1))
+        self.bind('<Leave>', lambda e: self._paint(0))
+        if on_wheel:
+            self.bind('<MouseWheel>', on_wheel)
+
+    # ---------- tk Scrollbar 协议 ----------
+    def set(self, first, last):
+        first, last = float(first), float(last)
+        if abs(first - self._first) < 1e-6 and abs(last - self._last) < 1e-6:
+            return
+        self._first, self._last = first, last
+        self._draw()
+
+    def get(self):
+        return (self._first, self._last)
+
+    # ---------- 内部 ----------
+    def _geom(self):
+        """返回 (滑块顶端 y, 滑块高度, 轨道高度)"""
+        h = max(1, self.winfo_height())
+        span = max(0.0, min(1.0, self._last - self._first))
+        if span >= 0.9999:
+            return 0, h, h
+        th = max(self.MIN_THUMB, int(h * span))
+        y = int(self._first * (h - th) / (1.0 - span))
+        return y, th, h
+
+    def _draw(self):
+        # 窗口销毁瞬间仍可能收到 <Configure>，此时 canvas 已不能画了，直接放弃
+        try:
+            self.delete('all')
+            h = max(1, self.winfo_height())
+            self.create_rectangle(0, 0, self.w, h, fill=T['panel'], outline='')
+            y, th, _ = self._geom()
+            if th >= h:             # 内容不满一屏：只留一条淡轨道，不影响观感
+                return
+            if self._mode == 2:
+                col = T['acc']      # 拖动中
+            elif self._mode == 1:
+                col = T['fg']       # 悬停
+            else:
+                col = T['fg2']      # 静默也看得见
+            self.create_rectangle(1, y + 1, self.w - 1, y + th - 1, fill=col, outline='')
+        except tk.TclError:
+            pass
+
+    def _paint(self, mode):
+        if self._grab is not None:
+            self._mode = 2
+            return
+        self._mode = mode
+        self._draw()
+
+    def _press(self, e):
+        y, th, h = self._geom()
+        if th >= h:
+            return
+        if y <= e.y <= y + th:
+            self._grab = e.y - y            # 抓住滑块本体
+        else:
+            self._grab = th // 2            # 点轨道：滑块中心跟过来
+            self._move(e)
+        self._mode = 2
+        self._draw()
+
+    def _move(self, e):
+        if self._grab is None:
+            return
+        _, th, h = self._geom()
+        span = max(0.0, min(1.0, self._last - self._first))
+        if span >= 0.9999 or h - th <= 0:
+            return
+        y = max(0, min(h - th, e.y - self._grab))
+        first = y * (1.0 - span) / (h - th)
+        self._first = first
+        self._last = first + span
+        self._draw()
+        self.on_move(first)
+
+    def _release(self, e):
+        self._grab = None
+        self._paint(1)
+
+
 class ScrollFrame(tk.Frame):
     """可滚动容器：内容放 .inner。滚轮 + 右侧细滚动条，内层宽度自动跟随。"""
 
@@ -1077,11 +1183,10 @@ class ScrollFrame(tk.Frame):
         tk.Frame.__init__(self, master, bg=bg)
         self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0, bd=0,
                                 yscrollincrement=24)
-        self.sb = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview,
-                               bg=T['panel'], troughcolor=bg, activebackground=T['acc'],
-                               relief='flat', bd=0, width=6)
+        self.sb = ThinBar(self, lambda f: self.canvas.yview_moveto(f),
+                          width=8, on_wheel=self._wheel)
+        self.sb.pack(side='right', fill='y')      # 先占位，再让 canvas 吃掉剩余宽度
         self.canvas.pack(side='left', fill='both', expand=True)
-        self.sb.pack(side='right', fill='y')
         self.canvas.configure(yscrollcommand=self.sb.set)
         self.inner = tk.Frame(self.canvas, bg=bg)
         self._wid = self.canvas.create_window((0, 0), window=self.inner, anchor='nw')
@@ -1091,10 +1196,16 @@ class ScrollFrame(tk.Frame):
         self.canvas.bind('<MouseWheel>', self._wheel)
 
     def _on_inner(self, _=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox('all') or (0, 0, 0, 0))
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox('all') or (0, 0, 0, 0))
+        except tk.TclError:
+            pass
 
     def _on_canvas(self, e):
-        self.canvas.itemconfigure(self._wid, width=e.width)
+        try:
+            self.canvas.itemconfigure(self._wid, width=e.width)
+        except tk.TclError:
+            pass
 
     def bind_wheel_tree(self, w=None):
         """内容建好后调用一次：给所有子控件补上滚轮绑定（含后加的）"""
@@ -1136,11 +1247,10 @@ class VirtualList(tk.Frame):
         self._maxc = 0
         self._maxc2 = 40
         self.canvas = tk.Canvas(self, bg=T['bg'], highlightthickness=0, bd=0)
-        self.canvas.pack(side='left', fill='both', expand=True)
-        self.sb = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview,
-                               bg=T['panel'], troughcolor=T['bg'],
-                               activebackground=T['acc'], relief='flat', bd=0, width=6)
+        self.sb = ThinBar(self, self._bar_move, width=8, on_wheel=self._wheel)
+        # 顺序很重要：canvas 的请求宽度是 378px，先 pack 它会把后 pack 的滑动条压成 1px
         self.sb.pack(side='right', fill='y')
+        self.canvas.pack(side='left', fill='both', expand=True)
         self.canvas.configure(yscrollcommand=self.sb.set)
         self._acc = 0.0        # 滚轮增量累积：触控板/高精度滚轮的 delta 常小于 120
         self.canvas.bind('<MouseWheel>', self._wheel)
@@ -1185,6 +1295,11 @@ class VirtualList(tk.Frame):
         self._acc -= steps
         self.scroll_rows(-steps * WHEEL_LINES)
         return 'break'
+
+    def _bar_move(self, first):
+        """拖滑动条：first 是滑块顶端对应的比例"""
+        self.canvas.yview_moveto(first)
+        self.update_view()
 
     def scroll_rows(self, rows):
         """按行滚动（负值向下），夹在首尾之间，滚到头不会滚出空白"""
@@ -2839,11 +2954,10 @@ class TransformWindow:
                              highlightthickness=1, highlightbackground=T['line'],
                              selectbackground=T['acc'], font=FONT_SM,
                              width=20, height=20)
-        sb = tk.Scrollbar(lf, command=self.lb.yview, bg=T['panel'],
-                          troughcolor=T['bg'], relief='flat', bd=0, width=6)
+        sb = ThinBar(lf, lambda f: self.lb.yview_moveto(f), width=8)
         self.lb.configure(yscrollcommand=sb.set)
         self.lb.pack(side='left', fill='y')
-        sb.pack(side='left', fill='y')
+        sb.pack(side='left', fill='y', padx=(2, 0))
         # Windows 的 Tk Listbox 自带没有任何滚轮绑定，必须自己接管
         self.lb.bind('<MouseWheel>', self.lb_wheel)
         for _, label, _ in tx().TRANSFORMS:
