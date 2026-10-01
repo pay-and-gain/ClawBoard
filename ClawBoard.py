@@ -95,6 +95,8 @@ WM_RBUTTONUP = 0x0205
 WM_DESTROY = 0x0002
 WM_APP_REG = WM_USER + 2      # 请求注册热键（必须在消息线程内执行）
 WM_APP_UNREG = WM_USER + 3
+NIF_INFO = 0x00000010
+NIIF_INFO = 0x00000001
 MOD_ALT, MOD_CONTROL, MOD_SHIFT = 0x0001, 0x0002, 0x0004
 VK_V = 0x56
 VK_CONTROL = 0x11
@@ -134,6 +136,12 @@ u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wint
 u32.PostMessageW.restype = wintypes.BOOL
 u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 u32.GetCursorPos.restype = wintypes.BOOL
+
+MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+                                     ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+u32.EnumDisplayMonitors.argtypes = [wintypes.HANDLE, ctypes.c_void_p,
+                                   MONITORENUMPROC, wintypes.LPARAM]
+u32.EnumDisplayMonitors.restype = wintypes.BOOL
 k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
 k32.CreateMutexW.restype = wintypes.HANDLE
 u32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
@@ -327,6 +335,35 @@ def mask_text(text, hits):
 SCHEMA_VERSION = 3
 
 
+def monitors():
+    """列出所有显示器的矩形（多显示器下 winfo_screenwidth 只给主屏，不够用）"""
+    out = []
+
+    @MONITORENUMPROC
+    def cb(hmon, hdc, lprc, lp):
+        r = lprc.contents
+        out.append((r.left, r.top, r.right, r.bottom))
+        return True
+    try:
+        u32.EnumDisplayMonitors(None, None, cb, 0)
+    except Exception:
+        pass
+    if not out:
+        out = [(0, 0, 1920, 1080)]
+    return out
+
+
+def visible_ratio(x, y, w, h):
+    """窗口与所有显示器的可见交集占自身面积的比例"""
+    best = 0.0
+    for (l, t, r, b) in monitors():
+        iw = min(x + w, r) - max(x, l)
+        ih = min(y + h, b) - max(y, t)
+        if iw > 0 and ih > 0:
+            best = max(best, (iw * ih) / float(w * h))
+    return best
+
+
 def now_ms():
     return int(time.time() * 1000)
 
@@ -409,7 +446,7 @@ def capture_source(self_hwnd, delay_retry=True):
         if hwnd and hwnd != self_hwnd:
             name = proc_name_of(hwnd)
             if name != 'unknown':
-                return name, (hwnd if delay_retry else None)
+                return name, hwnd
         if attempt == 0 and delay_retry:
             time.sleep(0.05)
     return 'unknown', None
@@ -699,6 +736,24 @@ class HiddenWindow(threading.Thread):
         except Exception:
             return False
 
+    def balloon(self, title, msg):
+        """气泡提示：隐藏到托盘时告诉用户去哪儿找回来"""
+        if not self.hwnd:
+            return False
+        try:
+            nid = NOTIFYICONDATA()
+            nid.cbSize = ctypes.sizeof(nid)
+            nid.hWnd = self.hwnd
+            nid.uID = 1
+            nid.uFlags = NIF_INFO
+            nid.szInfoTitle = (title or '')[:63]
+            nid.szInfo = (msg or '')[:255]
+            nid.dwInfoFlags = NIIF_INFO
+            nid.uTimeout = 6000
+            return bool(sh32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid)))
+        except Exception:
+            return False
+
     def tray_del(self):
         try:
             nid = NOTIFYICONDATA()
@@ -798,6 +853,14 @@ def center_on(win, parent, w, h):
     win.geometry('%dx%d+%d+%d' % (w, h, max(px + (pw - w) // 2, 0), max(py + (ph - h) // 2, 0)))
 
 
+def safe_release(win):
+    """关闭弹窗时释放（可能根本没 grab 过，不能让它抛异常打断流程）"""
+    try:
+        win.grab_release()
+    except Exception:
+        pass
+
+
 class Dialog:
     """非模态输入对话框：on_ok 回调，绝不阻塞主循环"""
 
@@ -808,7 +871,8 @@ class Dialog:
         self.win = tk.Toplevel(parent)
         self.win.transient(parent)
         dark_top(self.win, title)
-        self.win.grab_set()
+        self.win.attributes('-topmost', True)
+        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         body = tk.Frame(self.win, bg=T['bg'])
         body.pack(fill='both', expand=True, padx=12, pady=10)
         self.vars = {}
@@ -852,14 +916,14 @@ class Dialog:
         out = [w.get('1.0', 'end-1c') if w is not None else v.get()
                for v, w in self.vars.values()]
         self.result = out
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
         if self.on_ok:
             self.on_ok(out)
 
     def _cancel(self):
         self.result = None
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
 
     def show(self, w=380, h=None):
@@ -878,7 +942,8 @@ class SplitDialog:
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
         dark_top(self.win, '拆词')
-        self.win.grab_set()
+        self.win.attributes('-topmost', True)
+        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         body = tk.Frame(self.win, bg=T['bg'])
         body.pack(fill='both', expand=True, padx=12, pady=8)
         tk.Label(body, text='源文本', bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w').pack(fill='x')
@@ -957,11 +1022,11 @@ class SplitDialog:
         self.app.tab = 'phrase'
         self.app.render()
         self.app.tip('已拆出 %d 条常用语' % len(parts))
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
 
     def cancel(self):
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
 
 
@@ -1189,7 +1254,8 @@ class VirtualList(tk.Frame):
 DEFAULT_SETTINGS = dict(theme='dark', hotkey='ctrl+shift+v', max_items=500,
                         listen=True, autopaste=True, mask_sensitive=True,
                         skip_sensitive=False, show_time=False, record_title=False,
-                        group_by_time=False, edge_hide=False, edge_delay=8)
+                        group_by_time=False, edge_hide=False, edge_delay=8,
+                        close_action='hide')     # hide=隐藏到托盘 / quit=直接退出
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
 
@@ -1212,6 +1278,7 @@ class ClawBoard:
         self._paste_fail = False
         self._anchor_idx = None
         self.search_err = ''
+        self._told_tray = False
         self._edge_hidden = False
         self._edge_tick = 0
         self._edge_side = None
@@ -1237,10 +1304,12 @@ class ClawBoard:
         root.bind('<Control-Shift-Return>', lambda e: self.paste_plain_sel())
         root.bind('<Control-t>', lambda e: self.open_transform())
         root.bind('<Control-e>', lambda e: self.open_export())
+        root.bind('<Control-q>', lambda e: self.quit_app())
         root.protocol('WM_DELETE_WINDOW', self.hide)
 
         self.build_ui()
         self.apply_geometry()
+        self.save(True)      # 把修正后的位置立刻写回，避免下次启动又去纠正一遍
         self.setup_system()
         self.render()
         self.root.after(120, self.render)
@@ -1411,13 +1480,24 @@ class ClawBoard:
         table = {'ctrl+shift+v': (MOD_CONTROL | MOD_SHIFT, VK_V),
                  'alt+v': (MOD_ALT, VK_V),
                  'ctrl+alt+v': (MOD_CONTROL | MOD_ALT, VK_V)}
-        key = self.st.get('hotkey', 'ctrl+shift+v')
-        ok = self.hw.reg_hotkey(*table[key]) if key in table else False
-        self.hotkey_ok = ok
-        self.hotkey_fallback = (not ok and key != 'none')
-        if self.hotkey_fallback:
-            self.note('全局热键 %s 注册失败（被占用），降级为轮询检测' % key)
-            self.tip('热键被占用，已启用降级检测')
+        # 被占用就自动退到备用组合，而不是直接放弃（Ctrl+Shift+V 常被输入法/其他软件抢）
+        want = self.st.get('hotkey', 'ctrl+shift+v')
+        order = [want] + [k for k in table if k != want]
+        used = None
+        for key in order:
+            if key in table and self.hw.reg_hotkey(*table[key]):
+                used = key
+                break
+        self.hotkey_ok = bool(used)
+        self.hotkey_fallback = (not used)
+        if used and used != want:
+            self.st['hotkey'] = used
+            self.save(True)
+            self.note('热键 %s 被占用，自动改用 %s' % (want, used))
+            self.tip('热键被占用，已改用 %s' % used.upper())
+        elif not used:
+            self.note('所有候选热键均注册失败，降级为轮询检测')
+            self.tip('热键全被占用，已启用降级检测')
 
     def on_hotkey(self):
         self.root.after(0, self.toggle_show)
@@ -1429,27 +1509,35 @@ class ClawBoard:
             self._tray_menu = True
 
     def poll_bg(self):
-        """主线程统一消费后台线程产生的事件标志 + 热键降级轮询 + 记录前台窗口"""
+        """主线程统一消费后台事件 + 热键降级 + 靠边隐藏 + 前台窗口记录。
+
+        整个循环体包在 try 里：以前任何一处异常都会让这个 after 链断掉，
+        后果是面板点了没反应、粘贴后回不来、托盘菜单失效 —— 必须保证永续。
+        """
         try:
-            h = u32.GetForegroundWindow()
-            if h and h != self.root.winfo_id():
-                self.prev_hwnd = h
-        except Exception:
-            pass
-        if self._tray_menu:
-            self._tray_menu = False
-            self.tray_menu()
-        if self._need_show:
-            self._need_show = False
-            self.root.deiconify()
-            self.root.attributes('-topmost', True)
-            self.render()
-        if getattr(self, '_paste_fail', False):
-            self._paste_fail = False
-            self.tip('目标窗口拒绝焦点（可能是管理员权限），已复制，请手动 Ctrl+V')
-        if self.hotkey_fallback:
-            self._poll_hotkey()
-        self.edge_update()
+            try:
+                h = u32.GetForegroundWindow()
+                if h and h != self.root.winfo_id():
+                    self.prev_hwnd = h
+            except Exception:
+                pass
+            if self._tray_menu:
+                self._tray_menu = False
+                self.tray_menu()
+            if self._need_show:
+                self._need_show = False
+                self.root.deiconify()
+                self.root.attributes('-topmost', True)
+                if not self.ensure_onscreen():
+                    self.render()
+            if getattr(self, '_paste_fail', False):
+                self._paste_fail = False
+                self.tip('目标窗口拒绝焦点（可能是管理员权限），已复制，请手动 Ctrl+V')
+            if self.hotkey_fallback:
+                self._poll_hotkey()
+            self.edge_update()
+        except Exception as e:
+            self.note('poll_bg 异常已吞掉（循环继续）：%s' % e)
         self.root.after(120, self.poll_bg)
 
     def _poll_hotkey(self):
@@ -1569,20 +1657,53 @@ class ClawBoard:
 
     # ---------- 几何 ----------
     def apply_geometry(self):
+        """恢复位置。必须完整落在某一个显示器内：跨屏缝隙会让面板看起来开着却点不到"""
         g = self.data.get('geom')
-        if g and re.match(r'^\d+x\d+\+\d+\+\d+$', g):
-            try:
-                parts = g.split('+')
-                x, y = int(parts[1]), int(parts[2])
-                sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-                if -80 <= x <= sw and -80 <= y <= sh:
-                    self.root.geometry(g)
-                    return
-            except Exception:
-                pass
-        w, h = 340, 480
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        self.root.geometry('%dx%d+%d+%d' % (w, h, sw - w - 14, sh - h - 62))
+        if g:
+            m = re.match(r'^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$', g)
+            if m:
+                w, h, x, y = (int(v) for v in m.groups())
+                w, h, x, y = self.fit_geometry(w, h, x, y)
+                self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+                return
+        w, h, x, y = self.fit_geometry(340, 480, 10 ** 6, 10 ** 6)
+        self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+
+    def fit_geometry(self, w, h, x, y):
+        """保证窗口完整落在某个显示器内；做不到就放到主屏右下角并按需缩小"""
+        for (l, t, r, b) in monitors():
+            if x >= l and y >= t and x + w <= r and y + h <= b:
+                return w, h, x, y
+        l, t, r, b = self.primary_monitor()
+        w = min(w, max(260, r - l - 24))
+        h = min(h, max(200, b - t - 24))
+        return w, h, r - w - 14, b - h - 62
+
+    @staticmethod
+    def primary_monitor():
+        for m in monitors():
+            if m[0] <= 0 <= m[2] and m[1] <= 0 <= m[3]:
+                return m
+        return monitors()[0]
+
+    def clamp_to_screen(self):
+        """拖动时保证至少 80x40 露在屏幕内，防止拖出去找不回来"""
+        w, h = self.root.winfo_width(), self.root.winfo_height()
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+        best, bi = -1, 0
+        for i, (l, t, r, b) in enumerate(monitors()):
+            iw = min(x + w, r) - max(x, l)
+            ih = min(y + h, b) - max(y, t)
+            if iw > 0 and ih > 0 and iw * ih > best:
+                best, bi = iw * ih, i
+        l, t, r, b = monitors()[bi]
+        w = min(w, max(260, r - l - 24))
+        h = min(h, max(200, b - t - 24))
+        # 完整推进该显示器内部，绝不跨屏
+        nx = min(max(x, l), r - w)
+        ny = min(max(y, t), b - h)
+        if (nx, ny) != (x, y) or (w, h) != (self.root.winfo_width(), self.root.winfo_height()):
+            self.root.geometry('%dx%d+%d+%d' % (w, h, nx, ny))
 
     def start_move(self, e):
         self._mx, self._my = e.x_root, e.y_root
@@ -1590,6 +1711,7 @@ class ClawBoard:
     def do_move(self, e):
         self.root.geometry('+%d+%d' % (self.root.winfo_x() + e.x_root - self._mx,
                                        self.root.winfo_y() + e.y_root - self._my))
+        self.clamp_to_screen()
         self._mx, self._my = e.x_root, e.y_root
 
     def start_resize(self, e):
@@ -1686,10 +1808,43 @@ class ClawBoard:
             self.render()
 
     def hide(self):
-        """关闭按钮 / Esc = 隐藏到托盘，不是退出"""
+        """关闭按钮 / Esc：默认隐藏到托盘并气泡告知，也可在设置里改成直接退出"""
         self.save()
+        if self.st.get('close_action') == 'quit':
+            self.quit_app()
+            return
         self.root.withdraw()
         self.hidden = True
+        if not self._told_tray:
+            self._told_tray = True
+            self.hw.balloon('ClawBoard 还在后台运行',
+                            '面板已隐藏。点托盘图标或按 %s 叫回来；'
+                            '要彻底退出：右键托盘图标 → 退出'
+                            % (self.st.get('hotkey', 'ctrl+shift+v').upper()))
+
+    def reset_position(self):
+        """应急：把面板拉回主屏右下角（托盘菜单与热键唤起都会自动兜底）"""
+        w, h = 340, 480
+        _, _, r, b = self.primary_monitor()
+        self.root.geometry('%dx%d+%d+%d' % (w, h, r - w - 14, b - h - 62))
+        self.root.deiconify()
+        self.root.attributes('-topmost', True)
+        self.root.lift()
+        self.hidden = False
+        self._edge_hidden = False
+        self._edge_tick = 0
+        self.render()
+        self.tip('面板位置已重置')
+
+    def ensure_onscreen(self):
+        """窗口跑出屏幕时自动拉回，避免"点了没反应" """
+        m = re.match(r'^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$', self.root.geometry())
+        if m:
+            w, h, x, y = (int(v) for v in m.groups())
+            if visible_ratio(x, y, w, h) < 0.999:      # 跨屏/出屏都算不可见
+                self.reset_position()
+                return True
+        return False
 
     def toggle_show(self):
         if self.hidden:
@@ -1697,8 +1852,9 @@ class ClawBoard:
             self.root.deiconify()
             self.root.attributes('-topmost', True)
             self.root.lift()
-            self.focus_search()
-            self.render()
+            if not self.ensure_onscreen():
+                self.focus_search()
+                self.render()
         else:
             self.hide()
 
@@ -1979,7 +2135,16 @@ class ClawBoard:
             self.root.withdraw()
             self.root.update()
             threading.Thread(target=self._paste_worker, args=(hwnd,), daemon=True).start()
+            # 保险：万一后台线程没来得及恢复，1.5 秒后强制把面板叫回来
+            self.root.after(1500, self._ensure_visible)
         return True
+
+    def _ensure_visible(self):
+        if not self.hidden and self.root.state() == 'withdrawn':
+            self.root.deiconify()
+            self.root.attributes('-topmost', True)
+            if not self.ensure_onscreen():
+                self.render()
 
     def _paste_worker(self, hwnd):
         """返回是否真的把焦点抢回来了；UAC/管理员窗口会失败，需降级提示"""
@@ -2255,6 +2420,7 @@ class ClawBoard:
         m.add_command(label=('⏸ 暂停监听' if self.st['listen'] else '▶ 恢复监听'),
                       command=self.toggle_listen)
         m.add_command(label='⚙ 设置', command=self.open_settings)
+        m.add_command(label='⟲ 面板找不到了？重置位置', command=self.reset_position)
         m.add_command(label='ℹ 关于', command=self.about)
         m.add_separator()
         m.add_command(label='✕ 退出', command=self.quit_app)
@@ -2305,7 +2471,8 @@ class ClawBoard:
     def ingest(self, txt, hits=None):
         """入库：重复内容只刷新 updated_at / copy_count，created_at 永不改写"""
         ts = now_ms()
-        src, src_hwnd = capture_source(self.root.winfo_id())
+        # 不在这里做 50ms 延迟重试：那会卡住 UI 线程。抓不到就交给后台线程补抓。
+        src, src_hwnd = capture_source(self.root.winfo_id(), delay_retry=False)
         title = window_title_of(src_hwnd) if (src_hwnd and self.st['record_title']) else None
         dup = None
         for x in self.data['clip']:
@@ -2337,12 +2504,37 @@ class ClawBoard:
         if hits:
             rec['sens'] = hits
         self.data['clip'].insert(0, rec)
+        if src == 'unknown':
+            threading.Thread(target=self._late_source, args=(rec['id'],),
+                             daemon=True).start()
         lim = int(self.st['max_items'])
         if len(self.data['clip']) > lim:
             self.data['clip'] = self.data['clip'][:lim]
         self.save(True)
         if self.tab == 'clip':
             self.render()
+
+    def _late_source(self, rid):
+        """后台补抓来源：竞态下第一次可能抓到自己或抓空，50ms 后再试一次"""
+        time.sleep(0.05)
+        src, hwnd = capture_source(self.root.winfo_id(), delay_retry=False)
+        if src == 'unknown':
+            return
+        for x in self.data['clip']:
+            if x.get('id') == rid:
+                x['source_app'] = src
+                if self.st.get('record_title') and hwnd:
+                    t = window_title_of(hwnd)
+                    if t:
+                        x['source_title'] = t
+                break
+        else:
+            return
+        self.save(True)
+        try:
+            self.root.after(0, self.render)
+        except Exception:
+            pass
 
 
 class SettingsWindow:
@@ -2355,7 +2547,8 @@ class SettingsWindow:
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
         dark_top(self.win, '设置')
-        self.win.grab_set()
+        self.win.attributes('-topmost', True)
+        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         body = tk.Frame(self.win, bg=T['bg'])
         body.pack(fill='both', expand=True, padx=14, pady=10)
         self.row_switch(body, '监听剪贴板', 'listen')
@@ -2366,6 +2559,7 @@ class SettingsWindow:
         self.row_switch(body, '记录来源窗口标题（隐私）', 'record_title')
         self.row_switch(body, '靠边自动隐藏（贴屏幕边缘自动收起）', 'edge_hide')
         self.row_autostart_switch(body)
+        self.row_close_action(body)
         self.row_theme(body)
         self.row_hotkey(body)
         self.row_int(body, '历史最大条数（10-5000）', 'max_items')
@@ -2374,9 +2568,44 @@ class SettingsWindow:
         b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
                      padx=16, pady=5, cursor='hand2')
         b.pack(side='right')
-        b.bind('<Button-1>', lambda e: (app.save(True), self.win.grab_release(),
+        b.bind('<Button-1>', lambda e: (app.save(True), safe_release(self.win),
                                         self.win.destroy()))
-        self.win.bind('<Escape>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        q = tk.Label(btns, text='退出程序', bg=T['danger'], fg='#fff', font=FONT_B,
+                     padx=14, pady=5, cursor='hand2')
+        q.pack(side='left')
+        q.bind('<Button-1>', lambda e: (app.save(True), safe_release(self.win),
+                                        self.win.destroy(), app.quit_app()))
+        self.win.bind('<Escape>', lambda e: (safe_release(self.win), self.win.destroy()))
+
+    def row_close_action(self, master):
+        """点 ✕ 的行为：默认隐藏到托盘，也可改成直接退出"""
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text='点标题栏 ✕ 时', bg=T['bg'], fg=T['fg'], font=FONT,
+                 anchor='w').pack(side='left')
+        lb = tk.Label(r, text='', bg=T['card'], fg=T['fg'], font=FONT_SM,
+                      padx=8, pady=2, cursor='hand2')
+        lb.pack(side='right')
+
+        def paint():
+            v = self.app.st.get('close_action', 'hide')
+            lb.configure(text='隐藏到托盘' if v == 'hide' else '直接退出程序')
+
+        def setv(val):
+            self.app.st['close_action'] = val
+            self.app.save(True)
+            paint()
+            self.app.tip('✕ 现在会%s' % ('隐藏到托盘' if val == 'hide' else '直接退出'))
+
+        def menu(_=None):
+            m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                        activebackground=T['card_h'], activeforeground=T['fg'],
+                        font=FONT, relief='flat')
+            m.add_command(label='隐藏到托盘（继续后台监听）', command=lambda: setv('hide'))
+            m.add_command(label='直接退出程序', command=lambda: setv('quit'))
+            m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
+        lb.bind('<Button-1>', menu)
+        paint()
         center_on(self.win, app.root, 380, 430)
 
     def row_switch(self, master, text, key):
@@ -2415,7 +2644,7 @@ class SettingsWindow:
         self.app.save(True)
         set_theme(name)
         self.app.rebuild()
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
 
     def row_hotkey(self, master):
@@ -2442,7 +2671,7 @@ class SettingsWindow:
         self.app.apply_hotkey()
         self.app.rebuild()
         self.app.tip('热键已更新' if val != 'none' else '热键已关闭')
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
 
     def row_int(self, master, text, key):
@@ -2522,7 +2751,8 @@ class TransformWindow:
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
         dark_top(self.win, '文本变换')
-        self.win.grab_set()
+        self.win.attributes('-topmost', True)
+        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         mid = tk.Frame(self.win, bg=T['bg'])
         mid.pack(fill='both', expand=True, padx=10, pady=6)
 
@@ -2571,8 +2801,8 @@ class TransformWindow:
         b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
                      padx=14, pady=5, cursor='hand2')
         b.pack(side='right')
-        b.bind('<Button-1>', lambda e: (self.win.grab_release(), self.win.destroy()))
-        self.win.bind('<Escape>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        b.bind('<Button-1>', lambda e: (safe_release(self.win), self.win.destroy()))
+        self.win.bind('<Escape>', lambda e: (safe_release(self.win), self.win.destroy()))
         center_on(self.win, app.root, 760, 540)
 
     def run(self):
@@ -2659,7 +2889,8 @@ class ExportDialog:
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
         dark_top(self.win, '批量导出')
-        self.win.grab_set()
+        self.win.attributes('-topmost', True)
+        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         body = tk.Frame(self.win, bg=T['bg'])
         body.pack(fill='both', expand=True, padx=14, pady=10)
         tk.Label(body, text='共 %d 条待导出（多选优先，否则导出当前筛选结果）'
@@ -2699,7 +2930,7 @@ class ExportDialog:
         b2 = tk.Label(btns, text='取消', bg=T['card_h'], fg=T['fg'], font=FONT,
                       padx=14, pady=5, cursor='hand2')
         b2.pack(side='right', padx=(0, 6))
-        b2.bind('<Button-1>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        b2.bind('<Button-1>', lambda e: (safe_release(self.win), self.win.destroy()))
         center_on(self.win, app.root, 480, 340)
 
     def paint(self):
@@ -2755,7 +2986,7 @@ class ExportDialog:
             self.app.tip('导出失败：%s' % e)
             return
         self.app.tip('已导出 %d 条 → %s' % (len(raw), os.path.basename(path)))
-        self.win.grab_release()
+        safe_release(self.win)
         self.win.destroy()
 
 
