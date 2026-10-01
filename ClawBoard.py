@@ -65,6 +65,8 @@ FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
 ITEM_H = 52          # 虚拟列表固定行高
 WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
+NO_SAVE = False      # --bench 压测时置 True：压测实例绝不把任何东西写回存档
+                     # （曾经漏了这条，压测把「热键」也写进了存档）
 
 # ---------------- 1. 主题 ----------------
 DARK = dict(bg='#1e2027', panel='#252831', card='#2c303b', card_h='#39404f',
@@ -1839,6 +1841,8 @@ class ClawBoard:
 
     def save_now(self, d=None):
         """同步落盘（迁移后立即写回用）"""
+        if NO_SAVE:
+            return False
         d = d or self.data
         tmp = DATA_FILE + '.tmp'
         try:
@@ -1900,6 +1904,9 @@ class ClawBoard:
         return d
 
     def save(self, later=False):
+        if NO_SAVE:
+            return
+
         def do():
             self.data['geom'] = self.root.geometry()
             tmp = DATA_FILE + '.tmp'
@@ -3594,6 +3601,8 @@ def bench():
     """性能实测：跑完输出真实数字后退出（压测数据绝不落盘）"""
     import random
     import string
+    global NO_SAVE
+    NO_SAVE = True       # 必须在建实例之前：__init__ 里就会 save 一次（曾经漏了这条，热键被改掉）
     root = tk.Tk()
     app = ClawBoard(root)
     root.geometry('340x480+-2000+-2000')   # 移出屏幕但保持 mapped，保证布局真实

@@ -42,6 +42,12 @@
   **出处：PasteBar `settingsStore.ts:285` 的 `clipTextMinLength` / `clipTextMaxLength`**
 - 新增「清空历史时保留收藏项」开关，**出处：PasteBar `isKeepStarredOnClearEnabled`**
 
+### 顺带修掉一个自己埋的坑
+- **`--bench` 压测会写回存档**：压测实例在 `__init__` 里就会 `save()` 一次，于是把
+  「热键被占用 → 自动降级成 alt+v」这个**测试环境的偶然结果**写进了真实存档 ——
+  表现为「重启后 Ctrl+Shift+V 唤不出来」。现在压测全程 `NO_SAVE`，一个字都不落盘；
+  被改掉的热键已恢复
+
 ### 明确没抄的
 - CopyQ 的「超 1KB 正文外置成独立文件（SHA256 内容寻址）」——我们用 JSON + 原子替换，
   只有文本条目，收益不抵复杂度，先不做
