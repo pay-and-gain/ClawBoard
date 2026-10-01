@@ -37,6 +37,10 @@ DATA_FILE = os.path.join(BASE_DIR, 'ClawBoard数据.json')
 ICON_FILE = os.path.join(BASE_DIR, 'ClawBoard.ico')
 CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
 
+sys.path.insert(0, BASE_DIR)
+import query as Q          # F3 查询解析器（独立模块，可单测）
+import transform as TX     # F4 文本变换（独立模块，可单测）
+
 FONT = ('Microsoft YaHei UI', 9)
 FONT_B = ('Microsoft YaHei UI', 9, 'bold')
 FONT_SM = ('Microsoft YaHei UI', 8)
@@ -47,11 +51,11 @@ MAX_TEXT = 200000    # 单条文本入库上限（字符）
 
 # ---------------- 1. 主题 ----------------
 DARK = dict(bg='#1e2027', panel='#252831', card='#2c303b', card_h='#39404f',
-            card_s='#33465f', fg='#e6e8ee', fg2='#9aa0ad', acc='#4f8cff',
-            acc2='#2f6fe0', line='#333844', danger='#e05c5c')
+            card_s='#33465f', card_m='#3d4f6b', fg='#e6e8ee', fg2='#9aa0ad',
+            acc='#4f8cff', acc2='#2f6fe0', line='#333844', danger='#e05c5c')
 LIGHT = dict(bg='#f4f5f8', panel='#e9ebf0', card='#ffffff', card_h='#eef1f7',
-             card_s='#dbe7ff', fg='#1f2430', fg2='#6b7280', acc='#2563eb',
-             acc2='#1d4ed8', line='#d6dae3', danger='#c0392b')
+             card_s='#dbe7ff', card_m='#e3edff', fg='#1f2430', fg2='#6b7280',
+             acc='#2563eb', acc2='#1d4ed8', line='#d6dae3', danger='#c0392b')
 T = dict(DARK)
 
 
@@ -952,6 +956,7 @@ class VirtualList(tk.Frame):
         self.tip = Tip(self.winfo_toplevel())
         self.items = []
         self.sel = None
+        self.multi = set()
         self.kw = ''
         self.pool = {}
         self.wids = {}
@@ -1049,7 +1054,7 @@ class VirtualList(tk.Frame):
         f._l2 = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['fg2'], anchor='w')
         f._l2.place(x=8, y=28, relwidth=1, width=-16, height=16)
         for wg in (f, row, f._l1a, f._l1b, f._l1c, f._l2, f._badge):
-            wg.bind('<Button-1>', lambda e, ff=f: self.on_click(ff._idx))
+            wg.bind('<Button-1>', lambda e, ff=f: self.on_click(ff._idx, e))
             wg.bind('<Button-3>', lambda e, ff=f: self.on_menu(e, ff._idx))
             wg.bind('<Enter>', lambda e, ff=f: (self._hover(ff._idx, True),
                                                 self.on_hover(ff._idx, e.x_root, e.y_root)))
@@ -1076,7 +1081,12 @@ class VirtualList(tk.Frame):
 
     def _fill(self, f, i):
         it = self.items[i]
-        c = T['card_s'] if it.get('id') == self.sel else T['card']
+        if it.get('id') == self.sel:
+            c = T['card_s']
+        elif it.get('id') in self.multi:
+            c = T['card_m']
+        else:
+            c = T['card']
         self._paint(f, c)
         body = it.get('disp') or it.get('text', '')
         w = max(60, self.canvas.winfo_width())
@@ -1126,6 +1136,8 @@ class ClawBoard:
         self.hotkey_fallback = False
         self._hk_down = False
         self._paste_fail = False
+        self._anchor_idx = None
+        self.search_err = ''
         self.t0 = time.time()
 
         self.data = self.load_data()
@@ -1145,6 +1157,8 @@ class ClawBoard:
         root.bind('<Control-f>', lambda e: self.focus_search())
         root.bind('<Delete>', lambda e: self.del_sel())
         root.bind('<Control-Shift-Return>', lambda e: self.paste_plain_sel())
+        root.bind('<Control-t>', lambda e: self.open_transform())
+        root.bind('<Control-e>', lambda e: self.open_export())
         root.protocol('WM_DELETE_WINDOW', self.hide)
 
         self.build_ui()
@@ -1422,10 +1436,15 @@ class ClawBoard:
         self.search_entry.pack(side='left', padx=6, ipady=3, fill='x', expand=True)
         self.search_entry.bind('<KeyRelease>', lambda e: self.render())
         self.search_entry.bind('<Escape>', lambda e: self.hide())
+        self.search_entry.bind('<Return>', self.on_search_return)
+        self.search_entry.bind('<Button-3>', lambda e: self.search_menu(e))
+        self.search_entry.bind('<Control-a>', self.select_all_visible)
         for txt, tip, cmd in (('＋', '新增常用语', self.add_phrase),
                               ('拆', '拆词：把一段文字拆成多条常用语', self.split_words),
                               ('删', '删除选中项', self.del_sel),
                               ('清', '清空当前列表', self.clear_list),
+                              ('🔧', '文本变换（Ctrl+T）', self.open_transform),
+                              ('?', '搜索语法帮助', self.open_query_help),
                               ('⚙', '设置', self.open_settings)):
             self.mk_tool_btn(txt, tip, cmd)
 
@@ -1610,15 +1629,20 @@ class ClawBoard:
 
     # ---------- 渲染 ----------
     def visible_items(self):
-        q = self.search.get().strip().lower()
+        q = self.search.get().strip()
         out = []
         pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
         sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        self.search_err = ''
+        kw = ''
+        if q:
+            pool, cond = Q.match(q, pool)
+            if cond['errors']:
+                self.search_err = cond['errors'][0]
+            kw = cond['terms'][0] if cond['terms'] else ''
         for it in pool:
             text = it['text']
             name = it.get('name') or ''
-            if q and q not in text.lower() and q not in name.lower():
-                continue
             hits = it.get('sens') or []
             disp = text
             if hits and self.st['mask_sensitive'] and not it.get('mask_off'):
@@ -1645,7 +1669,7 @@ class ClawBoard:
                         'created_at': it.get('created_at'),
                         'est': it.get('is_estimated'),
                         'app': it.get('source_app') or 'unknown'})
-        return out, sel, q
+        return out, sel, kw
 
     def render(self):
         for t in (self.tab_clip, self.tab_phr):
@@ -1660,14 +1684,44 @@ class ClawBoard:
             if self.gbar.winfo_ismapped():
                 self.gbar.pack_forget()
         items, sel, kw = self.visible_items()
+        try:
+            self.search_entry.configure(
+                highlightbackground=T['danger'] if self.search_err else T['line'])
+        except Exception:
+            pass
+        if self.search_err:
+            self.tip('语法：' + self.search_err)
         self.vlist.set_data(items, sel, kw)
 
     # ---------- 交互 ----------
-    def on_click_item(self, i):
+    def on_click_item(self, i, e=None):
+        """Ctrl = 多选切换，Shift = 连选，都不触发粘贴；普通单击 = 选中并粘贴"""
         items = self.vlist.items
         if not (0 <= i < len(items)):
             return
         it = items[i]
+        if e is not None:
+            state = getattr(e, 'state', 0)
+            if state & 0x0004:                      # Ctrl
+                cid = it['id']
+                if cid in self.vlist.multi:
+                    self.vlist.multi.discard(cid)
+                else:
+                    self.vlist.multi.add(cid)
+                self.vlist.update_view()
+                self.tip('已选 %d 条' % len(self.vlist.multi))
+                return
+            if state & 0x0001:                      # Shift
+                anchor = self._anchor_idx if self._anchor_idx is not None else 0
+                a, b = min(anchor, i), max(anchor, i)
+                for k in range(a, b + 1):
+                    self.vlist.multi.add(items[k]['id'])
+                self.vlist.update_view()
+                self.tip('已选 %d 条' % len(self.vlist.multi))
+                return
+        self._anchor_idx = i
+        if not (getattr(e, 'state', 0) & 0x0004):
+            self.vlist.multi.clear()
         if self.tab == 'clip':
             self.sel_clip = it['id']
         else:
@@ -1696,9 +1750,14 @@ class ClawBoard:
             m.add_command(label='✎ 编辑内容', command=lambda: self.edit_phrase(it['id']))
             m.add_command(label='🏷 命名', command=lambda: self.rename_phrase(it['id']))
         m.add_command(label='拆 拆词', command=lambda: self.split_words(text))
+        m.add_command(label='🔧 文本变换', command=self.open_transform)
         m.add_command(label='★ 收藏' if not it.get('fav') else '☆ 取消收藏',
                       command=lambda: self.toggle_fav(it['id']))
         m.add_command(label='🕘 查看详情', command=lambda: self.show_detail(it))
+        m.add_command(label='↗ 选中这条用于导出',
+                      command=lambda: (self.vlist.multi.add(it['id']),
+                                       self.vlist.update_view(),
+                                       self.tip('已选 %d 条' % len(self.vlist.multi))))
         if it.get('sens'):
             m.add_command(label='👁 切换原文/打码', command=lambda: self.toggle_sens(it['id']))
         m.add_separator()
@@ -1940,6 +1999,17 @@ class ClawBoard:
                 return it
         return None
 
+    def find_raw_item(self, cid):
+        """按 id 找真实数据条目（跨剪贴板与所有常用语分组）"""
+        for x in self.data['clip']:
+            if x.get('id') == cid:
+                return x
+        for g in self.data['groups']:
+            for x in g.get('items', []):
+                if x.get('id') == cid:
+                    return x
+        return None
+
     def split_words(self, text=None):
         if text is None:
             sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
@@ -1950,6 +2020,74 @@ class ClawBoard:
     # ---------- 设置 ----------
     def open_settings(self):
         SettingsWindow(self)
+
+    # ---------- F3 搜索：历史 / 帮助 ----------
+    def on_search_return(self, e=None):
+        q = self.search.get().strip()
+        if q:
+            h = list(self.data.get('search_history') or [])
+            if q in h:
+                h.remove(q)
+            h.insert(0, q)
+            self.data['search_history'] = h[:10]
+            self.save(True)
+        self.enter_sel()
+        return 'break'
+
+    def search_menu(self, e):
+        m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
+                    font=FONT, relief='flat')
+        hist = list(self.data.get('search_history') or [])[:10]
+        if hist:
+            for q in hist:
+                m.add_command(label=q, command=lambda v=q: (self.search.set(v), self.render()))
+        else:
+            m.add_command(label='（暂无历史）', state='disabled')
+        m.add_separator()
+        m.add_command(label='导出当前结果…', command=self.open_export)
+        m.add_command(label='语法帮助', command=self.open_query_help)
+        m.add_command(label='清空搜索历史', command=self.clear_history)
+        m.tk_popup(e.x_root, e.y_root)
+
+    def clear_history(self):
+        self.data['search_history'] = []
+        self.search.set('')
+        self.save(True)
+        self.render()
+
+    def select_all_visible(self, e=None):
+        for it in self.vlist.items:
+            self.vlist.multi.add(it['id'])
+        self.vlist.update_view()
+        self.tip('已全选 %d 条' % len(self.vlist.multi))
+        return 'break'
+
+    def open_query_help(self):
+        body = '\n'.join('%-32s %s' % (a, b) for a, b in Q.SYNTAX_HELP)
+        Dialog(self.root, '搜索语法', [('', body, True)],
+               on_ok=lambda v: None, ok_text='知道了').show(540, 440)
+
+    # ---------- F4 变换 / F5 导出 ----------
+    def current_target_text(self):
+        items = self.vlist.items
+        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        for it in items:
+            if it['id'] == sel:
+                return it.get('text', ''), it
+        if items:
+            return items[0].get('text', ''), items[0]
+        return clip_read() or '', None
+
+    def open_transform(self):
+        text, it = self.current_target_text()
+        if not text:
+            self.tip('没有可变换的内容')
+            return
+        TransformWindow(self, text, it)
+
+    def open_export(self):
+        ExportDialog(self)
 
     def rebuild(self):
         self.root.configure(bg=T['bg'])
@@ -2203,6 +2341,252 @@ class SettingsWindow:
                 subprocess.Popen(['explorer', path])
         except Exception:
             pass
+
+
+class TransformWindow:
+    """F4：左侧选变换，右侧看结果，底部三个动作。>5MB 走异步，不卡 UI"""
+
+    def __init__(self, app, text, item=None):
+        self.app = app
+        self.item = item
+        self.win = tk.Toplevel(app.root)
+        self.win.transient(app.root)
+        dark_top(self.win, '文本变换')
+        self.win.grab_set()
+        mid = tk.Frame(self.win, bg=T['bg'])
+        mid.pack(fill='both', expand=True, padx=10, pady=6)
+
+        lf = tk.Frame(mid, bg=T['bg'])
+        lf.pack(side='left', fill='y')
+        self.lb = tk.Listbox(lf, bg=T['card'], fg=T['fg'], bd=0, relief='flat',
+                             highlightthickness=1, highlightbackground=T['line'],
+                             selectbackground=T['acc'], font=FONT_SM,
+                             width=20, height=20)
+        sb = tk.Scrollbar(lf, command=self.lb.yview, bg=T['panel'],
+                          troughcolor=T['bg'], relief='flat', bd=0, width=6)
+        self.lb.configure(yscrollcommand=sb.set)
+        self.lb.pack(side='left', fill='y')
+        sb.pack(side='left', fill='y')
+        for _, label, _ in TX.TRANSFORMS:
+            self.lb.insert('end', label)
+        self.lb.bind('<<ListboxSelect>>', lambda e: self.run())
+
+        rf = tk.Frame(mid, bg=T['bg'])
+        rf.pack(side='left', fill='both', expand=True, padx=(10, 0))
+        tk.Label(rf, text='原文', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                 anchor='w').pack(fill='x')
+        self.src = tk.Text(rf, height=9, bg=T['card'], fg=T['fg'],
+                           insertbackground=T['fg'], relief='flat', font=FONT_SM,
+                           wrap='word', bd=0, highlightthickness=1,
+                           highlightbackground=T['line'], highlightcolor=T['acc'])
+        self.src.insert('1.0', text[:200000])
+        self.src.pack(fill='both', expand=True)
+        tk.Label(rf, text='结果', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                 anchor='w').pack(fill='x')
+        self.out = tk.Text(rf, height=9, bg=T['card'], fg=T['fg'],
+                           insertbackground=T['fg'], relief='flat', font=FONT_SM,
+                           wrap='word', bd=0, highlightthickness=1,
+                           highlightbackground=T['line'], highlightcolor=T['acc'])
+        self.out.pack(fill='both', expand=True)
+
+        btns = tk.Frame(self.win, bg=T['bg'])
+        btns.pack(fill='x', padx=10, pady=(0, 10))
+        for label, cmd in (('复制到剪贴板', self.copy_out),
+                           ('存为新条目', self.save_new),
+                           ('覆盖原条目', self.overwrite)):
+            b = tk.Label(btns, text=label, bg=T['card'], fg=T['fg'], font=FONT,
+                         padx=10, pady=5, cursor='hand2')
+            b.pack(side='left', padx=3)
+            b.bind('<Button-1>', lambda e, c=cmd: c())
+        b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
+                     padx=14, pady=5, cursor='hand2')
+        b.pack(side='right')
+        b.bind('<Button-1>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        self.win.bind('<Escape>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        center_on(self.win, app.root, 760, 540)
+
+    def run(self):
+        sel = self.lb.curselection()
+        if not sel:
+            return
+        key = TX.TRANSFORMS[int(sel[0])][0]
+        src = self.src.get('1.0', 'end-1c')
+        if len(src.encode('utf-8')) > 5 * 1024 * 1024:
+            self.out.delete('1.0', 'end')
+            self.out.insert('1.0', '内容超过 5MB，后台处理中…')
+            threading.Thread(target=self._work, args=(key, src), daemon=True).start()
+        else:
+            self._work(key, src)
+
+    def _work(self, key, src):
+        try:
+            res, err = TX.apply(key, src), None
+        except Exception as e:
+            res, err = '', str(e)
+        try:
+            self.win.after(0, lambda: self._show(res, err))
+        except Exception:
+            pass
+
+    def _show(self, res, err):
+        self.out.delete('1.0', 'end')
+        if err:
+            self.out.configure(fg=T['danger'])
+            self.out.insert('1.0', '变换失败：' + err)
+        else:
+            self.out.configure(fg=T['fg'])
+            self.out.insert('1.0', res[:500000])
+
+    def _out_text(self):
+        t = self.out.get('1.0', 'end-1c')
+        if not t:
+            self.app.tip('先选一个变换')
+            return None
+        return t
+
+    def copy_out(self):
+        t = self._out_text()
+        if t is not None:
+            clip_write(t)
+            self.app.tip('结果已复制到剪贴板')
+
+    def save_new(self):
+        t = self._out_text()
+        if t is None:
+            return
+        self.app.tab = 'clip'
+        self.app.ingest(t)
+        self.app.tip('已存为新条目（原条目保留）')
+
+    def overwrite(self):
+        t = self._out_text()
+        if t is None:
+            return
+        raw = self.app.find_raw_item(self.item['id']) if self.item else None
+        if not raw:
+            self.app.tip('没有可覆盖的原条目，请用「存为新条目」')
+            return
+        raw['text'] = t
+        raw['content_size'] = byte_size(t)
+        raw['content_type'] = detect_content_type(t)
+        raw['updated_at'] = now_ms()      # created_at 原样保留
+        self.app.save(True)
+        self.app.render()
+        self.app.tip('已覆盖原条目（首次复制时间未改）')
+
+
+class ExportDialog:
+    """F5：把历史导出成 TXT / CSV / JSON / Markdown"""
+
+    def __init__(self, app):
+        self.app = app
+        ids = set(app.vlist.multi)
+        items = [x for x in app.vlist.items if x['id'] in ids] if ids else list(app.vlist.items)
+        self.items = items
+        if not items:
+            app.tip('没有可导出的内容')
+            return
+        self.win = tk.Toplevel(app.root)
+        self.win.transient(app.root)
+        dark_top(self.win, '批量导出')
+        self.win.grab_set()
+        body = tk.Frame(self.win, bg=T['bg'])
+        body.pack(fill='both', expand=True, padx=14, pady=10)
+        tk.Label(body, text='共 %d 条待导出（多选优先，否则导出当前筛选结果）'
+                 % len(items), bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(fill='x')
+        self.fmt = tk.StringVar(value='txt')
+        self.rows = []
+        for v, label in (('txt', 'TXT（序号/时间/来源/内容）'),
+                         ('csv', 'CSV（Excel 友好，带 BOM）'),
+                         ('json', 'JSON（完整字段，可再导入）'),
+                         ('md', 'Markdown（适合归档笔记）')):
+            r = tk.Frame(body, bg=T['bg'])
+            r.pack(fill='x', pady=2)
+            dot = tk.Label(r, text='○', bg=T['bg'], fg=T['fg2'], font=FONT, cursor='hand2')
+            dot.pack(side='left')
+            tk.Label(r, text=label, bg=T['bg'], fg=T['fg'], font=FONT_SM,
+                     cursor='hand2').pack(side='left')
+
+            def pick(_, v=v):
+                self.fmt.set(v)
+                self.paint()
+            for w in (dot, r):
+                w.bind('<Button-1>', pick)
+            r._dot = dot
+            r._v = v
+            self.rows.append(r)
+        self.paint()
+        sens = sum(1 for x in items if x.get('sens'))
+        if sens:
+            tk.Label(body, text='⚠ 其中 %d 条含敏感内容，导出为明文' % sens,
+                     bg=T['bg'], fg=T['danger'], font=FONT_SM, anchor='w').pack(fill='x', pady=4)
+        btns = tk.Frame(body, bg=T['bg'])
+        btns.pack(fill='x', pady=(8, 0))
+        b = tk.Label(btns, text='导出到本目录', bg=T['acc'], fg='#fff', font=FONT_B,
+                     padx=14, pady=5, cursor='hand2')
+        b.pack(side='right')
+        b.bind('<Button-1>', lambda e: self.do_export())
+        b2 = tk.Label(btns, text='取消', bg=T['card_h'], fg=T['fg'], font=FONT,
+                      padx=14, pady=5, cursor='hand2')
+        b2.pack(side='right', padx=(0, 6))
+        b2.bind('<Button-1>', lambda e: (self.win.grab_release(), self.win.destroy()))
+        center_on(self.win, app.root, 480, 340)
+
+    def paint(self):
+        cur = self.fmt.get()
+        for r in self.rows:
+            r._dot.configure(text='●' if r._v == cur else '○',
+                             fg=T['acc'] if r._v == cur else T['fg2'])
+
+    def do_export(self):
+        fmt = self.fmt.get()
+        stamp = time.strftime('%Y%m%d-%H%M%S')
+        path = os.path.join(BASE_DIR, '导出_%s.%s' % (stamp, fmt if fmt != 'md' else 'md'))
+        tmp = path + '.tmp'
+        raw = [self.app.find_raw_item(x['id']) for x in self.items]
+        raw = [x for x in raw if x]
+        try:
+            if fmt == 'txt':
+                lines = []
+                for i, it in enumerate(raw, 1):
+                    lines.append('[%d] %s | %s | %s\n%s\n' % (
+                        i, full_time(it.get('created_at')),
+                        it.get('source_app') or 'unknown',
+                        it.get('content_type') or 'text', it.get('text', '')))
+                data = '\n'.join(lines).encode('utf-8')
+            elif fmt == 'csv':
+                import csv
+                import io
+                buf = io.StringIO()
+                w = csv.writer(buf)
+                w.writerow(['时间(本地)', '来源应用', '类型', '大小(字节)', '内容'])
+                for it in raw:
+                    w.writerow([full_time(it.get('created_at')),
+                                it.get('source_app') or 'unknown',
+                                it.get('content_type') or 'text',
+                                it.get('content_size') or 0,
+                                it.get('text', '').replace('\n', '\\n')])
+                data = buf.getvalue().encode('utf-8-sig')     # BOM 防 Excel 中文乱码
+            elif fmt == 'json':
+                data = json.dumps({'version': SCHEMA_VERSION, 'items': raw},
+                                  ensure_ascii=False, indent=1).encode('utf-8')
+            else:
+                lines = ['# 剪贴板导出 %s\n' % time.strftime('%F %T')]
+                for it in raw:
+                    lines.append('## %s · %s\n\n```\n%s\n```\n' % (
+                        full_time(it.get('created_at')),
+                        it.get('source_app') or 'unknown', it.get('text', '')))
+                data = '\n'.join(lines).encode('utf-8')
+            with open(tmp, 'wb') as f:
+                f.write(data)
+            os.replace(tmp, path)          # 先写 tmp 再改名，不留半截文件
+        except Exception as e:
+            self.app.note('导出失败：%s' % e)
+            self.app.tip('导出失败：%s' % e)
+            return
+        self.app.tip('已导出 %d 条 → %s' % (len(raw), os.path.basename(path)))
+        self.win.grab_release()
+        self.win.destroy()
 
 
 # ---------------- 崩溃兜底 ----------------
