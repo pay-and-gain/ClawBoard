@@ -2331,6 +2331,8 @@ class ClawBoard:
             pass
 
     def quit_app(self):
+        # 记一条：事后才能区分「用户正常退出」和「进程被外部杀掉」（后者不会留下任何痕迹）
+        self.note('用户触发退出（托盘 / Ctrl+Q / 设置里的退出按钮）')
         try:
             self.hw.unreg_hotkey()
             self.hw.tray_del()
@@ -3672,7 +3674,9 @@ def main():
         sys.exit(0)
     root = tk.Tk()
     tk_error(root)
-    ClawBoard(root)
+    app = ClawBoard(root)
+    app.note('%s v%s 启动（热键 %s，pid %d）' % (APP_NAME, APP_VER, app.st['hotkey'],
+                                                os.getpid()))
     root.mainloop()
 
 
