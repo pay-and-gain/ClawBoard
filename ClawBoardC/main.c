@@ -397,7 +397,7 @@ static void save_data(void) {
         if (tl2 + tl + 1 > tc) { tc = (tl2 + tl + 1) * 2; tb = (char *)realloc(tb, tc); }
         memcpy(tb + tl2, line, tl); tl2 += tl;
         b = tb; cap = tc; len = tl2;
-        { const char *s = ",\"text\":\""; size_t sl = strlen(s);
+        { const char *s = "\"text\":\""; size_t sl = strlen(s);
           if (len + sl + 1 > cap) { cap = (len + sl + 1) * 2; b = (char *)realloc(b, cap); }
           memcpy(b + len, s, sl); len += sl; }
         json_esc(it->text, &b, &cap, &len);
@@ -663,38 +663,924 @@ static void ingest(const wchar_t *text) {
 /* ==========================================================================
  * 6. 视图过滤（搜索）
  * ========================================================================== */
+/* ---------- 高级搜索语法（time: / app: / type: / size: / is: / -排除） ---------- */
+#define MAXQ 8
+
+typedef struct {
+    wchar_t terms[MAXQ][128]; int nterms;
+    wchar_t nots[MAXQ][128];  int nnots;
+    wchar_t apps[MAXQ][128];  int napps;
+    wchar_t notapps[MAXQ][128]; int nnotapps;
+    int     types[MAXQ];      int ntypes;
+    int     has_time; long long t_lo, t_hi; int t_neg;
+    int     has_size; long long sz; int sz_op; int sz_neg;   /* op: 0 <, 1 >, 2 = */
+    int     is_fav, is_sens, is_est, is_url;
+    int     bad;                                            /* 语法是否有错 */
+} Query;
+
+static void wcslwr_in(wchar_t *s) {
+    for (; *s; s++)
+        if (*s >= L'A' && *s <= L'Z') *s = *s - L'A' + L'a';
+}
+
+/* 解析 YYYY-MM-DD 到毫秒区间 [当天 00:00, 次日 00:00) */
+static int parse_date(const wchar_t *s, long long *lo, long long *hi) {
+    SYSTEMTIME st; FILETIME ft; ULARGE_INTEGER ui;
+    int y = 0, m = 0, d = 0;
+    if (swscanf_s(s, L"%d-%d-%d", &y, &m, &d) != 3) return 0;
+    if (y < 1970 || m < 1 || m > 12 || d < 1 || d > 31) return 0;
+    memset(&st, 0, sizeof(st));
+    st.wYear = (WORD)y; st.wMonth = (WORD)m; st.wDay = (WORD)d;
+    SystemTimeToFileTime(&st, &ft);
+    ui.LowPart = ft.dwLowDateTime; ui.HighPart = ft.dwHighDateTime;
+    *lo = (long long)(ui.QuadPart / 10000LL) - 11644473600000LL;
+    *hi = *lo + 86400000LL;
+    return 1;
+}
+
+/* 相对时间：>1h / <30m，单位 s/m/h/d/w */
+static int parse_rel(const wchar_t *v, long long *lo, long long *hi) {
+    wchar_t op = v[0];
+    long long n = 0, unit = 1;
+    const wchar_t *p = v + 1;
+    long long now = now_ms();
+    if (op != L'>' && op != L'<') return 0;
+    while (*p >= L'0' && *p <= L'9') { n = n * 10 + (*p - L'0'); p++; }
+    if (!n) return 0;
+    switch (*p) {
+    case L's': unit = 1; break;
+    case L'm': unit = 60; break;
+    case L'h': unit = 3600; break;
+    case L'd': unit = 86400; break;
+    case L'w': unit = 604800; break;
+    default: return 0;
+    }
+    n *= unit * 1000;
+    if (op == L'>') { *lo = 0; *hi = now - n; }        /* 早于 N 之前 */
+    else { *lo = now - n; *hi = now + 1000; }          /* N 之内 */
+    return 1;
+}
+
+static void parse_query(const wchar_t *in, Query *q) {
+    const wchar_t *p = in;
+    wchar_t tok[256];
+    memset(q, 0, sizeof(*q));
+    while (*p) {
+        int n = 0, neg = 0;
+        while (*p == L' ') p++;
+        if (!*p) break;
+        while (*p && *p != L' ' && n < 250) tok[n++] = *p++;
+        tok[n] = 0;
+        if (n == 0) continue;
+        if (tok[0] == L'-') { neg = 1; memmove(tok, tok + 1, sizeof(wchar_t) * n); }
+
+        if (!wcsncmp(tok, L"time:", 5)) {
+            const wchar_t *v = tok + 5;
+            const wchar_t *dots = wcschr(v, L'.');
+            if (dots && !wcsncmp(dots, L"..", 2)) {
+                wchar_t a[64], b[64]; long long l1, h1, l2, h2;
+                const wchar_t *sep = wcsstr(v, L"..");
+                int la = (int)(sep - v);
+                if (la >= 64) la = 63;
+                memcpy(a, v, sizeof(wchar_t) * la); a[la] = 0;
+                wcsncpy_s(b, 64, sep + 2, _TRUNCATE);
+                if (parse_date(a, &l1, &h1) && parse_date(b, &l2, &h2)) {
+                    q->has_time = 1; q->t_lo = l1 < l2 ? l1 : l2; q->t_hi = h1 > h2 ? h1 : h2;
+                } else q->bad = 1;
+            } else if (!parse_rel(v, &q->t_lo, &q->t_hi) && !parse_date(v, &q->t_lo, &q->t_hi)) {
+                q->bad = 1;
+            } else q->has_time = 1;
+            q->t_neg = neg;
+        } else if (!wcsncmp(tok, L"app:", 4)) {
+            if (neg) { if (q->nnotapps < MAXQ) { wcsncpy_s(q->notapps[q->nnotapps], 128, tok + 4, _TRUNCATE);
+                       wcslwr_in(q->notapps[q->nnotapps]); q->nnotapps++; } }
+            else { if (q->napps < MAXQ) { wcsncpy_s(q->apps[q->napps], 128, tok + 4, _TRUNCATE);
+                   wcslwr_in(q->apps[q->napps]); q->napps++; } }
+        } else if (!wcsncmp(tok, L"type:", 5)) {
+            const wchar_t *v = tok + 5; int t = 0;
+            if (!wcscmp(v, L"url")) t = 1;
+            else if (!wcscmp(v, L"json")) t = 2;
+            else if (!wcscmp(v, L"multiline")) t = 3;
+            else if (!wcscmp(v, L"text")) t = 0;
+            else { q->bad = 1; continue; }
+            if (q->ntypes < MAXQ) q->types[q->ntypes++] = t;
+        } else if (!wcsncmp(tok, L"size:", 5)) {
+            const wchar_t *v = tok + 5; long long n2 = 0; long long mult = 1;
+            int op = 2;
+            if (*v == L'>') { op = 1; v++; }
+            else if (*v == L'<') { op = 0; v++; }
+            while (*v >= L'0' && *v <= L'9') { n2 = n2 * 10 + (*v - L'0'); v++; }
+            if (!wcscmp(v, L"kb") || !wcscmp(v, L"k")) mult = 1024;
+            else if (!wcscmp(v, L"mb") || !wcscmp(v, L"m")) mult = 1048576;
+            else if (!wcscmp(v, L"gb") || !wcscmp(v, L"g")) mult = 1073741824;
+            else if (*v && wcscmp(v, L"b")) { q->bad = 1; continue; }
+            q->has_size = 1; q->sz = n2 * mult; q->sz_op = op; q->sz_neg = neg;
+        } else if (!wcsncmp(tok, L"is:", 3)) {
+            const wchar_t *v = tok + 3;
+            if (!wcscmp(v, L"fav")) q->is_fav = 1;
+            else if (!wcscmp(v, L"sens")) q->is_sens = 1;
+            else if (!wcscmp(v, L"est")) q->is_est = 1;
+            else if (!wcscmp(v, L"url")) q->is_url = 1;
+            else q->bad = 1;
+        } else {
+            if (neg) { if (q->nnots < MAXQ) { wcsncpy_s(q->nots[q->nnots], 128, tok, _TRUNCATE);
+                       wcslwr_in(q->nots[q->nnots]); q->nnots++; } }
+            else { if (q->nterms < MAXQ) { wcsncpy_s(q->terms[q->nterms], 128, tok, _TRUNCATE);
+                   wcslwr_in(q->terms[q->nterms]); q->nterms++; } }
+        }
+    }
+}
+
+static int wcs_contains_i(const wchar_t *hay, const wchar_t *needle) {
+    /* 大小写不敏感子串匹配 */
+    size_t hl = wcslen(hay), nl = wcslen(needle), i, k;
+    if (!nl) return 1;
+    for (i = 0; i + nl <= hl; i++) {
+        for (k = 0; k < nl; k++) {
+            wchar_t a = hay[i + k], b = needle[k];
+            if (a >= L'A' && a <= L'Z') a = a - L'A' + L'a';
+            if (a != b) break;
+        }
+        if (k == nl) return 1;
+    }
+    return 0;
+}
+
+static int match_query(const Query *q, const Item *it) {
+    int i;
+    wchar_t hay[4096], one[4096];
+    oneline(it->text, one, 4096);
+    swprintf_s(hay, 4096, L"%s %s", one, it->name ? it->name : L"");
+    wcslwr_in(hay);
+    for (i = 0; i < q->nterms; i++)
+        if (!wcsstr(hay, q->terms[i])) return 0;
+    for (i = 0; i < q->nnots; i++)
+        if (wcsstr(hay, q->nots[i])) return 0;
+    if (q->napps || q->nnotapps) {
+        wchar_t app[128];
+        wcsncpy_s(app, 128, it->app ? it->app : L"unknown", _TRUNCATE);
+        wcslwr_in(app);
+        for (i = 0; i < q->napps; i++)
+            if (!wcsstr(app, q->apps[i])) return 0;
+        for (i = 0; i < q->nnotapps; i++)
+            if (wcsstr(app, q->notapps[i])) return 0;
+    }
+    if (q->ntypes) {
+        int hit = 0;
+        for (i = 0; i < q->ntypes; i++) if (q->types[i] == it->ctype) { hit = 1; break; }
+        if (!hit) return 0;
+    }
+    if (q->has_size) {
+        long long s = (long long)it->size;
+        int hit = (q->sz_op == 1) ? (s > q->sz) : ((q->sz_op == 0) ? (s < q->sz) : (s == q->sz));
+        if (q->sz_neg && hit) return 0;
+        if (!q->sz_neg && !hit) return 0;
+    }
+    if (q->has_time) {
+        int hit = (it->created_at >= q->t_lo && it->created_at < q->t_hi);
+        if (q->t_neg && hit) return 0;
+        if (!q->t_neg && !hit) return 0;
+    }
+    if (q->is_fav && !it->fav) return 0;
+    if (q->is_sens && !it->sens) return 0;
+    if (q->is_est && !it->is_est) return 0;
+    if (q->is_url && it->ctype != 1) return 0;
+    return 1;
+}
+
+static Query g_q;
+
 static void rebuild_view(void) {
     ItemArray *pool = cur_pool();
     int i;
     free(g.view);
     g.view = (int *)malloc(sizeof(int) * (pool->n + 1));
     g.nview = 0;
+    parse_query(g.search, &g_q);
     for (i = 0; i < pool->n; i++) {
         Item *it = &pool->v[i];
-        if (g.search[0]) {
-            wchar_t hay[4096];
-            wchar_t one[4096];
-            oneline(it->text, one, 4096);
-            swprintf_s(hay, 4096, L"%s %s", one, it->name ? it->name : L"");
-            { /* 简单大小写不敏感包含匹配 */
-                int j, k, found = 0;
-                size_t hl = wcslen(hay), sl = wcslen(g.search);
-                for (j = 0; (size_t)j + sl <= hl; j++) {
-                    for (k = 0; (size_t)k < sl; k++) {
-                        wchar_t a = hay[j + k], b = g.search[k];
-                        if (a >= L'A' && a <= L'Z') a = a - L'A' + L'a';
-                        if (b >= L'A' && b <= L'Z') b = b - L'A' + L'a';
-                        if (a != b) break;
-                    }
-                    if ((size_t)k == sl) { found = 1; break; }
-                }
-                if (!found) continue;
-            }
-        }
+        if (g.search[0] && !match_query(&g_q, it)) continue;
         g.view[g.nview++] = i;
     }
     if (g.sel >= g.nview) g.sel = g.nview - 1;
     if (g.sel < 0) g.sel = 0;
+}
+
+/* ==========================================================================
+ * 6b. 文本变换（纯函数，与 Python 版一一对应）
+ * ========================================================================== */
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
+
+static wchar_t *tf_deformat(const wchar_t *s) {
+    /* 去 HTML 标签并解码常用实体，<br>/<p>/<li> 变成换行 */
+    size_t n = wcslen(s), i, j = 0;
+    wchar_t *out = (wchar_t *)malloc(sizeof(wchar_t) * (n * 2 + 4));
+    if (!out) return NULL;
+    for (i = 0; i < n;) {
+        if (!wcsncmp(s + i, L"<br", 3) || !wcsncmp(s + i, L"<BR", 3)) {
+            out[j++] = L'\n';
+            while (i < n && s[i] != L'>') i++;
+            if (i < n) i++;
+            continue;
+        }
+        if (!wcsncmp(s + i, L"</p>", 4) || !wcsncmp(s + i, L"</P>", 4) ||
+            !wcsncmp(s + i, L"</li>", 5) || !wcsncmp(s + i, L"</div>", 6) ||
+            !wcsncmp(s + i, L"</tr>", 5)) {
+            out[j++] = L'\n';
+            while (i < n && s[i] != L'>') i++;
+            if (i < n) i++;
+            continue;
+        }
+        if (s[i] == L'<') {
+            while (i < n && s[i] != L'>') i++;
+            if (i < n) i++;
+            continue;
+        }
+        if (!wcsncmp(s + i, L"&nbsp;", 6)) { out[j++] = L' '; i += 6; continue; }
+        if (!wcsncmp(s + i, L"&amp;", 5))  { out[j++] = L'&'; i += 5; continue; }
+        if (!wcsncmp(s + i, L"&lt;", 4))   { out[j++] = L'<'; i += 4; continue; }
+        if (!wcsncmp(s + i, L"&gt;", 4))   { out[j++] = L'>'; i += 4; continue; }
+        if (!wcsncmp(s + i, L"&quot;", 6)) { out[j++] = L'"'; i += 6; continue; }
+        out[j++] = s[i++];
+    }
+    out[j] = 0;
+    return out;
+}
+
+static wchar_t *tf_drop_blank(const wchar_t *s) {
+    /* 逐行判断：整行只有空白就整行丢掉（连行内的空格一起丢） */
+    size_t n = wcslen(s), pos = 0, i, j = 0;
+    wchar_t *out = (wchar_t *)malloc(sizeof(wchar_t) * (n + 2));
+    if (!out) return NULL;
+    for (i = 0; i <= n; i++) {
+        if (i < n && s[i] != L'\n') continue;
+        {
+            size_t k = pos, len = i - pos;
+            int blank = 1;
+            while (k < i) {
+                if (s[k] != L' ' && s[k] != L'\t' && s[k] != L'\r') { blank = 0; break; }
+                k++;
+            }
+            if (!blank) {
+                if (j > 0) out[j++] = L'\n';
+                memcpy(out + j, s + pos, sizeof(wchar_t) * len);
+                j += len;
+            }
+            pos = i + 1;
+        }
+    }
+    out[j] = 0;
+    return out;
+}
+
+static wchar_t *tf_trim_lines(const wchar_t *s) {
+    size_t n = wcslen(s);
+    wchar_t *out = (wchar_t *)malloc(sizeof(wchar_t) * (n + 2));
+    size_t i = 0, j = 0;
+    if (!out) return NULL;
+    while (i < n) {
+        size_t start = i;
+        while (i < n && s[i] != L'\n') i++;
+        { size_t a = start, b = i;
+          while (a < b && (s[a] == L' ' || s[a] == L'\t' || s[a] == L'\r')) a++;
+          while (b > a && (s[b - 1] == L' ' || s[b - 1] == L'\t' || s[b - 1] == L'\r')) b--;
+          memcpy(out + j, s + a, sizeof(wchar_t) * (b - a)); j += b - a; }
+        if (i < n) { out[j++] = L'\n'; i++; }
+    }
+    out[j] = 0;
+    return out;
+}
+
+static wchar_t *tf_half(const wchar_t *s) {
+    size_t n = wcslen(s), i;
+    wchar_t *out = wcsdup2(s);
+    if (!out) return NULL;
+    for (i = 0; i < n; i++) {
+        wchar_t c = out[i];
+        if (c == 0x3000) out[i] = L' ';
+        else if (c >= 0xFF01 && c <= 0xFF5E) out[i] = (wchar_t)(c - 0xFEE0);
+    }
+    return out;
+}
+
+static wchar_t *tf_full(const wchar_t *s) {
+    size_t n = wcslen(s), i;
+    wchar_t *out = wcsdup2(s);
+    if (!out) return NULL;
+    for (i = 0; i < n; i++) {
+        wchar_t c = out[i];
+        if (c == L' ') out[i] = (wchar_t)0x3000;
+        else if (c >= 0x21 && c <= 0x7E) out[i] = (wchar_t)(c + 0xFEE0);
+    }
+    return out;
+}
+
+static wchar_t *tf_upper(const wchar_t *s) {
+    wchar_t *out = wcsdup2(s);
+    if (out) CharUpperW(out);
+    return out;
+}
+
+static wchar_t *tf_lower(const wchar_t *s) {
+    wchar_t *out = wcsdup2(s);
+    if (out) CharLowerW(out);
+    return out;
+}
+
+static wchar_t *tf_capital(const wchar_t *s) {
+    wchar_t *out = wcsdup2(s);
+    size_t i;
+    int newword = 1;
+    if (!out) return NULL;
+    CharLowerW(out);
+    for (i = 0; out[i]; i++) {
+        if (out[i] == L' ') { newword = 1; continue; }
+        if (newword && out[i] >= L'a' && out[i] <= L'z') { out[i] = (wchar_t)(out[i] - 32); newword = 0; }
+        else newword = 0;
+    }
+    return out;
+}
+
+static const wchar_t B64[] = L"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static wchar_t *tf_b64enc(const wchar_t *s) {
+    char *u = u16(s);
+    size_t len = strlen(u), i, j = 0;
+    wchar_t *out;
+    if (!u) return NULL;
+    out = (wchar_t *)malloc(sizeof(wchar_t) * (len * 2 + 8));
+    if (!out) { free(u); return NULL; }
+    for (i = 0; i < len; i += 3) {
+        unsigned char a = (unsigned char)u[i];
+        unsigned char b = (i + 1 < len) ? (unsigned char)u[i + 1] : 0;
+        unsigned char c = (i + 2 < len) ? (unsigned char)u[i + 2] : 0;
+        out[j++] = B64[a >> 2];
+        out[j++] = B64[((a & 3) << 4) | (b >> 4)];
+        out[j++] = (i + 1 < len) ? B64[((b & 15) << 2) | (c >> 6)] : L'=';
+        out[j++] = (i + 2 < len) ? B64[c & 63] : L'=';
+    }
+    out[j] = 0;
+    free(u);
+    return out;
+}
+
+static int b64val(wchar_t c) {
+    const wchar_t *p = wcschr(B64, c);
+    return p ? (int)(p - B64) : -1;
+}
+
+static wchar_t *tf_b64dec(const wchar_t *s) {
+    size_t n = wcslen(s), i, len = 0;
+    char *buf, *u;
+    wchar_t *out;
+    buf = (char *)malloc(n + 4);
+    if (!buf) return NULL;
+    for (i = 0; i + 3 < n + 1 && s[i]; i += 4) {
+        int v1 = b64val(s[i]), v2 = b64val(s[i + 1]);
+        int v3 = (s[i + 2] && s[i + 2] != L'=') ? b64val(s[i + 2]) : -1;
+        int v4 = (s[i + 3] && s[i + 3] != L'=') ? b64val(s[i + 3]) : -1;
+        if (v1 < 0 || v2 < 0) break;
+        buf[len++] = (char)((v1 << 2) | (v2 >> 4));
+        if (v3 >= 0) buf[len++] = (char)(((v2 & 15) << 4) | (v3 >> 2));
+        if (v4 >= 0) buf[len++] = (char)(((v3 & 3) << 6) | v4);
+    }
+    buf[len] = 0;
+    u = buf;
+    out = u8(u);
+    free(buf);
+    return out;
+}
+
+static wchar_t *tf_urlenc(const wchar_t *s) {
+    char *u = u16(s);
+    size_t len, i, j = 0;
+    wchar_t *out;
+    if (!u) return NULL;
+    len = strlen(u);
+    out = (wchar_t *)malloc(sizeof(wchar_t) * (len * 3 + 4));
+    if (!out) { free(u); return NULL; }
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)u[i];
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            out[j++] = (wchar_t)c;
+        } else {
+            swprintf_s(out + j, 4, L"%%%02X", c);
+            j += 3;
+        }
+    }
+    out[j] = 0;
+    free(u);
+    return out;
+}
+
+static wchar_t *tf_urldec(const wchar_t *s) {
+    size_t n = wcslen(s), i, len = 0;
+    char *buf = (char *)malloc(n + 4);
+    wchar_t *out;
+    if (!buf) return NULL;
+    for (i = 0; i < n; i++) {
+        if (s[i] == L'%' && i + 2 < n) {
+            int hi = 0, lo = 0, k;
+            for (k = 0; k < 2; k++) {
+                wchar_t h = s[i + 1 + k];
+                int d;
+                if (h >= L'0' && h <= L'9') d = h - L'0';
+                else if (h >= L'a' && h <= L'f') d = h - L'a' + 10;
+                else if (h >= L'A' && h <= L'F') d = h - L'A' + 10;
+                else { d = 0; }
+                if (k == 0) hi = d; else lo = d;
+            }
+            buf[len++] = (char)((hi << 4) | lo);
+            i += 2;
+        } else if (s[i] == L'+') buf[len++] = ' ';
+        else {
+            char t[8];
+            int tn = WideCharToMultiByte(CP_UTF8, 0, &s[i], 1, t, 8, NULL, NULL);
+            memcpy(buf + len, t, tn); len += tn;
+        }
+    }
+    buf[len] = 0;
+    out = u8(buf);
+    free(buf);
+    return out;
+}
+
+static wchar_t *hash_of(const wchar_t *alg, const wchar_t *s) {
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_HASH_HANDLE hHash = NULL;
+    DWORD cbHash = 0, cbData = 0;
+    unsigned char buf[64];
+    wchar_t out[160];
+    char *u = u16(s);
+    int i;
+    if (!u) return NULL;
+    if (BCryptOpenAlgorithmProvider(&hAlg, alg, NULL, 0) < 0) { free(u); return NULL; }
+    BCryptGetProperty(hAlg, BCRYPT_HASH_LENGTH, (PUCHAR)&cbHash, sizeof(cbHash), &cbData, 0);
+    if (cbHash > 64) cbHash = 64;
+    if (BCryptCreateHash(hAlg, &hHash, NULL, 0, NULL, 0, 0) < 0) {
+        BCryptCloseAlgorithmProvider(hAlg, 0); free(u); return NULL;
+    }
+    BCryptHashData(hHash, (PUCHAR)u, (ULONG)strlen(u), 0);
+    BCryptFinishHash(hHash, buf, cbHash, 0);
+    for (i = 0; i < (int)cbHash; i++) swprintf_s(out + i * 2, 3, L"%02x", buf[i]);
+    out[cbHash * 2] = 0;
+    BCryptDestroyHash(hHash);
+    BCryptCloseAlgorithmProvider(hAlg, 0);
+    free(u);
+    return wcsdup2(out);
+}
+
+static wchar_t *tf_md5(const wchar_t *s)  { return hash_of(BCRYPT_MD5_ALGORITHM, s); }
+static wchar_t *tf_sha1(const wchar_t *s) { return hash_of(BCRYPT_SHA1_ALGORITHM, s); }
+static wchar_t *tf_sha256(const wchar_t *s) { return hash_of(BCRYPT_SHA256_ALGORITHM, s); }
+
+static wchar_t *tf_exnum(const wchar_t *s) {
+    size_t n = wcslen(s), i, j = 0, cnt = 0;
+    wchar_t *out = (wchar_t *)malloc(sizeof(wchar_t) * (n * 2 + 4));
+    if (!out) return NULL;
+    for (i = 0; i < n;) {
+        if ((s[i] >= L'0' && s[i] <= L'9') ||
+            (s[i] == L'-' && i + 1 < n && s[i + 1] >= L'0' && s[i + 1] <= L'9')) {
+            size_t st = i;
+            if (s[i] == L'-') i++;
+            while (i < n && s[i] >= L'0' && s[i] <= L'9') i++;
+            if (i < n && s[i] == L'.') {
+                i++;
+                while (i < n && s[i] >= L'0' && s[i] <= L'9') i++;
+            }
+            if (cnt) out[j++] = L'\n';
+            memcpy(out + j, s + st, sizeof(wchar_t) * (i - st));
+            j += i - st;
+            cnt++;
+        } else i++;
+    }
+    out[j] = 0;
+    if (!cnt) { free(out); return NULL; }
+    return out;
+}
+
+static wchar_t *tf_sortlines(const wchar_t *s) {
+    /* 按行冒泡排序（条目规模小，够用） */
+    size_t n = wcslen(s), cap = 64, cnt = 0, i, k;
+    wchar_t **lines = (wchar_t **)malloc(sizeof(wchar_t *) * cap);
+    wchar_t *out, *tmp = wcsdup2(s);
+    size_t total = 0, pos = 0;
+    if (!lines || !tmp) { free(lines); free(tmp); return NULL; }
+    for (i = 0; i <= n; i++) {
+        if (i == n || tmp[i] == L'\n') {
+            tmp[i] = 0;
+            if (cnt == cap) { cap *= 2; lines = (wchar_t **)realloc(lines, sizeof(wchar_t *) * cap); }
+            lines[cnt++] = wcsdup2(tmp + (i ? 0 : 0) + pos);
+            pos = i + 1;
+            if (i == n) break;
+        }
+    }
+    for (i = 0; i < cnt; i++)
+        for (k = i + 1; k < cnt; k++)
+            if (wcscmp(lines[i], lines[k]) > 0) { wchar_t *t = lines[i]; lines[i] = lines[k]; lines[k] = t; }
+    total = 1;
+    for (i = 0; i < cnt; i++) total += wcslen(lines[i]) + 1;
+    out = (wchar_t *)malloc(sizeof(wchar_t) * total);
+    if (out) {
+        size_t p = 0;
+        for (i = 0; i < cnt; i++) {
+            wcscpy_s(out + p, total - p, lines[i]);
+            p += wcslen(lines[i]);
+            if (i + 1 < cnt) out[p++] = L'\n';
+            else out[p] = 0;
+        }
+    }
+    for (i = 0; i < cnt; i++) free(lines[i]);
+    free(lines); free(tmp);
+    return out;
+}
+
+static wchar_t *tf_uniqlines(const wchar_t *s) {
+    size_t n = wcslen(s), cap = 64, cnt = 0, i, k, pos = 0;
+    wchar_t **lines = (wchar_t **)malloc(sizeof(wchar_t *) * cap);
+    wchar_t *tmp = wcsdup2(s), *out;
+    size_t total;
+    if (!lines || !tmp) { free(lines); free(tmp); return NULL; }
+    for (i = 0; i <= n; i++) {
+        if (i == n || tmp[i] == L'\n') {
+            tmp[i] = 0;
+            int dup = 0;
+            for (k = 0; k < cnt; k++) if (!wcscmp(lines[k], tmp + pos)) { dup = 1; break; }
+            if (!dup) {
+                if (cnt == cap) { cap *= 2; lines = (wchar_t **)realloc(lines, sizeof(wchar_t *) * cap); }
+                lines[cnt++] = wcsdup2(tmp + pos);
+            }
+            pos = i + 1;
+            if (i == n) break;
+        }
+    }
+    total = 1;
+    for (i = 0; i < cnt; i++) total += wcslen(lines[i]) + 1;
+    out = (wchar_t *)malloc(sizeof(wchar_t) * total);
+    if (out) {
+        size_t p = 0;
+        for (i = 0; i < cnt; i++) {
+            wcscpy_s(out + p, total - p, lines[i]);
+            p += wcslen(lines[i]);
+            if (i + 1 < cnt) out[p++] = L'\n';
+            else out[p] = 0;
+        }
+    }
+    for (i = 0; i < cnt; i++) free(lines[i]);
+    free(lines); free(tmp);
+    return out;
+}
+
+static wchar_t *tf_md2txt(const wchar_t *s) {
+    size_t n = wcslen(s), i, j = 0;
+    wchar_t *out = (wchar_t *)malloc(sizeof(wchar_t) * (n * 2 + 4));
+    wchar_t *t = wcsdup2(s);
+    if (!out || !t) { free(out); free(t); return NULL; }
+    /* 去标题 #、粗体斜体、行内代码、引用、列表符号；链接保留文字 */
+    for (i = 0; i < n; i++) {
+        if (t[i] == L'#') { continue; }
+        if (t[i] == L'*' || t[i] == L'_' || t[i] == L'`' || t[i] == L'~') continue;
+        if (t[i] == L'>' && (i == 0 || t[i - 1] == L'\n')) continue;
+        if ((t[i] == L'-' || t[i] == L'+') &&
+            (i == 0 || t[i - 1] == L'\n') && i + 1 < n && t[i + 1] == L' ') { i++; continue; }
+        if (t[i] == L'[') {
+            size_t k = i + 1;
+            while (k < n && t[k] != L']' && t[k] != L'\n') k++;
+            if (k < n && t[k] == L']') {
+                memcpy(out + j, t + i + 1, sizeof(wchar_t) * (k - i - 1));
+                j += k - i - 1;
+                i = k;
+                if (i + 1 < n && t[i + 1] == L'(') {
+                    while (i < n && t[i] != L')') i++;
+                }
+                continue;
+            }
+        }
+        if (t[i] == L'!') continue;
+        out[j++] = t[i];
+    }
+    out[j] = 0;
+    free(t);
+    return out;
+}
+
+static wchar_t *tf_jsonmin(const wchar_t *s) {
+    size_t n = wcslen(s), i, j = 0;
+    wchar_t *out = (wchar_t *)malloc(sizeof(wchar_t) * (n + 2));
+    int instr = 0;
+    if (!out) return NULL;
+    for (i = 0; i < n; i++) {
+        wchar_t c = s[i];
+        if (c == L'"') instr = !instr;
+        if (!instr && (c == L' ' || c == L'\t' || c == L'\r' || c == L'\n')) continue;
+        out[j++] = c;
+    }
+    out[j] = 0;
+    return out;
+}
+
+typedef struct { const wchar_t *label; wchar_t *(*fn)(const wchar_t *); } TF;
+static const TF TFS[] = {
+    { L"去格式（HTML→纯文本）", tf_deformat },
+    { L"去空行",                tf_drop_blank },
+    { L"去每行首尾空格",        tf_trim_lines },
+    { L"全角→半角",            tf_half },
+    { L"半角→全角",            tf_full },
+    { L"全部大写",              tf_upper },
+    { L"全部小写",              tf_lower },
+    { L"首字母大写",            tf_capital },
+    { L"Base64 编码",           tf_b64enc },
+    { L"Base64 解码",           tf_b64dec },
+    { L"URL 编码",              tf_urlenc },
+    { L"URL 解码",              tf_urldec },
+    { L"MD5",                   tf_md5 },
+    { L"SHA1",                  tf_sha1 },
+    { L"SHA256",                tf_sha256 },
+    { L"提取全部数字",          tf_exnum },
+    { L"行排序",                tf_sortlines },
+    { L"行去重",                tf_uniqlines },
+    { L"Markdown→纯文本",       tf_md2txt },
+    { L"JSON 压缩",             tf_jsonmin },
+};
+#define NTFS ((int)(sizeof(TFS) / sizeof(TFS[0])))
+
+/* ==========================================================================
+ * 6c. 批量导出（TXT / CSV / JSON / Markdown）
+ * ========================================================================== */
+static void export_as(int fmt) {
+    wchar_t dir[MAX_PATH], path[MAX_PATH];
+    FILE *f;
+    int i;
+    ItemArray *pool = cur_pool();
+    GetModuleFileNameW(NULL, dir, MAX_PATH);
+    { wchar_t *slash = wcsrchr(dir, L'\\'); if (slash) *slash = 0; }
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        swprintf_s(path, MAX_PATH, L"%s\\导出_%04d%02d%02d-%02d%02d%02d.%s",
+                   dir, st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                   fmt == 0 ? L"txt" : fmt == 1 ? L"csv" : fmt == 2 ? L"json" : L"md");
+    }
+    f = _wfopen(path, L"wb");
+    if (!f) { MessageBoxW(g.hwnd, L"导出失败：无法写入文件", APP_NAME, MB_OK | MB_ICONERROR); return; }
+    if (fmt == 1) {
+        unsigned char bom[3] = { 0xEF, 0xBB, 0xBF };   /* Excel 中文不乱码 */
+        fwrite(bom, 1, 3, f);
+        fwprintf(f, L"时间(本地),来源应用,类型,大小(字节),内容\n");
+    }
+    if (fmt == 2) fwprintf(f, L"{\n \"schema_version\": 3,\n \"items\": [\n");
+    if (fmt == 3) fwprintf(f, L"# ClawBoard 导出\n\n");
+    for (i = 0; i < g.nview; i++) {
+        Item *it = &pool->v[g.view[i]];
+        wchar_t t1[64], sz[32], one[4096];
+        rel_time(it->created_at, t1, 64);
+        human_size(it->size, sz, 32);
+        oneline(it->text, one, 4096);
+        if (fmt == 0) {
+            fwprintf(f, L"[%d] %s | %s | %s\n%s\n\n", i + 1, t1,
+                     it->app ? it->app : L"unknown", type_name(it->ctype), it->text);
+        } else if (fmt == 1) {
+            wchar_t esc[8192];
+            wchar_t *p = esc;
+            int k;
+            for (k = 0; one[k] && p - esc < 8100; k++) {
+                if (one[k] == L'"') { *p++ = L'"'; *p++ = L'"'; }
+                else *p++ = one[k];
+            }
+            *p = 0;
+            fwprintf(f, L"%s,%s,%s,%d,\"%s\"\n", t1, it->app ? it->app : L"unknown",
+                     type_name(it->ctype), (int)it->size, esc);
+        } else if (fmt == 2) {
+            wchar_t esc[8192];
+            wchar_t *p = esc;
+            int k;
+            for (k = 0; one[k] && p - esc < 8100; k++) {
+                if (one[k] == L'"') { *p++ = L'\\'; *p++ = L'"'; }
+                else if (one[k] == L'\\') { *p++ = L'\\'; *p++ = L'\\'; }
+                else *p++ = one[k];
+            }
+            *p = 0;
+            fwprintf(f, L"  {\"created_at\":%lld,\"source_app\":\"%s\",\"content_type\":%d,"
+                        L"\"content_size\":%d,\"text\":\"%s\"}%s\n",
+                     it->created_at, it->app ? it->app : L"unknown", it->ctype,
+                     (int)it->size, esc, (i == g.nview - 1) ? L"" : L",");
+        } else {
+            fwprintf(f, L"## %s · %s\n\n```\n%s\n```\n\n", t1,
+                     it->app ? it->app : L"unknown", it->text);
+        }
+    }
+    if (fmt == 2) fwprintf(f, L" ]\n}\n");
+    fclose(f);
+    {
+        wchar_t msg[MAX_PATH + 64];
+        swprintf_s(msg, MAX_PATH + 64, L"已导出 %d 条：\n%s", g.nview, path);
+        MessageBoxW(g.hwnd, msg, L"导出完成", MB_OK | MB_ICONINFORMATION);
+    }
+}
+
+/* ---------- 文本变换窗口 ---------- */
+static HWND tf_hwnd = NULL, tf_list = NULL, tf_src = NULL, tf_out = NULL;
+static int tf_vidx = -1;
+
+static void tf_apply(void) {
+    int sel = (int)SendMessageW(tf_list, LB_GETCURSEL, 0, 0);
+    int len;
+    wchar_t *buf, *res;
+    if (sel < 0 || sel >= NTFS) return;
+    len = (int)GetWindowTextLengthW(tf_src);
+    buf = (wchar_t *)malloc(sizeof(wchar_t) * (len + 2));
+    if (!buf) return;
+    GetWindowTextW(tf_src, buf, len + 1);
+    res = TFS[sel].fn(buf);
+    SetWindowTextW(tf_out, res ? res : L"（变换失败：结果为空，或输入不合法）");
+    free(res);
+    free(buf);
+}
+
+static wchar_t *tf_out_text(void) {
+    int len = (int)GetWindowTextLengthW(tf_out);
+    wchar_t *b = (wchar_t *)malloc(sizeof(wchar_t) * (len + 2));
+    if (!b) return NULL;
+    GetWindowTextW(tf_out, b, len + 1);
+    return b;
+}
+
+static LRESULT CALLBACK TfProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_COMMAND:
+        if (HIWORD(wp) == LBN_SELCHANGE) { tf_apply(); return 0; }
+        switch (LOWORD(wp)) {
+        case 1: {
+            wchar_t *b = tf_out_text();
+            if (b) { clip_write(b); free(b);
+                     MessageBoxW(hw, L"结果已复制到剪贴板", APP_NAME, MB_OK); }
+            return 0; }
+        case 2: {
+            wchar_t *b = tf_out_text();
+            if (b) {
+                Item it;
+                memset(&it, 0, sizeof(it));
+                it.text = wcsdup2(b);
+                it.created_at = now_ms(); it.updated_at = it.created_at;
+                it.size = wcslen(b) * 2; it.ctype = detect_type(b);
+                ia_push(&g.groups[g.gi].items, it);
+                free(b);
+                save_data(); rebuild_view(); InvalidateRect(g.hwnd, NULL, FALSE);
+                MessageBoxW(hw, L"已存为新条目（原条目保留）", APP_NAME, MB_OK);
+            }
+            return 0; }
+        case 3: {
+            if (tf_vidx >= 0 && tf_vidx < g.nview) {
+                Item *it = &cur_pool()->v[g.view[tf_vidx]];
+                wchar_t *b = tf_out_text();
+                if (b) {
+                    free(it->text);
+                    it->text = wcsdup2(b);
+                    it->size = wcslen(b) * 2;
+                    it->ctype = detect_type(b);
+                    it->updated_at = now_ms();      /* created_at 原样保留 */
+                    free(b);
+                    save_data(); rebuild_view(); InvalidateRect(g.hwnd, NULL, FALSE);
+                    MessageBoxW(hw, L"已覆盖原条目（首次复制时间未改）", APP_NAME, MB_OK);
+                }
+            } else {
+                MessageBoxW(hw, L"没有可覆盖的原条目，请用「存为新条目」", APP_NAME, MB_OK);
+            }
+            return 0; }
+        case 4: DestroyWindow(hw); return 0;
+        }
+        return 0;
+    case WM_DESTROY: tf_hwnd = NULL; return 0;
+    }
+    return DefWindowProcW(hw, msg, wp, lp);
+}
+
+static void open_transform(void) {
+    int i;
+    wchar_t init[65536] = L"";
+    HINSTANCE hi = GetModuleHandleW(NULL);
+    if (tf_hwnd) { SetForegroundWindow(tf_hwnd); return; }
+    if (g.nview > 0 && g.sel >= 0 && g.sel < g.nview) {
+        Item *it = &cur_pool()->v[g.view[g.sel]];
+        wcsncpy_s(init, 65536, it->text, _TRUNCATE);
+        tf_vidx = g.sel;
+    } else tf_vidx = -1;
+
+    tf_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME, L"ClawBoardTf",
+                              L"文本变换", WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                              140, 120, 720, 540, g.hwnd, NULL, hi, NULL);
+    if (!tf_hwnd) return;
+    tf_list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", NULL,
+                              WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+                              10, 10, 190, 440, tf_hwnd, (HMENU)(INT_PTR)50, hi, NULL);
+    SendMessageW(tf_list, WM_SETFONT, (WPARAM)g.font_s, TRUE);
+    for (i = 0; i < NTFS; i++)
+        SendMessageW(tf_list, LB_ADDSTRING, 0, (LPARAM)TFS[i].label);
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"原文", WS_CHILD | WS_VISIBLE, 210, 8, 200, 18,
+                                tf_hwnd, NULL, hi, NULL);
+        SendMessageW(lb, WM_SETFONT, (WPARAM)g.font_s, TRUE);
+    }
+    tf_src = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", init,
+                             WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL,
+                             210, 28, 490, 190, tf_hwnd, (HMENU)(INT_PTR)51, hi, NULL);
+    SendMessageW(tf_src, WM_SETFONT, (WPARAM)g.font_s, TRUE);
+    {
+        HWND lb = CreateWindowW(L"STATIC", L"结果", WS_CHILD | WS_VISIBLE, 210, 226, 200, 18,
+                                tf_hwnd, NULL, hi, NULL);
+        SendMessageW(lb, WM_SETFONT, (WPARAM)g.font_s, TRUE);
+    }
+    tf_out = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                             WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL |
+                             WS_VSCROLL | ES_READONLY,
+                             210, 246, 490, 200, tf_hwnd, (HMENU)(INT_PTR)52, hi, NULL);
+    SendMessageW(tf_out, WM_SETFONT, (WPARAM)g.font_s, TRUE);
+    {
+        struct { int id; const wchar_t *t; int x, w; } bs[] = {
+            { 1, L"复制到剪贴板", 210, 108 }, { 2, L"存为新条目", 326, 108 },
+            { 3, L"覆盖原条目", 442, 108 },   { 4, L"关闭", 592, 106 } };
+        int k;
+        for (k = 0; k < 4; k++) {
+            HWND b = CreateWindowW(L"BUTTON", bs[k].t, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                   bs[k].x, 458, bs[k].w, 30, tf_hwnd, (HMENU)(INT_PTR)bs[k].id, hi, NULL);
+            SendMessageW(b, WM_SETFONT, (WPARAM)g.font, TRUE);
+        }
+    }
+    SendMessageW(tf_list, LB_SETCURSEL, 0, 0);
+    tf_apply();
+    SetForegroundWindow(tf_hwnd);
+}
+
+/* ---------- 导出窗口 ---------- */
+static HWND ex_hwnd = NULL;
+static int ex_fmt = 0;
+
+static LRESULT CALLBACK ExProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_COMMAND:
+        switch (LOWORD(wp)) {
+        case 10: ex_fmt = 0; return 0;
+        case 11: ex_fmt = 1; return 0;
+        case 12: ex_fmt = 2; return 0;
+        case 13: ex_fmt = 3; return 0;
+        case 20: DestroyWindow(hw); export_as(ex_fmt); return 0;
+        case 21: DestroyWindow(hw); return 0;
+        }
+        return 0;
+    case WM_DESTROY: ex_hwnd = NULL; return 0;
+    }
+    return DefWindowProcW(hw, msg, wp, lp);
+}
+
+static void open_export_dlg(void) {
+    HINSTANCE hi = GetModuleHandleW(NULL);
+    int W = 380, H = 260;
+    if (ex_hwnd) { SetForegroundWindow(ex_hwnd); return; }
+    if (g.nview == 0) {
+        MessageBoxW(g.hwnd, L"当前没有可导出的内容（先搜索或切换列表）", APP_NAME, MB_OK);
+        return;
+    }
+    ex_hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_DLGMODALFRAME, L"ClawBoardEx",
+                              L"批量导出", WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+                              260, 220, W, H, g.hwnd, NULL, hi, NULL);
+    if (!ex_hwnd) return;
+    {
+        wchar_t cap[128];
+        HWND lb;
+        swprintf_s(cap, 128, L"共 %d 条待导出（当前筛选结果）", g.nview);
+        lb = CreateWindowW(L"STATIC", cap, WS_CHILD | WS_VISIBLE, 16, 14, W - 32, 20,
+                           ex_hwnd, NULL, hi, NULL);
+        SendMessageW(lb, WM_SETFONT, (WPARAM)g.font, TRUE);
+    }
+    {
+        struct { int id; const wchar_t *t; } rs[] = {
+            { 10, L"TXT（序号 / 时间 / 来源 / 内容）" },
+            { 11, L"CSV（Excel 友好，带 BOM 防中文乱码）" },
+            { 12, L"JSON（含时间字段，可再导入）" },
+            { 13, L"Markdown（适合归档到笔记软件）" } };
+        int k;
+        for (k = 0; k < 4; k++) {
+            HWND r = CreateWindowW(L"BUTTON", rs[k].t,
+                                   WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON |
+                                   (k == 0 ? WS_GROUP : 0),
+                                   18, 44 + k * 30, W - 40, 24, ex_hwnd,
+                                   (HMENU)(INT_PTR)rs[k].id, hi, NULL);
+            SendMessageW(r, WM_SETFONT, (WPARAM)g.font, TRUE);
+            if (k == 0) SendMessageW(r, BM_SETCHECK, BST_CHECKED, 0);
+        }
+    }
+    ex_fmt = 0;
+    {
+        HWND b1 = CreateWindowW(L"BUTTON", L"导出", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                W - 190, H - 50, 80, 30, ex_hwnd, (HMENU)(INT_PTR)20, hi, NULL);
+        HWND b2 = CreateWindowW(L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                W - 100, H - 50, 80, 30, ex_hwnd, (HMENU)(INT_PTR)21, hi, NULL);
+        SendMessageW(b1, WM_SETFONT, (WPARAM)g.font, TRUE);
+        SendMessageW(b2, WM_SETFONT, (WPARAM)g.font, TRUE);
+    }
+    SetForegroundWindow(ex_hwnd);
 }
 
 /* ==========================================================================
@@ -846,8 +1732,8 @@ static void paint(HWND hw, HDC hdc) {
         }
         /* 工具栏 */
         { RECT r = { 0, H - TOOL_H, W, H };
-          RECT sr = { 6, H - TOOL_H + 6, W - 180, H - 8 };
-          RECT sb = { 6, H - TOOL_H + 7, W - 178, H - 9 };
+          RECT sr = { 6, H - TOOL_H + 6, W - 250, H - 8 };
+          RECT sb = { 6, H - TOOL_H + 7, W - 248, H - 9 };
           wchar_t hint[300];
           fill_rect(mem, &r, C_PANEL);
           fill_rect(mem, &sb, C_CARD);
@@ -855,10 +1741,10 @@ static void paint(HWND hw, HDC hdc) {
           else wcscpy_s(hint, 300, L"搜索（输入即过滤）");
           sr.left = 12;
           draw_text(mem, hint, &sr, g.search[0] ? C_FG : C_FG2, g.font_s, 1);
-          { int bx = W - 172;
-            const wchar_t *btns[] = { L"＋", L"拆", L"删", L"清", L"⚙" };
+          { int bx = W - 240;
+            const wchar_t *btns[] = { L"＋", L"拆", L"删", L"清", L"换", L"出", L"设" };
             int k;
-            for (k = 0; k < 5; k++) {
+            for (k = 0; k < 7; k++) {
                 RECT b = { bx, H - TOOL_H + 5, bx + 32, H - 7 };
                 fill_rect(mem, &b, C_CARD);
                 draw_text(mem, btns[k], &b, C_FG, g.font_b, 1);
@@ -945,15 +1831,15 @@ static int prompt_box(const wchar_t *title, const wchar_t *label,
                          (multiline ? (ES_MULTILINE | ES_WANTRETURN | WS_VSCROLL |
                                        ES_AUTOVSCROLL) : 0),
                          14, 40, W - 28, multiline ? 140 : 26, dlg,
-                         (HMENU)100, GetModuleHandleW(NULL), NULL);
+                         (HMENU)(INT_PTR)100, GetModuleHandleW(NULL), NULL);
     SendMessageW(ed, WM_SETFONT, (WPARAM)g.font, TRUE);
     SetFocus(ed);
     {
         HWND ok = CreateWindowW(L"BUTTON", L"确定", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                W - 180, H - 64, 76, 28, dlg, (HMENU)1,
+                                W - 180, H - 64, 76, 28, dlg, (HMENU)(INT_PTR)1,
                                 GetModuleHandleW(NULL), NULL);
         HWND cc = CreateWindowW(L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                W - 96, H - 64, 76, 28, dlg, (HMENU)2,
+                                W - 96, H - 64, 76, 28, dlg, (HMENU)(INT_PTR)2,
                                 GetModuleHandleW(NULL), NULL);
         SendMessageW(ok, WM_SETFONT, (WPARAM)g.font, TRUE);
         SendMessageW(cc, WM_SETFONT, (WPARAM)g.font, TRUE);
@@ -1385,8 +2271,8 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         if (!g.collapsed && y > cr.bottom - TOOL_H) {
-            int bx = cr.right - 172, k;
-            for (k = 0; k < 5; k++) {
+            int bx = cr.right - 240, k;
+            for (k = 0; k < 7; k++) {
                 if (x >= bx && x < bx + 32) {
                     switch (k) {
                     case 0: add_phrase(); break;
@@ -1404,7 +2290,9 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                             save_data(); rebuild_view(); InvalidateRect(hw, NULL, FALSE);
                         }
                         break;
-                    case 4:
+                    case 4: open_transform(); break;
+                    case 5: open_export_dlg(); break;
+                    case 6:
                         MessageBoxW(hw, L"C 原生版：设置项在托盘右键菜单里"
                                         L"（暂停监听 / 显示时间）", APP_NAME, MB_OK);
                         break;
@@ -1500,15 +2388,143 @@ static LRESULT CALLBACK WndProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 /* ==========================================================================
+ * 9b. 自测（命令行 --selftest，结果写入 ClawBoardC_selftest.txt）
+ * ========================================================================== */
+static int pass_cnt = 0, fail_cnt = 0;
+
+#define T(cond, name) do { \
+    if (cond) { pass_cnt++; fwprintf(f, L"PASS  %s\n", name); } \
+    else { fail_cnt++; fwprintf(f, L"FAIL  %s\n", name); } } while (0)
+
+static void add_test_item(const wchar_t *text, const wchar_t *app, int ctype,
+                          size_t size, int fav, long long ts) {
+    Item it;
+    memset(&it, 0, sizeof(it));
+    it.text = wcsdup2(text);
+    it.app = wcsdup2(app);
+    it.ctype = ctype; it.size = size; it.fav = fav;
+    it.created_at = ts; it.updated_at = ts;
+    ia_push(&g.clip, it);
+}
+
+static int count_match(const wchar_t *qs) {
+    Query q; int i, c = 0;
+    parse_query(qs, &q);
+    for (i = 0; i < g.clip.n; i++)
+        if (match_query(&q, &g.clip.v[i])) c++;
+    return c;
+}
+
+static void selftest(void) {
+    FILE *f = _wfopen(L"ClawBoardC_selftest.txt", L"w, ccs=UTF-8");
+    wchar_t *r, *r2;
+    if (!f) return;
+
+    memset(&g, 0, sizeof(g));
+    ia_init(&g.clip);
+    g.groups = (Group *)calloc(1, sizeof(Group));
+    g.ngroups = 1;
+    g.groups[0].name = wcsdup2(L"默认");
+    ia_init(&g.groups[0].items);
+    g.tab = 0;
+
+    add_test_item(L"hello world 中文", L"chrome", 0, 20, 0, now_ms());
+    add_test_item(L"https://a.com/x", L"EXCEL", 1, 15, 0, now_ms());
+    add_test_item(L"big data", L"notepad", 0, 3 * 1024 * 1024, 1, now_ms());
+    add_test_item(L"old news", L"chrome", 0, 8, 0, now_ms() - 3LL * 86400 * 1000);
+    add_test_item(L"secret", L"WeChat", 0, 6, 0, now_ms());
+
+    fwprintf(f, L"=== 搜索语法 ===\n");
+    T(count_match(L"app:chrome") == 2, L"app:chrome -> 2");
+    T(count_match(L"app:hro") == 2, L"app:hro 模糊 -> 2");
+    T(count_match(L"app:excel") == 1, L"app:excel 大小写不敏感 -> 1");
+    T(count_match(L"type:url") == 1, L"type:url -> 1");
+    T(count_match(L"size:>1mb") == 1, L"size:>1mb -> 1");
+    T(count_match(L"size:<100") == 4, L"size:<100 -> 4");
+    T(count_match(L"is:fav") == 1, L"is:fav -> 1");
+    T(count_match(L"time:>1d") == 1, L"time:>1d -> 1");
+    T(count_match(L"time:<1h") == 4, L"time:<1h -> 4");
+    T(count_match(L"中文") == 1, L"中文关键词 -> 1");
+    T(count_match(L"hello -world") == 0, L"hello -world 排除 -> 0");
+    T(count_match(L"-app:chrome") == 3, L"-app:chrome -> 3");
+    T(count_match(L"") == 5, L"空查询 -> 全部 5");
+    {
+        Query q;
+        parse_query(L"time:zzz", &q);
+        T(q.bad == 1, L"非法时间标记 bad=1 且不崩");
+    }
+
+    fwprintf(f, L"\n=== 文本变换 ===\n");
+    r = tf_upper(L"abc"); T(r && !wcscmp(r, L"ABC"), L"全部大写"); free(r);
+    r = tf_lower(L"ABC"); T(r && !wcscmp(r, L"abc"), L"全部小写"); free(r);
+    r = tf_capital(L"hello world"); T(r && !wcscmp(r, L"Hello World"), L"首字母大写"); free(r);
+    r = tf_half(L"ＡＢＣ　１"); T(r && !wcscmp(r, L"ABC 1"), L"全角→半角"); free(r);
+    r = tf_full(L"AB 1");
+    fwprintf(f, L"[dbg] full len=%d c0=0x%04X c2=0x%04X\n",
+              (int)wcslen(r), (int)r[0], (int)r[2]);
+    T(r && wcslen(r) == 4 && r[0] == 0xFF21, L"半角→全角"); free(r);
+    r = tf_deformat(L"<p>你好&nbsp;&amp; 世界</p><li>一</li>");
+    T(r && wcsstr(r, L"你好") && wcsstr(r, L"&") && !wcsstr(r, L"<"), L"去格式（标签与实体）"); free(r);
+    r = tf_drop_blank(L"a\n\n\nb\n  \nc"); T(r && !wcscmp(r, L"a\nb\nc"), L"去空行"); free(r);
+    r = tf_trim_lines(L"  a  \n b"); T(r && !wcscmp(r, L"a\nb"), L"去每行首尾空格"); free(r);
+    r = tf_b64enc(L"中文abc"); r2 = tf_b64dec(r);
+    T(r2 && !wcscmp(r2, L"中文abc"), L"Base64 编解码往返"); free(r); free(r2);
+    r = tf_urlenc(L"中文 &x"); r2 = tf_urldec(r);
+    T(r2 && !wcscmp(r2, L"中文 &x"), L"URL 编解码往返"); free(r); free(r2);
+    r = tf_md5(L"abc");
+    T(r && !wcscmp(r, L"900150983cd24fb0d6963f7d28e17f72"), L"MD5(abc) 值正确"); free(r);
+    r = tf_sha1(L"abc");
+    T(r && !wcscmp(r, L"a9993e364706816aba3e25717850c26c9cd0d89d"), L"SHA1(abc) 值正确"); free(r);
+    r = tf_sha256(L"abc");
+    T(r && wcslen(r) == 64, L"SHA256 长度 64"); free(r);
+    r = tf_exnum(L"a1 b2.5 c-3"); T(r && wcsstr(r, L"1\n2.5"), L"提取数字"); free(r);
+    r = tf_sortlines(L"c\na\nb"); T(r && !wcscmp(r, L"a\nb\nc"), L"行排序"); free(r);
+    r = tf_uniqlines(L"a\na\nb"); T(r && !wcscmp(r, L"a\nb"), L"行去重"); free(r);
+    r = tf_md2txt(L"# 标题\n- **粗体**\n[链接](http://x)");
+    T(r && !wcsstr(r, L"#") && !wcsstr(r, L"**") && wcsstr(r, L"链接"), L"Markdown→纯文本"); free(r);
+    r = tf_jsonmin(L"{ \"a\" : 1 }"); T(r && !wcscmp(r, L"{\"a\":1}"), L"JSON 压缩"); free(r);
+
+    fwprintf(f, L"\n=== 持久化往返 ===\n");
+    save_data();
+    {
+        int before = g.clip.n;
+        int i;
+        for (i = 0; i < g.clip.n; i++) { free(g.clip.v[i].text); free(g.clip.v[i].app); }
+        free(g.clip.v); ia_init(&g.clip);
+        for (i = 0; i < g.ngroups; i++) { ia_clear(&g.groups[i].items); free(g.groups[i].name); }
+        free(g.groups); g.groups = NULL; g.ngroups = 0;
+        load_data();
+        fwprintf(f, L"[dbg] before=%d after=%d\n", before, g.clip.n);
+        T(g.clip.n == before, L"保存后重新加载条数一致");
+        T(g.clip.n > 0 && g.clip.v[0].app != NULL, L"来源字段保留");
+        T(g.clip.n > 0 && g.clip.v[0].created_at > 0, L"时间字段保留");
+    }
+
+    fwprintf(f, L"\n通过 %d 项，失败 %d 项\n", pass_cnt, fail_cnt);
+    fclose(f);
+}
+
+/* ==========================================================================
  * 10. 入口
  * ========================================================================== */
+static void register_classes(HINSTANCE hInst) {
+    WNDCLASSW wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpfnWndProc = DefWindowProcW;  wc.lpszClassName = L"ClawBoardDlg"; RegisterClassW(&wc);
+    wc.lpfnWndProc = TfProc;          wc.lpszClassName = L"ClawBoardTf";  RegisterClassW(&wc);
+    wc.lpfnWndProc = ExProc;          wc.lpszClassName = L"ClawBoardEx";  RegisterClassW(&wc);
+}
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
     WNDCLASSW wc;
     HWND hw;
     MSG msg;
     HANDLE mutex;
     int sw, sh, W = 360, H = 500;
-    (void)hPrev; (void)cmd; (void)show;
+    (void)hPrev; (void)show;
+    if (cmd && wcsstr(cmd, L"--selftest")) { selftest(); return 0; }
 
     /* 单实例互斥 */
     mutex = CreateMutexW(NULL, TRUE, L"ClawBoardC_SingleInstance");
@@ -1521,6 +2537,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
     memset(&g, 0, sizeof(g));
     g.listen = 1; g.autopaste = 1; g.show_time = 0;
     ia_init(&g.clip);
+
+    register_classes(hInst);
 
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = WndProc;

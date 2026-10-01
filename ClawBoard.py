@@ -26,6 +26,7 @@ import traceback
 import subprocess
 import html as _html
 import tkinter as tk
+import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
@@ -131,6 +132,8 @@ u32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
 u32.UnregisterHotKey.restype = wintypes.BOOL
 u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 u32.PostMessageW.restype = wintypes.BOOL
+u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+u32.GetCursorPos.restype = wintypes.BOOL
 k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
 k32.CreateMutexW.restype = wintypes.HANDLE
 u32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
@@ -730,6 +733,48 @@ def now_str():
     return time.strftime('%m-%d %H:%M')
 
 
+# ---------------- 开机自启（只写当前用户注册表，可逆） ----------------
+RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
+RUN_NAME = 'ClawBoard'
+
+
+def autostart_cmd():
+    """frozen 时写 exe 自身；脚本运行时写 pythonw + 脚本路径"""
+    if getattr(sys, 'frozen', False):
+        return '"%s"' % sys.executable
+    py = sys.executable.replace('python.exe', 'pythonw.exe')
+    if not os.path.exists(py):
+        py = sys.executable
+    return '"%s" "%s"' % (py, os.path.join(BASE_DIR, 'ClawBoard.py'))
+
+
+def get_autostart():
+    """读取注册表真实状态，不信任配置文件"""
+    try:
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY)
+        v, _ = winreg.QueryValueEx(k, RUN_NAME)
+        winreg.CloseKey(k)
+        return True, v
+    except Exception:
+        return False, ''
+
+
+def set_autostart(on):
+    try:
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE)
+        if on:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, autostart_cmd())
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except Exception:
+                pass
+        winreg.CloseKey(k)
+        return True
+    except Exception:
+        return False
+
+
 def preview(text, n=90):
     t = ' '.join((text or '').split())
     return t if len(t) <= n else t[:n] + '…'
@@ -1144,7 +1189,8 @@ class VirtualList(tk.Frame):
 DEFAULT_SETTINGS = dict(theme='dark', hotkey='ctrl+shift+v', max_items=500,
                         listen=True, autopaste=True, mask_sensitive=True,
                         skip_sensitive=False, show_time=False, record_title=False,
-                        group_by_time=False)
+                        group_by_time=False, edge_hide=False, edge_delay=8)
+# 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
 
 class ClawBoard:
@@ -1166,6 +1212,10 @@ class ClawBoard:
         self._paste_fail = False
         self._anchor_idx = None
         self.search_err = ''
+        self._edge_hidden = False
+        self._edge_tick = 0
+        self._edge_side = None
+        self._edge_pos = None
         self.t0 = time.time()
 
         self.data = self.load_data()
@@ -1399,6 +1449,7 @@ class ClawBoard:
             self.tip('目标窗口拒绝焦点（可能是管理员权限），已复制，请手动 Ctrl+V')
         if self.hotkey_fallback:
             self._poll_hotkey()
+        self.edge_update()
         self.root.after(120, self.poll_bg)
 
     def _poll_hotkey(self):
@@ -1555,6 +1606,73 @@ class ClawBoard:
         cur = bool(self.root.attributes('-topmost'))
         self.root.attributes('-topmost', not cur)
         self.tip('已取消置顶' if cur else '窗口已置顶')
+
+    # ---------- 靠边自动隐藏（像输入法一样贴边收纳） ----------
+    def edge_update(self):
+        """贴住屏幕左/右/上边缘且鼠标离开 → 收起只留 6px；鼠标碰边缘 → 滑出"""
+        st = self.st
+        if not st.get('edge_hide') or self.hidden or self.collapsed:
+            if self._edge_hidden:
+                self._edge_show()
+            return
+        try:
+            pt = wintypes.POINT()
+            if not u32.GetCursorPos(ctypes.byref(pt)):
+                return
+            mx, my = pt.x, pt.y
+        except Exception:
+            return
+        if self._edge_hidden:
+            gap = 10
+            sw = self.root.winfo_screenwidth()
+            side = self._edge_side
+            near = ((side == 'left' and mx <= gap) or
+                    (side == 'right' and mx >= sw - gap) or
+                    (side == 'top' and my <= gap))
+            if near:
+                self._edge_show()
+            return
+        wx, wy = self.root.winfo_x(), self.root.winfo_y()
+        ww, wh = self.root.winfo_width(), self.root.winfo_height()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        side = None
+        if wx <= 4:
+            side = 'left'
+        elif wx + ww >= sw - 4:
+            side = 'right'
+        elif wy <= 4:
+            side = 'top'
+        if side is None:
+            self._edge_tick = 0
+            return
+        inside = (wx - 2 <= mx <= wx + ww + 2) and (wy - 2 <= my <= wy + wh + 2)
+        if inside:
+            self._edge_tick = 0
+            return
+        self._edge_tick += 1
+        if self._edge_tick >= max(2, int(st.get('edge_delay', 8))):
+            self._edge_hide(side)
+
+    def _edge_hide(self, side):
+        wx, wy = self.root.winfo_x(), self.root.winfo_y()
+        ww, wh = self.root.winfo_width(), self.root.winfo_height()
+        sw = self.root.winfo_screenwidth()
+        self._edge_side = side
+        self._edge_pos = (wx, wy)      # 收起前记住原位，滑出时原样还原
+        if side == 'left':
+            nx, ny = -(ww - 6), wy
+        elif side == 'right':
+            nx, ny = sw - 6, wy
+        else:
+            nx, ny = wx, -(wh - 6)
+        self.root.geometry('+%d+%d' % (nx, ny))
+        self._edge_hidden = True
+
+    def _edge_show(self):
+        if self._edge_pos:
+            self.root.geometry('+%d+%d' % self._edge_pos)
+        self._edge_hidden = False
+        self._edge_tick = 0
 
     def toggle_collapse(self):
         self.collapsed = not self.collapsed
@@ -2246,10 +2364,11 @@ class SettingsWindow:
         self.row_switch(body, '敏感内容不入库', 'skip_sensitive')
         self.row_switch(body, '列表中显示时间', 'show_time')
         self.row_switch(body, '记录来源窗口标题（隐私）', 'record_title')
+        self.row_switch(body, '靠边自动隐藏（贴屏幕边缘自动收起）', 'edge_hide')
+        self.row_autostart_switch(body)
         self.row_theme(body)
         self.row_hotkey(body)
         self.row_int(body, '历史最大条数（10-5000）', 'max_items')
-        self.row_autostart(body)
         btns = tk.Frame(body, bg=T['bg'])
         btns.pack(fill='x', pady=(6, 0))
         b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
@@ -2348,14 +2467,37 @@ class SettingsWindow:
         e.bind('<Return>', commit)
         e.bind('<FocusOut>', commit)
 
-    def row_autostart(self, master):
+    def row_autostart_switch(self, master):
+        """开机自启：直接读写当前用户注册表 Run 项，状态以注册表真实值为准"""
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=6)
-        tk.Label(r, text='开机自启：把快捷方式放进启动文件夹（不改注册表）',
-                 bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w').pack(fill='x')
-        b = tk.Label(r, text='打开启动文件夹', bg=T['card'], fg=T['fg'], font=FONT,
-                     padx=10, pady=4, cursor='hand2')
-        b.pack(anchor='w', pady=(4, 0))
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text='开机自启（写当前用户注册表，可随时关）', bg=T['bg'],
+                 fg=T['fg'], font=FONT, anchor='w').pack(side='left')
+        lb = tk.Label(r, text='', bg=T['card'], font=FONT_B, width=6, cursor='hand2')
+        lb.pack(side='right')
+
+        def paint():
+            on, _ = get_autostart()
+            lb.configure(text='开' if on else '关',
+                         fg='#fff' if on else T['fg2'],
+                         bg=T['acc'] if on else T['card'])
+
+        def toggle(_=None):
+            on, _ = get_autostart()
+            ok = set_autostart(not on)
+            paint()
+            if not ok:
+                self.app.tip('开机自启设置失败（注册表不可写）')
+            else:
+                self.app.tip('开机自启已开启' if not on else '开机自启已关闭')
+        lb.bind('<Button-1>', toggle)
+        paint()
+
+        r2 = tk.Frame(master, bg=T['bg'])
+        r2.pack(fill='x', pady=(0, 4))
+        b = tk.Label(r2, text='不想改注册表？点这里打开启动文件夹手动放快捷方式',
+                     bg=T['bg'], fg=T['fg2'], font=FONT_SM, cursor='hand2', anchor='w')
+        b.pack(anchor='w')
         b.bind('<Button-1>', lambda e: self.open_startup())
 
     @staticmethod

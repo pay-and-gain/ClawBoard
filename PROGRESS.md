@@ -287,3 +287,33 @@ transform 模块延迟到首次打开变换窗口才导入、bench 内部按需�
 - 自写迷你 JSON 解析器，因此能直接读 Python 版写的数据文件
 - 功能范围：核心子集（监听 / 历史 / 常用语分组 / 拆词 / 搜索 / 托盘 / 热键 / 单实例 /
   敏感打码 / 详情）。高级搜索语法、27 项变换、批量导出只在 Python 版。
+
+---
+
+## 后续三项（v1.3.0）
+
+### ① C 版补齐（已做）
+- 高级搜索语法：`parse_query()` / `match_query()`，支持 time:（相对/日期/区间）、
+  app:（模糊 + 大小写不敏感）、type:、size:（b/kb/mb/gb）、is:fav/sens/est/url、-排除；
+  无法识别的 token 标记 `bad` 但绝不崩溃
+- 20 项文本变换：去格式、去空行、去行首尾空格、全角半角互转、大小写、首字母大写、
+  Base64 编解码（自写）、URL 编解码（自写）、MD5/SHA1/SHA256（系统 BCrypt）、
+  提取数字、行排序、行去重、Markdown→纯文本、JSON 压缩
+- 批量导出：TXT / CSV（带 BOM）/ JSON / Markdown，导出当前筛选结果
+- 自测：`ClawBoardC.exe --selftest` → 写 `ClawBoardC_selftest.txt`，**35 项全部通过**
+
+**自测发现的 2 个真 bug（已修）**
+1. `save_data()` 拼 JSON 时多写一个逗号 → 文件非法 → 重新加载只回 1 条（`before=5 after=1`）
+2. `tf_drop_blank()` 只跳过空行的换行符，没跳过行内空格 → `a\n\n\nb\n  \nc` 清不干净
+
+### ③ 靠边自动隐藏（设置开关，默认关）
+- 贴左/右/上边缘 → 鼠标离开约 1 秒 → 收起只留 6px；鼠标进入 10px 边缘带 → 滑回原位
+- 收起前记住原位（`_edge_pos` 移到 `_edge_hide` 里记，避免直接调用时丢位置）
+- 实测：左 x=-334、右 x=sw-6、上 y=-474，滑出后回 0，关掉开关不动
+
+### ④ 开机自启（设置开关，默认关）
+- 写/删 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\ClawBoard`，不需要管理员权限
+- 状态每次从注册表真实读取（不存配置文件），避免"显示开着其实没开"
+- frozen 时写 exe 自身，脚本运行时写 `pythonw.exe + ClawBoard.py`
+- 保留"打开启动文件夹手动放快捷方式"作为不改注册表的替代路径
+- 实测：开→读=True，关→读=False，测试后已还原到测试前状态（False）
