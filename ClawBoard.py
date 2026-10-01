@@ -485,10 +485,9 @@ def migrate(d, note=None):
                 if not isinstance(it, dict):
                     continue
                 seq += 1
-                has_ts = bool(it.get('created_at'))
-                if not has_ts:
+                if not it.get('created_at'):
                     it['created_at'] = now_ms() - seq * 1000
-                it['is_estimated'] = 0 if has_ts else 1
+                    it.setdefault('is_estimated', 1)   # 老数据无时间戳 → 标记为估算
                 it.setdefault('seq', seq)
         v = 2
     if v < 3:
@@ -960,6 +959,10 @@ class VirtualList(tk.Frame):
         self.kw = ''
         self.pool = {}
         self.wids = {}
+        self._vw = 0
+        self._last_w = -1
+        self._maxc = 0
+        self._maxc2 = 40
         self.canvas = tk.Canvas(self, bg=T['bg'], highlightthickness=0, bd=0)
         self.canvas.pack(side='left', fill='both', expand=True)
         self.sb = tk.Scrollbar(self, orient='vertical', command=self.canvas.yview,
@@ -1013,7 +1016,12 @@ class VirtualList(tk.Frame):
     def update_view(self):
         n = len(self.items)
         w = max(60, self.canvas.winfo_width())
-        self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
+        self._vw = w
+        if self._last_w != w:
+            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
+            self._last_w = w
+        else:
+            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
         if n == 0:
             self.clear_pool()
             return
@@ -1033,7 +1041,9 @@ class VirtualList(tk.Frame):
                                                          anchor='nw', width=w, height=ITEM_H)
             else:
                 self.canvas.coords(self.wids[i], 0, i * ITEM_H)
-                self.canvas.itemconfig(self.wids[i], width=w)
+                if f._vw != w:
+                    self.canvas.itemconfig(self.wids[i], width=w)
+                    f._vw = w
             f._idx = i
             self._fill(f, i)
 
@@ -1041,6 +1051,7 @@ class VirtualList(tk.Frame):
         f = tk.Frame(self.canvas, bg=T['card'], height=ITEM_H, cursor='hand2')
         f.pack_propagate(False)
         f._idx = i
+        f._vw = 0
         row = tk.Frame(f, bg=T['card'])
         row.place(x=8, y=6, relwidth=1, width=-96, height=18)
         f._row = row
@@ -1089,8 +1100,11 @@ class VirtualList(tk.Frame):
             c = T['card']
         self._paint(f, c)
         body = it.get('disp') or it.get('text', '')
-        w = max(60, self.canvas.winfo_width())
+        w = self._vw or 300
         maxc = max(8, int(w / 7.2))
+        if self._maxc != maxc:
+            self._maxc = maxc
+            self._maxc2 = max(8, int(w / 6.5))
         pos = -1
         if self.kw:
             pos = body.lower().find(self.kw.lower())
@@ -1107,7 +1121,7 @@ class VirtualList(tk.Frame):
             f._l1a.configure(text=preview(body, maxc), fg=T['fg'])
             f._l1b.configure(text='')
             f._l1c.configure(text='')
-        f._l2.configure(text=preview(it.get('sub', ''), max(8, int(w / 6.5))),
+        f._l2.configure(text=preview(it.get('sub', ''), self._maxc2 or 40),
                         fg=T['acc'] if it.get('kind') == 'phrase' else T['fg2'])
         f._badge.configure(text=it.get('badge', ''))
 
@@ -1201,9 +1215,9 @@ class ClawBoard:
         return it
 
     def load_data(self):
+        # 注意：schema_version 默认必须是 1，否则老文件（无该字段）会被误判为已迁移
         d = {'clip': [], 'groups': [{'name': '默认', 'items': []}], 'gi': 0,
-             'geom': None, 'settings': dict(DEFAULT_SETTINGS),
-             'schema_version': SCHEMA_VERSION}
+             'geom': None, 'settings': dict(DEFAULT_SETTINGS), 'schema_version': 1}
         if os.path.exists(DATA_FILE):
             try:
                 with open(DATA_FILE, 'r', encoding='utf-8') as f:
@@ -1213,7 +1227,6 @@ class ClawBoard:
                         d[k] = loaded[k]
             except Exception:
                 self.note('数据文件读取失败，已用默认值启动（原文件未改动）')
-        d = self.validate(d)
         if int(d.get('schema_version', 1)) < SCHEMA_VERSION:
             bak = backup_data()
             try:
@@ -1229,8 +1242,9 @@ class ClawBoard:
                                 b.write(a.read())
                     except Exception:
                         pass
-                d = self.validate(json.load(open(DATA_FILE, 'r', encoding='utf-8'))
-                                  if os.path.exists(DATA_FILE) else d)
+                d = self.validate(d)
+        else:
+            d = self.validate(d)
         return d
 
     def save_now(self, d=None):
@@ -2635,14 +2649,14 @@ def single_instance():
 def bench():
     """R4 性能实测：跑完输出真实数字后退出"""
     root = tk.Tk()
-    root.withdraw()
     app = ClawBoard(root)
+    root.geometry('340x480+-2000+-2000')   # 移出屏幕但保持 mapped，保证布局真实
     root.update()
     print('启动到可响应: %.0f ms' % ((time.time() - app.t0) * 1000))
     print('初始常驻内存: %.1f MB' % mem_mb())
 
     base = ''.join(random.choice(string.ascii_letters + '测试中文') for _ in range(60))
-    n = 5000
+    n = 10000
     t0 = time.time()
     for i in range(n):
         app.data['clip'].append({'id': uid(), 'text': base + str(i), 'time': now_str()})
@@ -2664,7 +2678,13 @@ def bench():
     for i in range(200):
         app.search.set(str(random.randint(0, n)))
         app.render()
-    print('搜索 200 次平均: %.2f ms/次' % ((time.time() - t0) / 200 * 1000))
+    print('普通搜索 200 次平均: %.2f ms/次' % ((time.time() - t0) / 200 * 1000))
+
+    t0 = time.time()
+    for i in range(50):
+        app.search.set('app:chrome size:>10 time:<1d')
+        app.render()
+    print('高级语法搜索 50 次平均: %.2f ms/次' % ((time.time() - t0) / 50 * 1000))
     app.search.set('')
     app.render()
 
@@ -2674,7 +2694,14 @@ def bench():
     print('空闲 3 秒 CPU 占用: %.2f %%' % ((cpu_ms() - c0) / ((time.time() - w0) * 10.0)))
     print('%d 条后内存: %.1f MB' % (n, mem_mb()))
     print('虚拟列表实际 widget 数: %d / %d 条' % (len(app.vlist.pool), n))
-    app.quit_app()
+    # 压测数据绝不落盘：直接销毁，不走 save()
+    try:
+        app.hw.unreg_hotkey()
+        app.hw.tray_del()
+        app.hw.stop()
+    except Exception:
+        pass
+    app.root.destroy()
 
 
 def main():
