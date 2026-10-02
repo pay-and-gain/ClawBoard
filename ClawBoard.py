@@ -31,7 +31,7 @@ import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.4.3'
+APP_VER = '1.4.4'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -61,11 +61,13 @@ FONT = ('Microsoft YaHei UI', 9)
 FONT_B = ('Microsoft YaHei UI', 9, 'bold')
 FONT_SM = ('Microsoft YaHei UI', 8)
 FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
+FONT_MONO = ('Consolas', 9)      # 代码 / JSON 用等宽，一眼看出"这是代码不是散文"
 
 ITEM_H = 52          # 虚拟列表固定行高（含卡片之间的空隙）
 CARD_GAP = 4         # 卡片上下留出的空隙，条目之间不再糊成一片
 WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
 BAR_H = 34            # 标题栏高度（也是折叠后露出来的高度），比原来 30 更好点
+TOOL_H = 40           # 工具条高度。36 时按钮上下只剩 5px 余量，一放大字号就被切掉一截
 MIN_W, MIN_H = 280, 340   # 面板最小尺寸。再小的话：标题栏 30 + 标签 32 + 工具条 36 一扣，
                           # 留给列表的宽度会被徽章/序号列吃掉，正文只剩几十像素 —— 看起来像"没有内容"
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
@@ -85,6 +87,52 @@ T = dict(DARK)
 def set_theme(name):
     T.clear()
     T.update(DARK if name == 'dark' else LIGHT)
+
+
+def _rgb(c):
+    c = (c or '').lstrip('#')
+    if len(c) != 6:
+        return None
+    try:
+        return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def shade(c, k):
+    """把颜色整体乘 k（>1 变亮、<1 变暗），各通道夹在 0-255"""
+    t = _rgb(c)
+    if not t:
+        return c
+    f = lambda v: max(0, min(255, int(round(v * k))))
+    return '#%02x%02x%02x' % tuple(f(v) for v in t)
+
+
+def is_dark(c):
+    """按亮度判断深浅，用来决定文字该用浅色还是深色"""
+    t = _rgb(c)
+    if not t:
+        return True
+    return (t[0] * 299 + t[1] * 587 + t[2] * 114) / 1000.0 < 128
+
+
+def apply_theme(st):
+    """应用主题，并按自定义背景色推导出整套配色。
+    用户只选一个背景色，剩下的面板/卡片/边框由它按比例推出来，
+    文字色按背景深浅自动选 —— 免得选了白底却配白字。"""
+    set_theme(st.get('theme', 'dark'))
+    c = (st.get('bg_color') or '').strip()
+    if not c or not _rgb(c):
+        return
+    T['bg'] = c
+    if is_dark(c):
+        T.update(panel=shade(c, 1.18), card=shade(c, 1.42), card_h=shade(c, 1.72),
+                 card_s=shade(c, 1.55), card_m=shade(c, 1.62), line=shade(c, 1.70),
+                 fg='#e6e8ee', fg2='#9aa0ad')
+    else:
+        T.update(panel=shade(c, 0.95), card=shade(c, 1.06), card_h=shade(c, 0.96),
+                 card_s=shade(c, 0.86), card_m=shade(c, 0.89), line=shade(c, 0.85),
+                 fg='#1f2430', fg2='#6b7280')
 
 
 # ---------------- 2. Win32 ----------------
@@ -709,6 +757,110 @@ TYPE_ICON = {'url': '🔗', 'json': '{ }', 'multiline': '¶', 'text': '📝',
 def type_icon(t):
     """徽章上的类型图标：比"文本/url/json"这类文字扫得快，也更省横向空间"""
     return TYPE_ICON.get((t or 'text').lower(), '📝')
+
+
+# ---------- 内容自适应：判定"这到底复制的是什么" ----------
+# 判定顺序与要点参考 EcoPaste(7.4k★) src-tauri/src/clipboard/detect.rs 和
+# Mimer 的 Clip.swift：① 单一特征不算证据，要叠加（只有 { 不算代码）
+# ② JSON 必须在代码**之前**判，且只认顶层 {}/[]（否则 "123"、'"abc"' 这类标量也会被
+# json.loads 通过，JSON 就被当成普通文本了）
+_URL_RE = re.compile(r'^(?:https?|ftp|file)://\S+$|^www\.\S+\.\S+$', re.I)
+_MAIL_RE = re.compile(r'^[A-Za-z0-9._%+\-一-龥]+@[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$')
+_HEX_RE = re.compile(r'^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$')
+_FN_COLOR_RE = re.compile(r'^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(.+\)$', re.I)
+_FILELINE_RE = re.compile(r'(?::\d+){1,2}$')
+_CODE_HEADS = ('func ', 'def ', 'const ', 'function ', 'import ', '#include', 'package ',
+               '<?xml', '<!DOCTYPE', 'SELECT ', 'class ', 'public ', 'static ', 'var ',
+               'let ', 'from ', 'if __name__', '#!/')
+CLASSIFY_MAX = 128000      # 超长内容直接降级为纯文本，别在正则上浪费时间
+
+
+def looks_like_code(s):
+    """证据叠加：光有 {} 不算，还得有 ; / = / 换行 / :" 佐证，
+    或者是关键字开头，或者 ≥2 行有缩进（散文只缩进一行不算）"""
+    if '{' in s and '}' in s and (';' in s or '=' in s or '\n' in s
+                                  or (':' in s and '"' in s)):
+        return True
+    if '=>' in s or '</' in s or '/>' in s:
+        return True
+    if s.lstrip().startswith(_CODE_HEADS):
+        return True
+    lines = s.split('\n')
+    if len(lines) >= 2 and sum(1 for L in lines if L[:1] in (' ', '\t')
+                               and L.startswith(('  ', '\t'))) >= 2:
+        return True
+    return False
+
+
+def guess_lang(s):
+    """轻量语言猜测（无第三方库），只在多行代码上启用，避免单行误报"""
+    h = s.lstrip()
+    if h.startswith('#!'):
+        return 'python' if 'python' in h else ('shell' if ('bash' in h or 'sh' in h) else 'shell')
+    if h.startswith('<?php'):
+        return 'php'
+    if '<!DOCTYPE html' in h or re.search(r'</(div|span|body|html)>', s, re.I):
+        return 'html'
+    if re.search(r'^\s*(def |class |import |from [\w.]+ import)', s, re.M):
+        return 'python'
+    if re.search(r'\b(function|const |let |var |=>)\b', s):
+        return 'javascript'
+    if re.search(r'#include|std::', s):
+        return 'cpp'
+    if re.search(r'^\s*SELECT .+ FROM', s, re.I | re.M):
+        return 'sql'
+    return 'code'
+
+
+def classify(text):
+    """返回 (kind, meta)。kind ∈ url / email / color / path / json / code / multiline / text
+    纯函数、可单测；UI 只是它的消费者。"""
+    s = (text or '').strip()
+    if not s:
+        return 'text', {}
+    if len(s) > CLASSIFY_MAX:
+        return 'text', {}
+    # 1. 路径（允许 path:行号 这种形态）
+    core = _FILELINE_RE.sub('', s)
+    if len(core) < 4096:
+        p = os.path.expanduser(core)
+        if (core.startswith(('/', '~', './', '../')) or os.path.isabs(core)) \
+                and os.path.exists(p):
+            return 'path', {'basename': os.path.basename(core.rstrip('/')) or core}
+    # 2. 单行串才可能是 url / email / 色值（要求整串无空白，能挡掉绝大多数误判）
+    if ' ' not in s and '\n' not in s:
+        if _URL_RE.match(s):
+            m = re.match(r'^(?:https?|ftp|file)://([^/\s?#]+)', s)
+            return 'url', {'host': m.group(1) if m else s}
+        if _MAIL_RE.match(s):
+            return 'email', {}
+    # 颜色单独判：rgb(30, 32, 39) 里带空格，不能受"整串无空白"那条限制。
+    # 正则要求首尾完整匹配，误判风险很低
+    if _HEX_RE.match(s) or _FN_COLOR_RE.match(s):
+        return 'color', {}
+    # 3. JSON：首字符预筛（省掉一次全量解析）+ 顶层必须是 dict/list
+    if s[0] in '{[' and len(s.encode('utf-8', 'replace')) <= 100000:
+        try:
+            v = json.loads(s)
+        except ValueError:
+            pass
+        else:
+            if isinstance(v, (dict, list)):
+                return 'json', {}
+    # 4. 代码
+    if looks_like_code(s):
+        return 'code', {'lang': guess_lang(s)}
+    return ('multiline' if '\n' in s else 'text'), {}
+
+
+KIND_LABEL = {'url': '链接', 'email': '邮箱', 'color': '颜色', 'path': '路径',
+              'json': 'JSON', 'code': '代码', 'multiline': '多行', 'text': '文本'}
+KIND_ICON = {'url': '🔗', 'email': '✉', 'color': '🎨', 'path': '📁',
+             'json': '{ }', 'code': '</>', 'multiline': '¶', 'text': '📝'}
+
+
+def kind_icon(k):
+    return KIND_ICON.get(k, '📝')
 
 
 def detect_content_type(text):
@@ -1750,6 +1902,10 @@ class VirtualList(tk.Frame):
             self._maxc2 = max(8, int(w / 6.5))
         f._num.configure(text=('0' if i == 9 else str(i + 1))
                          if (self.show_num and i < 10 and f._numw) else '')
+        # 自适应：代码/JSON 用等宽字体，链接用强调色 —— 一眼看出这行是什么东西
+        ka = it.get('kind_auto') or 'text'
+        ft = FONT_MONO if ka in ('code', 'json') else FONT
+        fg = T['acc'] if ka == 'url' else T['fg']
         kw, pos = self._first_hit(body)
         if pos >= 0 and kw:
             s = max(0, pos - 6)
@@ -1757,13 +1913,14 @@ class VirtualList(tk.Frame):
             a = seg[:pos - s]
             b = seg[pos - s:pos - s + len(kw)]
             cc = seg[pos - s + len(kw):]
-            f._l1a.configure(text=a, fg=T['fg'])
-            f._l1b.configure(text=b)
-            f._l1c.configure(text=preview(cc, max(1, maxc - len(a) - len(b))), fg=T['fg'])
+            f._l1a.configure(text=a, fg=fg, font=ft)
+            f._l1b.configure(text=b, font=ft)
+            f._l1c.configure(text=preview(cc, max(1, maxc - len(a) - len(b))),
+                             fg=fg, font=ft)
         else:
-            f._l1a.configure(text=preview(body, maxc), fg=T['fg'])
-            f._l1b.configure(text='')
-            f._l1c.configure(text='')
+            f._l1a.configure(text=preview(body, maxc), fg=fg, font=ft)
+            f._l1b.configure(text='', font=ft)
+            f._l1c.configure(text='', font=ft)
         f._l2.configure(text=preview(it.get('sub', ''), self._maxc2 or 40),
                         fg=T['acc'] if it.get('kind') == 'phrase' else T['fg2'])
         f._badge.configure(text=it.get('badge', ''))
@@ -1787,6 +1944,8 @@ DEFAULT_SETTINGS.update(
     # 粘出去却带着 → 看着像凭空多了空格。默认在粘贴时去掉首尾空白。
     trim_paste=True,
     collapsed=False,     # 上次退出时是不是折叠着的
+    collapse_to_corner=True,   # 折叠时贴到屏幕右下角（留在原处太突兀）
+    bg_color='',         # 自定义背景色，空=用主题默认
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
@@ -1820,7 +1979,7 @@ class ClawBoard:
         self.data = self.load_data()
         self.st = self.data['settings']
         self._seq = max([int(x.get('seq') or 0) for x in self.data['clip']] or [0])
-        set_theme(self.st['theme'])
+        apply_theme(self.st)
 
         root.title(APP_NAME)
         root.overrideredirect(True)
@@ -2154,7 +2313,7 @@ class ClawBoard:
                                  self.on_menu_item, self.on_hover_item)
         self.vlist.pack(fill='both', expand=True, padx=(6, 0), pady=4)
 
-        self.tool = tk.Frame(self.body, bg=T['panel'], height=36)
+        self.tool = tk.Frame(self.body, bg=T['panel'], height=TOOL_H)
         self.tool.pack(fill='x')
         self.tool.pack_propagate(False)
         # width=8 只是"请求宽度"，靠 expand 去吃剩余空间。默认 20 字符会把工具条撑爆，
@@ -2189,6 +2348,7 @@ class ClawBoard:
         self.grip.place(relx=1.0, rely=1.0, anchor='se')
         self.grip.bind('<ButtonPress-1>', self.start_resize)
         self.grip.bind('<B1-Motion>', self.do_resize)
+        self.grip.lower()      # 拖动手柄在右下角，压住工具条按钮的话按钮就像"被遮住"了
         # 兜住"手滑拖到看不见"：折叠状态下不设下限，否则折不成 210x30
         if not getattr(self, 'collapsed', False):
             mw, mh = self.min_size()
@@ -2220,11 +2380,12 @@ class ClawBoard:
         return f
 
     def mk_tool_btn(self, text, tip, cmd):
-        # width=2：1 个汉字的宽度就够。原来 3 + padx=2 时，7 个按钮要吃掉 217px，
-        # 最小宽度的面板里搜索框只剩 60 多像素，根本没法打字
+        # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示，靠 padx=1 省空间：
+        # 原来 width=3 + padx=2 时 7 个按钮吃掉 217px，搜索框只剩 60 多像素；
+        # 现在 7×31 = 217 → 7×31? 实际 7×31=217 padx=1 后每个 32 → 224
         b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
-                     width=2, cursor='hand2')
-        b.pack(side='left', padx=1, pady=5)
+                     width=3, cursor='hand2')
+        b.pack(side='left', padx=1, pady=7)   # pady 让它垂直居中，不被工具条上下切掉
         b.bind('<Button-1>', lambda e: cmd())
         b.bind('<Enter>', lambda e: (b.configure(bg=T['card_h']), self.tip(tip)))
         b.bind('<Leave>', lambda e: b.configure(bg=T['card']))
@@ -2404,6 +2565,20 @@ class ClawBoard:
         self._edge_hidden = False
         self._edge_tick = 0
 
+    def corner_pos(self, w, h):
+        """所在屏幕的右下角坐标（底部留出任务栏的高度）。
+        折叠成一条标题栏后还留在原处很突兀，贴到右下角更像是"收起来了"。"""
+        cx = self.root.winfo_x() + self.root.winfo_width() // 2
+        cy = self.root.winfo_y() + self.root.winfo_height() // 2
+        scr = None
+        for box in monitors():
+            l, t, r, b = box
+            if l <= cx <= r and t <= cy <= b:
+                scr = box
+                break
+        l, t, r, b = scr or self.primary_monitor()
+        return max(l + 2, r - w - 14), max(t + 2, b - h - 62)
+
     def toggle_collapse(self):
         self.collapsed = not self.collapsed
         # 折叠状态要跟着存盘：不然折叠着退出后，存档里剩下折叠尺寸，
@@ -2414,8 +2589,11 @@ class ClawBoard:
             self._restore = self.root.geometry()
             self.body.pack_forget()
             self.root.minsize(160, BAR_H)   # 先放开最小尺寸，否则折叠不成一条标题栏
-            self.root.geometry('210x%d+%d+%d' % (BAR_H, self.root.winfo_x(),
-                                                 self.root.winfo_y()))
+            if self.st.get('collapse_to_corner', True):
+                x, y = self.corner_pos(210, BAR_H)     # 贴到右下角
+            else:
+                x, y = self.root.winfo_x(), self.root.winfo_y()
+            self.root.geometry('210x%d+%d+%d' % (BAR_H, x, y))
         else:
             mw, mh = self.min_size()
             self.root.minsize(mw, mh)
@@ -2577,6 +2755,11 @@ class ClawBoard:
             text = it['text']
             name = it.get('name') or ''
             hits = it.get('sens') or []
+            k = it.get('kind_auto')
+            if not k:
+                # 老记录（判定功能是后加的）补算一次并写回内存，之后不再重算
+                k = classify(text)[0]
+                it['kind_auto'] = k
             disp = text
             if hits and self.st['mask_sensitive'] and not it.get('mask_off'):
                 disp = mask_text(text, hits)
@@ -2589,16 +2772,19 @@ class ClawBoard:
                 if self.st['show_time']:
                     parts.append(rel_time(it.get('created_at'), it.get('is_estimated')))
                 parts.append(it.get('source_app') or 'unknown')
+                nl = text.count('\n')
+                if nl:
+                    parts.append('+%d 行' % nl)     # PasteBar 的 "+N lines" 角标
                 if int(it.get('copy_count') or 1) > 1:
                     parts.append('×%d' % it['copy_count'])
                 if hits:
                     parts.append('⚠' + '/'.join(hits))
                 sub = ' · '.join(parts)
-                badge = '%s %s' % (type_icon(it.get('content_type')), human_size(size))
+                badge = '%s %s' % (kind_icon(k), human_size(size))
             if it.get('fav'):
                 disp = '★ ' + disp
             out.append({'id': it['id'], 'disp': disp, 'text': text, 'sub': sub,
-                        'badge': badge, 'kind': self.tab, 'sens': hits,
+                        'badge': badge, 'kind': self.tab, 'sens': hits, 'kind_auto': k,
                         'created_at': it.get('created_at'),
                         'est': it.get('is_estimated'),
                         'app': it.get('source_app') or 'unknown'})
@@ -3072,6 +3258,7 @@ class ClawBoard:
         ExportDialog(self)
 
     def rebuild(self):
+        apply_theme(self.st)          # 换主题/换背景后要重新推导整套配色
         self.root.configure(bg=T['bg'])
         self.build_ui()
         self.render()
@@ -3182,6 +3369,7 @@ class ClawBoard:
             rec = {'id': uid(), 'text': txt, 'created_at': ts, 'updated_at': ts,
                'seq': self.next_seq(), 'source_app': src,
                'content_type': detect_content_type(txt),
+               'kind_auto': classify(txt)[0],   # 入库时判一次类型，渲染层不再重算
                'content_size': byte_size(txt), 'copy_count': 1, 'fav': 0,
                'is_estimated': 0}
         # 空值字段一律不落盘：1 万条能省下 MB 级内存与文件体积
@@ -3250,6 +3438,8 @@ class SettingsWindow:
         self.row_autostart_switch(body)
         self.row_close_action(body)
         self.row_theme(body)
+        self.row_bgcolor(body)
+        self.row_switch(body, '折叠时贴到屏幕右下角', 'collapse_to_corner')
         self.row_hotkey(body)
         self.row_int(body, '历史最大条数（10-5000）', 'max_items')
         self.row_int(body, '捕获长度下限（0=不限）', 'min_len', lo=0, hi=1000)
@@ -3394,6 +3584,40 @@ class SettingsWindow:
             self.app.save(True)
         e.bind('<Return>', commit)
         e.bind('<FocusOut>', commit)
+
+    BG_CHOICES = (('默认（跟随主题）', ''), ('墨黑', '#12141a'), ('深蓝灰', '#1e2027'),
+                  ('午夜蓝', '#16202e'), ('墨绿', '#16241f'), ('深紫', '#1d1a2b'),
+                  ('浅灰', '#f4f5f8'), ('米白', '#faf7f0'), ('纯白', '#ffffff'))
+
+    def row_bgcolor(self, master):
+        """换背景：只选一个底色，面板/卡片/边框/文字色由 apply_theme 自动推导"""
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text='背景色（选底色，其余自动配）', bg=T['bg'], fg=T['fg'],
+                 font=FONT).pack(side='left')
+        lb = tk.Label(r, text='', bg=T['card'], font=FONT_B, width=10, cursor='hand2')
+        lb.pack(side='right')
+
+        def paint():
+            cur = (self.app.st.get('bg_color') or '').strip().lower()
+            lb.configure(text=next((n for n, c in self.BG_CHOICES
+                                    if c.lower() == cur), '默认'))
+
+        def pick(c):
+            self.app.st['bg_color'] = c
+            self.app.save(True)
+            self.app.rebuild()
+            self.app.tip('背景已更换' if c else '已恢复主题默认背景')
+
+        def menu(_=None):
+            m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                        activebackground=T['card_h'], activeforeground=T['fg'],
+                        font=FONT, relief='flat')
+            for name, c in self.BG_CHOICES:
+                m.add_command(label=name, command=lambda cc=c: pick(cc))
+            m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
+        lb.bind('<Button-1>', menu)
+        paint()
 
     def row_text(self, master, text, key, hint=''):
         """文本型设置：忽略名单这类可能写很长，占一整行，回车或失焦时提交"""
