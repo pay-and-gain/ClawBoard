@@ -73,9 +73,17 @@ check('超长直接降级', K('x' * (C.CLASSIFY_MAX + 10)) == 'text')
 
 # ---------- 6. 卡片样式真的跟着类型走 ----------
 C.NO_SAVE = True
+C.DEFAULT_SETTINGS['collapsed'] = False
 root = tk.Tk()
 root.geometry('420x560+80+80')
 app = C.ClawBoard(root)
+# 上次退出时若折叠，body 被 pack_forget → 虚拟列表只建出 1~2 行，
+# 后面访问 pool[3] 直接 KeyError（假失败）
+if app.collapsed:
+    app.collapsed = False
+    app.st['collapsed'] = False
+    app.body.pack(fill='both', expand=True)
+    app.root.minsize(*app.min_size())
 root.update()
 
 items = [

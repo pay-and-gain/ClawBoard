@@ -27,11 +27,12 @@ import subprocess
 import html as _html
 import fnmatch
 import tkinter as tk
+import tkinter.font as tkfont
 import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.4.4'
+APP_VER = '1.4.5'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -2334,14 +2335,18 @@ class ClawBoard:
         self.search_entry.bind('<Return>', self.on_search_return)
         self.search_entry.bind('<Button-3>', lambda e: self.search_menu(e))
         self.search_entry.bind('<Control-a>', self.select_all_visible)
-        for txt, tip, cmd in (('＋', '新增常用语', self.add_phrase),
-                              ('拆', '拆词：把一段文字拆成多条常用语', self.split_words),
-                              ('删', '删除选中项', self.del_sel),
-                              ('清', '清空当前列表', self.clear_list),
-                              ('🔧', '文本变换（Ctrl+T）', self.open_transform),
-                              ('?', '搜索语法帮助', self.open_query_help),
-                              ('⚙', '设置', self.open_settings)):
-            self.mk_tool_btn(txt, tip, cmd)
+        self._tool_btns = []
+        for txt, tip2, cmd in (('＋', '新增常用语', self.add_phrase),
+                               ('拆', '拆词：把一段文字拆成多条常用语', self.split_words),
+                               ('删', '删除选中项', self.del_sel),
+                               ('清', '清空当前列表', self.clear_list),
+                               ('🔧', '文本变换（Ctrl+T）', self.open_transform),
+                               ('?', '搜索语法帮助', self.open_query_help),
+                               ('⚙', '设置', self.open_settings)):
+            self._tool_btns.append((txt, self.mk_tool_btn(txt, tip2, cmd)))
+        # 面板变窄时按优先级收起次要按钮，别把它们挤成残废
+        self._last_tw = 0
+        self.tool.bind('<Configure>', lambda e: self._layout_tool())
 
         self.grip = tk.Label(r, text='◢', bg=T['bg'], fg=T['line'], font=('Consolas', 9),
                              cursor='sizing')
@@ -2379,20 +2384,57 @@ class ClawBoard:
         f._lb, f._bar, f._key = lb, bar, key
         return f
 
+    # 窗口窄于该宽度就收起对应按钮（从左到右优先级递增：⚙ 设置和 ? 帮助永远保留）
+    TOOL_HIDE_AT = (('＋', 420), ('拆', 390), ('清', 360))
+
+    def _layout_tool(self):
+        """窄面板时收起次要按钮，而不是让它们被压成残废。
+        收起的按需要恢复：重新按原顺序 pack，相对位置不变。"""
+        w = self.tool.winfo_width()
+        # 折叠时 body 被 pack_forget，宽度会退化成 1px。这时算出来的"该显示哪些"是假的，
+        # 还会污染 _last_tw，导致展开后不再重排
+        if w <= 1 or not self.tool.winfo_ismapped():
+            return
+        if w == self._last_tw:
+            return
+        self._last_tw = w
+        hide = {t for t, need in self.TOOL_HIDE_AT if w < need}
+        for text, b in self._tool_btns:
+            if text in hide:
+                if b.winfo_ismapped():
+                    b.pack_forget()
+            elif not b.winfo_ismapped():
+                # 必须用与首次创建完全一致的 pack 参数：
+                # 只写 pack(side='left') 会丢掉 padx/pady，按钮挤成一坨还贴边
+                b.pack(**b._pack_args)
+
     def mk_tool_btn(self, text, tip, cmd):
-        # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示，靠 padx=1 省空间：
-        # 原来 width=3 + padx=2 时 7 个按钮吃掉 217px，搜索框只剩 60 多像素；
-        # 现在 7×31 = 217 → 7×31? 实际 7×31=217 padx=1 后每个 32 → 224
+        # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示，靠 padx=1 省空间。
+        # 7 个按钮约占 224px；窄面板下由 _layout_tool 收起次要项，
+        # 宁可少几个按钮，也不要留半个被压扁的按钮（用户看到的"被遮挡"）
         b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
                      width=3, cursor='hand2')
-        b.pack(side='left', padx=1, pady=7)   # pady 让它垂直居中，不被工具条上下切掉
+        # pady 让它垂直居中，不被工具条上下切掉；参数存一份给 _layout_tool 复原用
+        b._pack_args = dict(side='left', padx=1, pady=7)
+        b.pack(**b._pack_args)
         b.bind('<Button-1>', lambda e: cmd())
         b.bind('<Enter>', lambda e: (b.configure(bg=T['card_h']), self.tip(tip)))
         b.bind('<Leave>', lambda e: b.configure(bg=T['card']))
         return b
 
     def tip(self, text):
-        self.title_lb.configure(text='⚡ ' + text)
+        # 提示太长会把标题栏顶满、盖到右侧按钮上，按可用宽度截断
+        t = text or ''
+        avail = max(80, self.title_lb.winfo_width() - 40)
+        try:
+            f = tkfont.Font(font=FONT_TITLE)
+            while t and f.measure('⚡ ' + t) > avail:
+                t = t[:-1]
+            if t != (text or ''):
+                t = t.rstrip() + '…'
+        except Exception:
+            t = t[:18]
+        self.title_lb.configure(text='⚡ ' + t)
         self.root.after(2500, lambda: self.title_lb.configure(text='⚡ ' + APP_NAME))
 
     def confirm(self, text, on_yes):
