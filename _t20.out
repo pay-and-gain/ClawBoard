@@ -1,0 +1,11 @@
+W=280  tool=280  entry=140  vis=删/🔧/?/⚙                clipped=-
+W=300  tool=300  entry=160  vis=删/🔧/?/⚙                clipped=-
+W=320  tool=320  entry=180  vis=删/🔧/?/⚙                clipped=-
+W=349  tool=349  entry=209  vis=删/🔧/?/⚙                clipped=-
+W=380  tool=380  entry=208  vis=删/清/🔧/?/⚙              clipped=-
+W=420  tool=420  entry=184  vis=＋/拆/删/清/🔧/?/⚙          clipped=-
+W=460  tool=460  entry=224  vis=＋/拆/删/清/🔧/?/⚙          clipped=-
+W=520  tool=520  entry=284  vis=＋/拆/删/清/🔧/?/⚙          clipped=-
+W=640  tool=640  entry=404  vis=＋/拆/删/清/🔧/?/⚙          clipped=-
+
+MIN_W=280  TOOL_H=40  btn_req=30  entry_req=52

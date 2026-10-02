@@ -4105,6 +4105,30 @@ def main():
     if '--bench' in sys.argv:
         bench()
         return
+    if '--shot' in sys.argv:
+        # 截图/量布局用：起一个不写盘、不抢单实例的实例，宽度由 --shot 后面的数字决定。
+        # 直接复用真实设置会把折叠态带进来（body 被 pack_forget，量出来全是 1px）
+        NO_SAVE = True
+        DEFAULT_SETTINGS['collapsed'] = False
+        i = sys.argv.index('--shot')
+        sw = int(sys.argv[i + 1]) if len(sys.argv) > i + 1 else 349
+        root = tk.Tk()
+        app = ClawBoard(root)
+        if app.collapsed:
+            app.collapsed = False
+            app.body.pack(fill='both', expand=True)
+            app.root.minsize(*app.min_size())
+        root.geometry('%dx460+60+60' % sw)
+        root.update()
+        app._last_tw = 0
+        app._layout_tool()
+        root.update()
+        print('W=%d tool=%d entry=%d vis=%s' % (
+            sw, app.tool.winfo_width(), app.search_entry.winfo_width(),
+            [b.cget('text') for _, b in app._tool_btns if b.winfo_ismapped()]),
+            flush=True)
+        root.mainloop()
+        return
     if not single_instance():
         sys.exit(0)
     root = tk.Tk()

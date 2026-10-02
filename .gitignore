@@ -13,3 +13,7 @@ ClawBoard数据.json
 ClawBoard数据.json.bak
 ClawBoard数据.json.tmp
 dist/
+*.log
+shot_w*.png
+dist/
+build/
