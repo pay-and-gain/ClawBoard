@@ -2344,7 +2344,17 @@ class ClawBoard:
                                ('?', '搜索语法帮助', self.open_query_help),
                                ('⚙', '设置', self.open_settings)):
             self._tool_btns.append((txt, self.mk_tool_btn(txt, tip2, cmd)))
+        # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
+        self.more_btn = tk.Label(self.tool, text='⋯', bg=T['card'], fg=T['fg2'],
+                                 font=FONT_B, width=3, cursor='hand2')
+        self.more_btn._pack_args = dict(side='left', padx=1, pady=7)
+        self.more_btn.bind('<Button-1>', self.more_menu)
+        self.more_btn.bind('<Enter>',
+                           lambda e: (self.more_btn.configure(bg=T['card_h']),
+                                      self.tip('更多：新增 / 拆词 / 清空')))
+        self.more_btn.bind('<Leave>', lambda e: self.more_btn.configure(bg=T['card']))
         # 面板变窄时按优先级收起次要按钮，别把它们挤成残废
+        self._tool_hidden = ()
         self._last_tw = 0
         self.tool.bind('<Configure>', lambda e: self._layout_tool())
 
@@ -2384,38 +2394,70 @@ class ClawBoard:
         f._lb, f._bar, f._key = lb, bar, key
         return f
 
-    # 窗口窄于该宽度就收起对应按钮（从左到右优先级递增：⚙ 设置和 ? 帮助永远保留）
-    TOOL_HIDE_AT = (('＋', 420), ('拆', 390), ('清', 360))
+    # 窗口不够宽时按优先级把次要按钮收进「⋯」溢出菜单（? 帮助和 ⚙ 设置永远直接可见，
+    # 删也跟着保留——有选中项时它是最高频的）。阈值是按算式推出来的，不是拍脑袋：
+    #   按钮 30px + padx 2 = 32px；搜索框要留 ≥120px（它是找历史的唯一入口）；
+    #   entry = W - 32*(可见按钮数 + 溢出按钮) - padx 12
+    #   W=380 放得下 7 个 → entry 144    W=356 放得下 6 个 → entry 152
+    #   W=324 放得下 5 个 → entry 152    W=280(MIN_W) 只剩 4 个 → entry 108，够用
+    TOOL_HIDE_AT = (('＋', 380), ('拆', 356), ('清', 324))
 
     def _layout_tool(self):
-        """窄面板时收起次要按钮，而不是让它们被压成残废。
-        收起的按需要恢复：重新按原顺序 pack，相对位置不变。"""
+        """窄面板时把次要按钮收进「⋯」菜单，而不是让它们被压成残废。
+
+        两个坑：
+        1) pack_forget 之后再 pack 只能追加到队尾，谁在队尾谁跑到最右边。
+           实测「宽 640 → 窄 349 → 宽 640」之后顺序变成 删🔧?⚙＋拆清（乱的）。
+           所以宽度跨过阈值时按固定顺序整体重排一遍。
+        2) 折叠时 body 被 pack_forget，宽度退化成 1px，这时算出来的显示集合是假的，
+           还会把 _last_tw 写成 1，导致展开后不再重排。所以要先挡掉。
+        """
         w = self.tool.winfo_width()
-        # 折叠时 body 被 pack_forget，宽度会退化成 1px。这时算出来的"该显示哪些"是假的，
-        # 还会污染 _last_tw，导致展开后不再重排
         if w <= 1 or not self.tool.winfo_ismapped():
             return
         if w == self._last_tw:
             return
         self._last_tw = w
-        hide = {t for t, need in self.TOOL_HIDE_AT if w < need}
-        for text, b in self._tool_btns:
-            if text in hide:
-                if b.winfo_ismapped():
-                    b.pack_forget()
-            elif not b.winfo_ismapped():
-                # 必须用与首次创建完全一致的 pack 参数：
-                # 只写 pack(side='left') 会丢掉 padx/pady，按钮挤成一坨还贴边
+        hidden = tuple(t for t, need in self.TOOL_HIDE_AT if w < need)
+        if hidden == getattr(self, '_tool_hidden', None):
+            return
+        self._tool_hidden = hidden
+        for _, b in self._tool_btns:              # 全部收回，再按固定顺序排队
+            b.pack_forget()
+        self.more_btn.pack_forget()
+        hide = set(hidden)
+        for text, b in self._tool_btns:           # 固定顺序：＋拆删清🔧?⚙
+            if text not in hide:
                 b.pack(**b._pack_args)
+        if hidden:
+            self.more_btn.pack(**self.more_btn._pack_args)
+
+    def more_menu(self, e=None):
+        """溢出菜单：收起的按钮一个都不丢，只是挪进菜单里"""
+        hidden = getattr(self, '_tool_hidden', ()) or ()
+        m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
+                    activebackground=T['card_h'], activeforeground=T['fg'],
+                    font=FONT, relief='flat')
+        for text, b in self._tool_btns:
+            if text in hidden:
+                m.add_command(label='%s  %s' % (text, b._tip_text),
+                              command=b._tip_cmd)
+        if e is not None:
+            m.tk_popup(e.x_root, e.y_root)
+        else:
+            m.tk_popup(self.more_btn.winfo_rootx() + 2,
+                       self.more_btn.winfo_rooty() - 8)
 
     def mk_tool_btn(self, text, tip, cmd):
         # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示，靠 padx=1 省空间。
-        # 7 个按钮约占 224px；窄面板下由 _layout_tool 收起次要项，
-        # 宁可少几个按钮，也不要留半个被压扁的按钮（用户看到的"被遮挡"）
+        # 7 个按钮约占 224px；窄面板下由 _layout_tool 收进「⋯」菜单，
+        # 宁可挪走也不要留半个被压扁的按钮（用户看到的"被遮挡"）
         b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
                      width=3, cursor='hand2')
         # pady 让它垂直居中，不被工具条上下切掉；参数存一份给 _layout_tool 复原用
         b._pack_args = dict(side='left', padx=1, pady=7)
+        b._tip_text = tip            # 溢出菜单里要显示完整提示
+        b._tip_cmd = cmd
         b.pack(**b._pack_args)
         b.bind('<Button-1>', lambda e: cmd())
         b.bind('<Enter>', lambda e: (b.configure(bg=T['card_h']), self.tip(tip)))
