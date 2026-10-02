@@ -31,7 +31,7 @@ import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.4.2'
+APP_VER = '1.4.3'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -62,7 +62,8 @@ FONT_B = ('Microsoft YaHei UI', 9, 'bold')
 FONT_SM = ('Microsoft YaHei UI', 8)
 FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
 
-ITEM_H = 52          # 虚拟列表固定行高
+ITEM_H = 52          # 虚拟列表固定行高（含卡片之间的空隙）
+CARD_GAP = 4         # 卡片上下留出的空隙，条目之间不再糊成一片
 WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
 BAR_H = 34            # 标题栏高度（也是折叠后露出来的高度），比原来 30 更好点
 MIN_W, MIN_H = 280, 340   # 面板最小尺寸。再小的话：标题栏 30 + 标签 32 + 工具条 36 一扣，
@@ -699,6 +700,15 @@ def capture_source(self_hwnd, delay_retry=True):
         if attempt == 0 and delay_retry:
             time.sleep(0.05)
     return 'unknown', None
+
+
+TYPE_ICON = {'url': '🔗', 'json': '{ }', 'multiline': '¶', 'text': '📝',
+             'image': '🖼', 'filelist': '📁', 'empty': '∅'}
+
+
+def type_icon(t):
+    """徽章上的类型图标：比"文本/url/json"这类文字扫得快，也更省横向空间"""
+    return TYPE_ICON.get((t or 'text').lower(), '📝')
 
 
 def detect_content_type(text):
@@ -1502,8 +1512,34 @@ class VirtualList(tk.Frame):
         self.canvas.configure(yscrollcommand=self.sb.set)
         self._acc = 0.0        # 滚轮增量累积：触控板/高精度滚轮的 delta 常小于 120
         self.show_num = False  # 按住 Ctrl 时在行首显示 1..9/0
+        self._empty = None     # 空列表时那句提示文字（canvas text item）
         self.canvas.bind('<MouseWheel>', self._wheel)
         self.canvas.bind('<Configure>', lambda e: self.update_view())
+
+    def _show_empty(self):
+        """列表为空时给一句话，别留一大片空白让人以为程序坏了"""
+        w = max(60, self.canvas.winfo_width())
+        h = max(60, self.canvas.winfo_height())
+        msg = ('没有匹配「%s」的条目' % self.kw if self.kw
+               else '这里还没有内容\n复制点什么，它就会出现在这里')
+        try:
+            if self._empty is None:
+                self._empty = self.canvas.create_text(
+                    w // 2, h // 2, text=msg, fill=T['fg2'], font=FONT,
+                    justify='center')
+            else:
+                self.canvas.itemconfigure(self._empty, text=msg)
+                self.canvas.coords(self._empty, w // 2, h // 2)
+        except tk.TclError:
+            pass
+
+    def _hide_empty(self):
+        if self._empty is not None:
+            try:
+                self.canvas.delete(self._empty)
+            except tk.TclError:
+                pass
+            self._empty = None
 
     def set_data(self, items, sel, kw):
         self.items = items
@@ -1583,7 +1619,9 @@ class VirtualList(tk.Frame):
             self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
         if n == 0:
             self.clear_pool()
+            self._show_empty()
             return
+        self._hide_empty()
         h = max(ITEM_H, self.canvas.winfo_height())
         top = self.canvas.canvasy(0)
         start = max(0, int(top // ITEM_H))
@@ -1596,10 +1634,11 @@ class VirtualList(tk.Frame):
             if f is None:
                 f = self._mk_item(i)
                 self.pool[i] = f
-                self.wids[i] = self.canvas.create_window((0, i * ITEM_H), window=f,
-                                                         anchor='nw', width=w, height=ITEM_H)
+                self.wids[i] = self.canvas.create_window(
+                    (0, i * ITEM_H + CARD_GAP // 2), window=f, anchor='nw',
+                    width=w, height=ITEM_H - CARD_GAP)
             else:
-                self.canvas.coords(self.wids[i], 0, i * ITEM_H)
+                self.canvas.coords(self.wids[i], 0, i * ITEM_H + CARD_GAP // 2)
                 if f._vw != w:
                     self.canvas.itemconfig(self.wids[i], width=w)
                     f._vw = w
@@ -1608,7 +1647,7 @@ class VirtualList(tk.Frame):
             self._fill(f, i)
 
     def _mk_item(self, i):
-        f = tk.Frame(self.canvas, bg=T['card'], height=ITEM_H, cursor='hand2')
+        f = tk.Frame(self.canvas, bg=T['card'], height=ITEM_H - CARD_GAP, cursor='hand2')
         f.pack_propagate(False)
         f._idx = i
         f._vw = 0
@@ -1747,6 +1786,7 @@ DEFAULT_SETTINGS.update(
     # 从 PDF/网页/代码复制的文本常带前导缩进，而列表预览把它压平显示，
     # 粘出去却带着 → 看着像凭空多了空格。默认在粘贴时去掉首尾空白。
     trim_paste=True,
+    collapsed=False,     # 上次退出时是不是折叠着的
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
@@ -2117,11 +2157,19 @@ class ClawBoard:
         self.tool = tk.Frame(self.body, bg=T['panel'], height=36)
         self.tool.pack(fill='x')
         self.tool.pack_propagate(False)
+        # width=8 只是"请求宽度"，靠 expand 去吃剩余空间。默认 20 字符会把工具条撑爆，
+        # 于是最后一个按钮被压成 3px（又是这类"抢空间"的老问题）
         self.search_entry = tk.Entry(self.tool, textvariable=self.search, bg=T['card'],
                                      fg=T['fg'], insertbackground=T['fg'], relief='flat',
-                                     font=FONT_SM, bd=0, highlightthickness=1,
+                                     font=FONT_SM, bd=0, width=8, highlightthickness=1,
                                      highlightbackground=T['line'], highlightcolor=T['acc'])
         self.search_entry.pack(side='left', padx=6, ipady=3, fill='x', expand=True)
+        # Entry 没有 placeholder，用一层灰字 Label 顶替：空着时提示可以怎么搜，
+        # 一输入就消失。Label 会吃掉点击，所以补一个转发焦点
+        self.search_ph = tk.Label(self.tool, bg=T['card'], fg=T['fg2'], font=FONT_SM,
+                                  anchor='w', text='搜索…')
+        self.search_ph.bind('<Button-1>', lambda e: self.search_entry.focus_set())
+        self.search.trace_add('write', lambda *a: self._sync_ph())
         self.search_entry.bind('<KeyRelease>', lambda e: self.render())
         self.search_entry.bind('<Escape>', lambda e: self.hide())
         self.search_entry.bind('<Return>', self.on_search_return)
@@ -2145,6 +2193,19 @@ class ClawBoard:
         if not getattr(self, 'collapsed', False):
             mw, mh = self.min_size()
             self.root.minsize(mw, mh)
+        self.root.after(60, self._sync_ph)     # 初始就该显示搜索框提示
+        if getattr(self, 'collapsed', False):  # 换主题重建 UI 时要保住折叠态
+            self.body.pack_forget()
+
+    def _sync_ph(self):
+        """搜索框为空时显示灰字提示，有内容就藏起来"""
+        try:
+            if self.search.get():
+                self.search_ph.place_forget()
+            else:
+                self.search_ph.place(in_=self.search_entry, x=5, rely=0.5, anchor='w')
+        except Exception:
+            pass
 
     def mk_tab(self, master, text, key):
         f = tk.Frame(master, bg=T['bg'], cursor='hand2')
@@ -2159,9 +2220,11 @@ class ClawBoard:
         return f
 
     def mk_tool_btn(self, text, tip, cmd):
+        # width=2：1 个汉字的宽度就够。原来 3 + padx=2 时，7 个按钮要吃掉 217px，
+        # 最小宽度的面板里搜索框只剩 60 多像素，根本没法打字
         b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
-                     width=3, cursor='hand2')
-        b.pack(side='left', padx=2, pady=5)
+                     width=2, cursor='hand2')
+        b.pack(side='left', padx=1, pady=5)
         b.bind('<Button-1>', lambda e: cmd())
         b.bind('<Enter>', lambda e: (b.configure(bg=T['card_h']), self.tip(tip)))
         b.bind('<Leave>', lambda e: b.configure(bg=T['card']))
@@ -2184,6 +2247,14 @@ class ClawBoard:
 
     def apply_geometry(self):
         """恢复位置。必须完整落在某一个显示器内：跨屏缝隙会让面板看起来开着却点不到"""
+        if self.st.get('collapsed'):
+            # 上次是折叠着退出的：按折叠态恢复，别把尺寸硬拉到最小尺寸
+            self.collapsed = True
+            w, h, x, y = self.fit_geometry(210, BAR_H, *(self._saved_pos()))
+            self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+            self.root.minsize(160, BAR_H)
+            self.body.pack_forget()
+            return
         mw, mh = self.min_size()
         g = self.data.get('geom')
         if g:
@@ -2197,6 +2268,14 @@ class ClawBoard:
                 return
         w, h, x, y = self.fit_geometry(340, 480, 10 ** 6, 10 ** 6)
         self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+
+    def _saved_pos(self):
+        """从存档 geom 里取出上次的坐标，折叠态恢复时沿用"""
+        g = self.data.get('geom') or ''
+        m = re.match(r'^\d+x\d+\+(-?\d+)\+(-?\d+)$', g)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        return 10 ** 6, 10 ** 6
 
     def fit_geometry(self, w, h, x, y):
         """保证窗口完整落在某个显示器内；做不到就放到主屏右下角并按需缩小"""
@@ -2327,6 +2406,10 @@ class ClawBoard:
 
     def toggle_collapse(self):
         self.collapsed = not self.collapsed
+        # 折叠状态要跟着存盘：不然折叠着退出后，存档里剩下折叠尺寸，
+        # 重启就成了"窗口是折叠大小、程序却以为自己展开着"
+        self.st['collapsed'] = self.collapsed
+        self.save(True)
         if self.collapsed:
             self._restore = self.root.geometry()
             self.body.pack_forget()
@@ -2511,7 +2594,7 @@ class ClawBoard:
                 if hits:
                     parts.append('⚠' + '/'.join(hits))
                 sub = ' · '.join(parts)
-                badge = '%s · %s' % (it.get('content_type') or 'text', human_size(size))
+                badge = '%s %s' % (type_icon(it.get('content_type')), human_size(size))
             if it.get('fav'):
                 disp = '★ ' + disp
             out.append({'id': it['id'], 'disp': disp, 'text': text, 'sub': sub,
