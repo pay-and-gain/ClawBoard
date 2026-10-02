@@ -131,6 +131,9 @@ check('溢出菜单已弹出', bool(menus))
 check('菜单包含全部被收起项',
       all(any(lbl.startswith(t) for lbl in labels) for t in hidden_txt),
       '%s vs %s' % (labels, hidden_txt))
+# 菜单是整块弹出来的，文案太长会撑出比面板还宽的菜单
+too_long = [l for l in labels if len(l) > 16]
+check('菜单文案够短（每项 <= 16 字）', not too_long, str(too_long))
 
 # ---------- 7. 标题栏长提示截断 ----------
 long_tip = '这是一条非常非常非常非常非常非常非常非常非常长的提示信息' * 3

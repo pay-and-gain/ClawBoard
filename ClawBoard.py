@@ -2336,14 +2336,17 @@ class ClawBoard:
         self.search_entry.bind('<Button-3>', lambda e: self.search_menu(e))
         self.search_entry.bind('<Control-a>', self.select_all_visible)
         self._tool_btns = []
-        for txt, tip2, cmd in (('＋', '新增常用语', self.add_phrase),
-                               ('拆', '拆词：把一段文字拆成多条常用语', self.split_words),
-                               ('删', '删除选中项', self.del_sel),
-                               ('清', '清空当前列表', self.clear_list),
-                               ('🔧', '文本变换（Ctrl+T）', self.open_transform),
-                               ('?', '搜索语法帮助', self.open_query_help),
-                               ('⚙', '设置', self.open_settings)):
-            self._tool_btns.append((txt, self.mk_tool_btn(txt, tip2, cmd)))
+        # 第三项是溢出菜单里的短文案：工具条的 tip 可以写长（悬停才看到），
+        # 但菜单是整块弹出来的，用长提示会撑出一张比面板还宽的菜单
+        for txt, tip2, menu2, cmd in (
+                ('＋', '新增常用语', '新增常用语', self.add_phrase),
+                ('拆', '拆词：把一段文字拆成多条常用语', '拆词', self.split_words),
+                ('删', '删除选中项', '删除选中项', self.del_sel),
+                ('清', '清空当前列表', '清空列表', self.clear_list),
+                ('🔧', '文本变换（Ctrl+T）', '文本变换', self.open_transform),
+                ('?', '搜索语法帮助', '搜索语法帮助', self.open_query_help),
+                ('⚙', '设置', '设置', self.open_settings)):
+            self._tool_btns.append((txt, self.mk_tool_btn(txt, tip2, cmd, menu2)))
         # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
         self.more_btn = tk.Label(self.tool, text='⋯', bg=T['card'], fg=T['fg2'],
                                  font=FONT_B, width=3, cursor='hand2')
@@ -2440,7 +2443,7 @@ class ClawBoard:
                     font=FONT, relief='flat')
         for text, b in self._tool_btns:
             if text in hidden:
-                m.add_command(label='%s  %s' % (text, b._tip_text),
+                m.add_command(label='%s  %s' % (text, b._menu_text),
                               command=b._tip_cmd)
         if e is not None:
             m.tk_popup(e.x_root, e.y_root)
@@ -2448,7 +2451,7 @@ class ClawBoard:
             m.tk_popup(self.more_btn.winfo_rootx() + 2,
                        self.more_btn.winfo_rooty() - 8)
 
-    def mk_tool_btn(self, text, tip, cmd):
+    def mk_tool_btn(self, text, tip, cmd, menu_text=None):
         # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示，靠 padx=1 省空间。
         # 7 个按钮约占 224px；窄面板下由 _layout_tool 收进「⋯」菜单，
         # 宁可挪走也不要留半个被压扁的按钮（用户看到的"被遮挡"）
@@ -2456,7 +2459,8 @@ class ClawBoard:
                      width=3, cursor='hand2')
         # pady 让它垂直居中，不被工具条上下切掉；参数存一份给 _layout_tool 复原用
         b._pack_args = dict(side='left', padx=1, pady=7)
-        b._tip_text = tip            # 溢出菜单里要显示完整提示
+        b._tip_text = tip                 # 悬停提示（可以长）
+        b._menu_text = menu_text or tip   # 溢出菜单里的短文案
         b._tip_cmd = cmd
         b.pack(**b._pack_args)
         b.bind('<Button-1>', lambda e: cmd())
