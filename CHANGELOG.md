@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## v1.4.5 hotfix · 两个从 crash.log 里挖出来的真崩溃
+
+这两个 bug 都是**排查"压缩上下文"时顺手看 crash.log 发现的**，之前所有自测都没覆盖到 ——
+因为它们只在"程序以折叠态启动"和"重复复制同一条内容"这两个真实使用路径上触发。
+
+### A. 折叠态启动后，面板展不开
+`toggle_collapse()` 展开分支读 `self._restore`，但它**只在"折叠"时被赋值**。
+如果程序**以折叠态启动**（存档里 `collapsed=True`），第一次点「—」就
+`AttributeError: 'ClawBoard' object has no attribute '_restore'` —— 面板卡在标题条上展不开。
+`crash.log 2026-10-03 01:22:33` 就是这个。
+
+配套还有一个更隐蔽的问题：`save()` 会把**当前**窗口尺寸写进 `geom`，
+而折叠时窗口只有 210×34 —— 于是"展开后该回到哪"被标题条尺寸顶掉了，
+即使不崩，展开也只会落到最小尺寸 + 右下角。
+
+修法：
+- `_restore` 在 `__init__` 里初始化为 `None`
+- 新增 `_expanded_geometry()`：从 `geom` 算出可用的展开几何，作为兜底
+- `apply_geometry()` 折叠分支里就把 `_restore` 算好存起来
+- `save()` **折叠期间不更新 `geom`**
+
+### B. 重复复制同一条内容，列表毫无反应
+`ingest()` 里 `rec` 只在"新条目"分支被赋值。重复复制时走的是 `dup` 分支，
+收尾的 `rec['source_title']` 直接 `UnboundLocalError`。
+被 `poll_clip` 的 try 兜住，所以程序不崩，但表现是**重复复制一条、列表毫无反应**
+（crash.log 里刷了几十条「监听异常：cannot access local variable 'rec'」）。
+
+修法：`rec = dup` 统一指向"本次要置顶的那条"，收尾逻辑（写标题/敏感标记/插入到最前）
+只写一份，`insert(0, rec)` 同时完成置顶。
+
+### 顺带：自测实例不再污染真实 crash.log
+`note()` 之前不受 `NO_SAVE` 约束 —— 自测反复建实例，每次都留一行「热键被占用」，
+把真正有用的诊断记录刷掉了。现在 `NO_SAVE` 下不写日志；
+`tk_error` 在 `NO_SAVE` 下改为把异常打到 stderr（否则异常被静默吞掉，自测只看到 FAIL 不知原因）。
+
+### 新增回归测试 `_t24.py`（24 项）
+覆盖：折叠态启动 → 展开不抛异常、反复折叠展开、折叠期间不污染 geom、
+重复复制不抛异常且 `copy_count` 递增/置顶/`created_at` 不变。
+
+---
+
 ## v1.4.5 · 工具条顺序错乱修复 + 溢出菜单（功能一个都不丢）+ 阈值按算式重算
 
 ### 真 bug：宽→窄→宽 之后按钮顺序乱了

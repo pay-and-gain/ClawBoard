@@ -1959,6 +1959,9 @@ class ClawBoard:
         self.sel_phrase = None
         self.search = tk.StringVar()
         self.collapsed = False
+        # 折叠前记下的"展开后该回到哪"。折叠态启动时它是 None，
+        # 靠 _expanded_geometry() 兜底 —— 直接拿它拼正则会 AttributeError
+        self._restore = None
         self.prev_hwnd = None
         self.save_timer = None
         self._need_show = False
@@ -2150,7 +2153,11 @@ class ClawBoard:
             return
 
         def do():
-            self.data['geom'] = self.root.geometry()
+            # 折叠时窗口只有 210x34 的标题条。若把这个尺寸写进 geom，就会顶掉
+            # "展开后该回到哪" —— 下次展开只能落到最小尺寸、还被丢到右下角。
+            # 所以折叠期间不更新 geom，展开时的位置由 _expanded_geometry() 还原。
+            if not self.collapsed:
+                self.data['geom'] = self.root.geometry()
             tmp = DATA_FILE + '.tmp'
             try:
                 with open(tmp, 'w', encoding='utf-8') as f:
@@ -2168,6 +2175,10 @@ class ClawBoard:
 
     def note(self, msg):
         """写运行日志。绝不写入剪贴板原文。"""
+        # NO_SAVE 的自测/压测实例同样不该往真实 crash.log 里写字：
+        # 自测会反复建实例，每次都留一行"热键被占用"，把真正有用的诊断记录刷掉
+        if NO_SAVE:
+            return
         try:
             with open(CRASH_LOG, 'a', encoding='utf-8') as f:
                 f.write('[%s] %s\n' % (time.strftime('%F %T'), msg))
@@ -2499,6 +2510,9 @@ class ClawBoard:
         if self.st.get('collapsed'):
             # 上次是折叠着退出的：按折叠态恢复，别把尺寸硬拉到最小尺寸
             self.collapsed = True
+            # 折叠态启动时 _restore 还没被赋过值，先把"展开后该回到哪"算好存起来。
+            # 漏了这一步的话，第一次点「—」展开会 AttributeError（真实 crash.log 见过）
+            self._restore = self._expanded_geometry()
             w, h, x, y = self.fit_geometry(210, BAR_H, *(self._saved_pos()))
             self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
             self.root.minsize(160, BAR_H)
@@ -2525,6 +2539,25 @@ class ClawBoard:
         if m:
             return int(m.group(1)), int(m.group(2))
         return 10 ** 6, 10 ** 6
+
+    def _expanded_geometry(self):
+        """算出一个可用的展开态几何字符串。
+
+        两处会用到，都得容错：
+        1. 折叠态启动后的第一次展开（`_restore` 还是 None）
+        2. `_restore` 解析失败时兜底
+        `data['geom']` 在折叠期间不会被覆盖（见 save()），所以这里拿到的就是
+        上次展开时的尺寸与位置；没有存档则回退到 340x480。
+        """
+        mw, mh = self.min_size()
+        m = re.match(r'^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$', self.data.get('geom') or '')
+        if m:
+            w, h, x, y = (int(v) for v in m.groups())
+        else:
+            w, h, x, y = 340, 480, 10 ** 6, 10 ** 6
+        w, h = max(mw, w), max(mh, h)
+        w, h, x, y = self.fit_geometry(w, h, x, y)
+        return '%dx%d+%d+%d' % (w, h, x, y)
 
     def fit_geometry(self, w, h, x, y):
         """保证窗口完整落在某个显示器内；做不到就放到主屏右下角并按需缩小"""
@@ -2692,7 +2725,9 @@ class ClawBoard:
                 w, h, x, y = self.fit_geometry(w, h, x, y)
                 self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
             else:
-                self.root.geometry(self._restore)
+                # _restore 可能是 None（折叠态启动后第一次展开）或格式意外，
+                # 都不该让展开失败 —— 用存档里的展开几何兜底
+                self.root.geometry(self._expanded_geometry())
             self.body.pack(fill='both', expand=True)
             self.render()
 
@@ -3441,13 +3476,17 @@ class ClawBoard:
                 dup = x
                 break
         if dup is not None:
-            dup['copy_count'] = int(dup.get('copy_count') or 1) + 1
-            dup['updated_at'] = ts
-            dup['time'] = now_str()
+            # 统一用 rec 指向"本次要置顶的那条"，后面收尾逻辑只写一份。
+            # 原来这里只操作 dup、不给 rec 赋值，收尾时 rec['source_title'] 会
+            # UnboundLocalError —— 表现为"重复复制一条，列表毫无反应"
+            # （crash.log 里刷了几十条「监听异常：cannot access local variable 'rec'」）
+            rec = dup
+            rec['copy_count'] = int(rec.get('copy_count') or 1) + 1
+            rec['updated_at'] = ts
+            rec['time'] = now_str()
             if src != 'unknown':
-                dup['source_app'] = src
-            self.data['clip'].remove(dup)
-            self.data['clip'].insert(0, dup)
+                rec['source_app'] = src
+            self.data['clip'].remove(rec)      # 置顶由下面的统一 insert 完成
         else:
             exist = [int(x.get('created_at') or 0) for x in self.data['clip']]
             mx = max(exist) if exist else 0
@@ -4052,10 +4091,17 @@ def install_excepthook():
 
 def tk_error(root):
     def cb(exc, val, tb):
+        text = ''.join(traceback.format_exception(exc, val, tb))
+        if NO_SAVE:
+            # 自测实例：打到 stderr 而不是写进真实 crash.log。
+            # 写日志的话异常会被静默吞掉，自测只看得到一句 FAIL 却不知道原因
+            sys.stderr.write('\n[Tk 回调异常] %s\n' % text)
+            sys.stderr.flush()
+            return
         try:
             with open(CRASH_LOG, 'a', encoding='utf-8') as f:
                 f.write('\n==== Tk 回调异常 %s ====\n' % time.strftime('%F %T'))
-                f.write(''.join(traceback.format_exception(exc, val, tb)))
+                f.write(text)
         except Exception:
             pass
     root.report_callback_exception = cb
