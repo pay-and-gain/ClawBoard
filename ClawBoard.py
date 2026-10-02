@@ -31,7 +31,7 @@ import winreg
 from ctypes import wintypes
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.4.1'
+APP_VER = '1.4.2'
 
 if getattr(sys, 'frozen', False):
     # PyInstaller onefile：__file__ 指向临时解包目录，退出即销毁。
@@ -64,6 +64,7 @@ FONT_TITLE = ('Microsoft YaHei UI', 10, 'bold')
 
 ITEM_H = 52          # 虚拟列表固定行高
 WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
+BAR_H = 34            # 标题栏高度（也是折叠后露出来的高度），比原来 30 更好点
 MIN_W, MIN_H = 280, 340   # 面板最小尺寸。再小的话：标题栏 30 + 标签 32 + 工具条 36 一扣，
                           # 留给列表的宽度会被徽章/序号列吃掉，正文只剩几十像素 —— 看起来像"没有内容"
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
@@ -1743,6 +1744,9 @@ DEFAULT_SETTINGS.update(
     max_len=0,          # 长于这个长度不入库（0=不限，仍受 MAX_TEXT 硬上限保护）
     smart_private=True,  # 遵守 Windows「别记录我」剪贴板标记
     keep_on_clear=True,  # 清空历史时保留收藏项
+    # 从 PDF/网页/代码复制的文本常带前导缩进，而列表预览把它压平显示，
+    # 粘出去却带着 → 看着像凭空多了空格。默认在粘贴时去掉首尾空白。
+    trim_paste=True,
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
@@ -2062,24 +2066,33 @@ class ClawBoard:
         r = self.root
         for w in list(r.winfo_children()):
             w.destroy()
-        self.bar = tk.Frame(r, bg=T['panel'], height=30, cursor='fleur')
+        self.bar = tk.Frame(r, bg=T['panel'], height=BAR_H, cursor='fleur')
         self.bar.pack(fill='x')
         self.bar.pack_propagate(False)
+        # 标题占满剩余宽度：整条标题栏（除了右边三个按钮）都是双击折叠的热区
         self.title_lb = tk.Label(self.bar, text='⚡ ' + APP_NAME, bg=T['panel'],
-                                 fg=T['acc'], font=FONT_TITLE)
-        self.title_lb.pack(side='left', padx=8)
-        self.bar.bind('<ButtonPress-1>', self.start_move)
-        self.bar.bind('<B1-Motion>', self.do_move)
-        self.bar.bind('<Double-Button-1>', lambda e: self.toggle_collapse())
+                                 fg=T['acc'], font=FONT_TITLE, anchor='w')
+        # 按钮必须先 pack：pack 按调用顺序分配空间，标题带 expand=True 后 pack 的话
+        # 会把按钮挤成 1px（和之前滚动条被挤成 1px 是同一个坑）
+        self._bar_btns = []
         for txt, cmd, col in (('✕', self.hide, T['danger']),
                               ('📌', self.toggle_pin, None),
                               ('—', self.toggle_collapse, None)):
+            # 按钮热区放大：更宽 + 更高（pady），不用瞄准
             b = tk.Label(self.bar, text=txt, bg=T['panel'], fg=T['fg2'], font=FONT,
-                         width=3, cursor='hand2')
+                         width=4, pady=7, cursor='hand2')
             b.pack(side='right')
             b.bind('<Button-1>', lambda e, c=cmd: c())
             b.bind('<Enter>', lambda e, b=b, c=col: b.configure(fg=c or T['fg']))
             b.bind('<Leave>', lambda e, b=b: b.configure(fg=T['fg2']))
+            self._bar_btns.append(b)
+        self.title_lb.pack(side='left', padx=8, fill='x', expand=True)
+        # 事件不会从子控件冒泡到父控件，所以标题文字上必须再绑一份：
+        # 只绑 bar 的话，双击能用的只剩标题右侧那一小条空白（"很局限"就是这个原因）
+        for w in (self.bar, self.title_lb):
+            w.bind('<ButtonPress-1>', self.start_move)
+            w.bind('<B1-Motion>', self.do_move)
+            w.bind('<Double-Button-1>', lambda e: self.toggle_collapse())
 
         self.body = tk.Frame(r, bg=T['bg'])
         self.body.pack(fill='both', expand=True)
@@ -2317,8 +2330,9 @@ class ClawBoard:
         if self.collapsed:
             self._restore = self.root.geometry()
             self.body.pack_forget()
-            self.root.minsize(160, 28)      # 先放开最小尺寸，否则折叠不成 210x30
-            self.root.geometry('210x30+%d+%d' % (self.root.winfo_x(), self.root.winfo_y()))
+            self.root.minsize(160, BAR_H)   # 先放开最小尺寸，否则折叠不成一条标题栏
+            self.root.geometry('210x%d+%d+%d' % (BAR_H, self.root.winfo_x(),
+                                                 self.root.winfo_y()))
         else:
             mw, mh = self.min_size()
             self.root.minsize(mw, mh)
@@ -2576,7 +2590,7 @@ class ClawBoard:
         m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
                     activebackground=T['card_h'], activeforeground=T['fg'],
                     font=FONT, relief='flat')
-        m.add_command(label='复制', command=lambda: clip_write(text))
+        m.add_command(label='复制', command=lambda: clip_write(self.trim_for_paste(text)))
         m.add_command(label='粘贴到上一窗口', command=lambda: self.paste(text, True, it['id']))
         m.add_command(label='粘贴为纯文本', command=lambda: self.paste_plain(it))
         m.add_separator()
@@ -2672,8 +2686,18 @@ class ClawBoard:
         self.paste(it.get('text') or '', cid=it['id'])
         return 'break'
 
+    def trim_for_paste(self, text):
+        """粘贴前去掉首尾空白。
+        从 PDF / 网页 / 代码块复制出来的文本常带着前导缩进和换行，
+        而列表预览用 ' '.join(split()) 把它们压平了显示 —— 面板里看着干干净净、
+        粘出去却带空格，感觉就像凭空多了一个空格。默认开，设置里可关。"""
+        if not self.st.get('trim_paste', True):
+            return text or ''
+        return (text or '').strip()
+
     def paste(self, text, force=False, cid=None):
         """粘贴出去：只刷新 last_used_at，绝不改写 created_at"""
+        text = self.trim_for_paste(text)
         if cid:
             pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
             for x in pool:
@@ -2732,7 +2756,7 @@ class ClawBoard:
 
     def paste_plain(self, it):
         """F6：粘贴为纯文本。三个坑全处理：不污染历史 / 还原焦点 / 失败降级提示"""
-        text = to_plain(it.get('text') or '')
+        text = self.trim_for_paste(to_plain(it.get('text') or ''))
         if len(text.encode('utf-8')) > 5 * 1024 * 1024:
             clip_write(text)
             self.tip('文本超 5MB，已放入剪贴板，请手动 Ctrl+V')
@@ -3134,6 +3158,7 @@ class SettingsWindow:
         body = self.sc.inner
         self.row_switch(body, '监听剪贴板', 'listen')
         self.row_switch(body, '单击后自动粘贴到上一窗口', 'autopaste')
+        self.row_switch(body, '粘贴时去掉首尾空白（PDF/网页复制常带前导空格）', 'trim_paste')
         self.row_switch(body, '敏感内容打码显示', 'mask_sensitive')
         self.row_switch(body, '敏感内容不入库', 'skip_sensitive')
         self.row_switch(body, '列表中显示时间', 'show_time')
