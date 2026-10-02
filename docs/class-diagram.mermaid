@@ -1,0 +1,209 @@
+classDiagram
+    %% ===== 数据契约（TypedDict：静态类型，运行时仍是 dict）=====
+    class ClipItemDict {
+        +str id
+        +str text
+        +int created_at
+        +int seq
+        +str source_app
+        +int copy_count
+        +int fav
+        +str content_type
+        +int content_size
+        +str kind_auto
+    }
+    class SettingsDict {
+        +str theme
+        +str hotkey
+        +int max_items
+        +bool listen
+        +bool autopaste
+        +str close_action
+    }
+    class AppDataDict {
+        +list clip
+        +list groups
+        +int gi
+        +str geom
+        +dict settings
+        +int schema_version
+    }
+
+    %% ===== 运行时状态（dataclass，构造期复制到 self）=====
+    class AppState {
+        +str tab
+        +bool collapsed
+        +str _restore
+        +bool hidden
+        +int _edge_tick
+        ...
+    }
+
+    %% ===== 主类（组合根 + 5 个 mixin）=====
+    class ClawBoard {
+        +root : Tk
+        +data : AppDataDict
+        +st : SettingsDict
+        +state : AppState
+        +__init__(root)
+        +render()
+        +paste(text, force, cid)
+        +ingest(txt, hits, manual)
+        +toggle_collapse()
+        +apply_geometry()
+        +min_size()
+    }
+    class DataMixin {
+        +norm_item(it, seq)
+        +load_data()
+        +validate(d)
+        +save(later)
+        +save_now(d)
+        +note(msg)
+        +ingest(txt, hits, manual)
+    }
+    class SystemMixin {
+        +setup_system()
+        +apply_hotkey()
+        +poll_clip()
+        +poll_bg()
+        +quit_app()
+        +tray_menu()
+    }
+    class UiMixin {
+        +build_ui()
+        +render()
+        +visible_items()
+        +_layout_tool()
+        +mk_tool_btn()
+        +tip(text)
+    }
+    class GeometryMixin {
+        +apply_geometry()
+        +fit_geometry()
+        +toggle_collapse()
+        +edge_update()
+        +hide()
+        +reset_position()
+    }
+    class InteractionMixin {
+        +on_click_item()
+        +on_menu_item()
+        +paste()
+        +del_item()
+        +clear_list()
+        +push_phrase()
+        +open_transform()
+        +open_export()
+    }
+    ClawBoard --|> DataMixin
+    ClawBoard --|> SystemMixin
+    ClawBoard --|> UiMixin
+    ClawBoard --|> GeometryMixin
+    ClawBoard --|> InteractionMixin
+
+    %% ===== 领域/系统/UI 控件层（模块即命名空间）=====
+    class config {
+        +DEFAULT_SETTINGS : dict
+        +BAR_H : int
+        +CLASSIFY_MAX : int
+        +SCHEMA_VERSION : int
+    }
+    class runtime {
+        +NO_SAVE : bool
+        +LAST_SEQ : int
+        +TX : module
+        +tx()
+        +uid()
+    }
+    class theme {
+        +DARK : dict
+        +LIGHT : dict
+        +T : dict
+        +set_theme(name)
+        +apply_theme(st)
+        +shade(c, k)
+    }
+    class classify {
+        +classify(text) tuple
+        +guess_lang(s)
+        +detect_content_type(text)
+        +to_plain(text)
+        +human_size(n)
+    }
+    class timefmt {
+        +now_ms()
+        +rel_time(ms)
+        +full_time(ms)
+        +migrate(d)
+        +backup_data()
+    }
+    class win32 {
+        +init_dpi_awareness()
+        +single_instance()
+        +force_foreground(hwnd)
+        +send_ctrl_v()
+        +capture_source(hwnd)
+    }
+    class clipboard {
+        +clip_seq()
+        +clip_read()
+        +clip_write(text)
+        +clip_is_private()
+        +scan_sensitive(text)
+        +mask_text(text, hits)
+    }
+    class hotkey {
+        +HiddenWindow
+        +make_ico(path)
+    }
+    class widgets {
+        +Dialog
+        +SplitDialog
+        +Tip
+        +ThinBar
+        +ScrollFrame
+        +pack_static_then_fill()
+        +bind_recursive()
+    }
+    class vlist {
+        +VirtualList
+    }
+    class dialogs {
+        +SettingsWindow
+        +TransformWindow
+        +ExportDialog
+    }
+
+    %% ===== 依赖（谁 import 谁）=====
+    ClawBoard ..> config
+    ClawBoard ..> theme
+    ClawBoard ..> runtime
+    DataMixin ..> timefmt
+    DataMixin ..> runtime
+    DataMixin ..> classify
+    SystemMixin ..> win32
+    SystemMixin ..> clipboard
+    SystemMixin ..> hotkey
+    UiMixin ..> widgets
+    UiMixin ..> vlist
+    InteractionMixin ..> dialogs
+    widgets ..> theme
+    widgets ..> clipboard
+    vlist ..> classify
+    dialogs ..> clipboard
+    dialogs ..> runtime
+    clipboard ..> win32
+    clipboard ..> runtime
+    hotkey ..> win32
+    win32 ..> config
+    win32 ..> runtime
+    classify ..> config
+    timefmt ..> config
+    timefmt ..> classify
+    theme ..> config
+    config ..> ClipItemDict
+    config ..> SettingsDict
+    config ..> AppState
+    AppDataDict ..> ClipItemDict
+    AppDataDict ..> SettingsDict

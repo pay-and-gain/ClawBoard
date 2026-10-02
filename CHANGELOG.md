@@ -1,5 +1,74 @@
 # CHANGELOG
 
+## v1.5.0 · 架构重构（模块化 + 分层 + 集中配置 + 统一状态管理）
+
+> 本次是**纯架构重构 + 中度优化**，外部行为、数据文件、打包产物与 C 版互通 **100% 不变**。
+> 由软件开发团队 SOP 协作完成：产品经理（增量 PRD）→ 架构师（系统设计 + 任务分解）→ 工程师（5 任务落地）→ QA（独立终验）。
+
+### 重构成果
+
+**主文件 `ClawBoard.py`：4236 行 → 233 行**（94.5% 削减）。原来一个文件里塞着主类 97 个方法 + 60 个模块级函数，现在拆成 `clawboard/` 包（16 个职责模块 + 入口聚合层）：
+
+```
+ClawBoard.py           入口 + re-export 聚合层（233 行，只剩 main/bench/single_instance/
+                       install_excepthook/tk_error + NO_SAVE 桥接）
+clawboard/
+├─ config.py           集中配置：DEFAULT_SETTINGS + 全部常量 + 数据契约 TypedDict + AppState
+├─ runtime.py          运行时可变全局：NO_SAVE / LAST_SEQ / TX / uid
+├─ theme.py            主题配色（含自定义底色推导）
+├─ classify.py         内容自适应分类 + 文本/尺寸/长度工具
+├─ timefmt.py          时间格式化 + 来源忽略规则 + 数据迁移
+├─ win32.py            Win32 声明 + 系统原语 + DPI 声明 + 单实例 + 开机自启
+├─ clipboard.py        剪贴板读写 + 隐私标记 + 敏感识别
+├─ hotkey.py           隐藏消息窗口（热键+托盘）+ 图标生成
+├─ widgets.py          通用控件 + 布局/事件 helper（四坑固化点）
+├─ vlist.py            虚拟滚动列表
+├─ dialogs.py          三个业务弹窗（设置/变换/导出）
+├─ app.py              主类组合根（继承 6 个 mixin）+ __init__ 统一状态初始化
+├─ app_services.py     DataMixin + SystemMixin（数据/系统接入）
+├─ app_ui.py           UiMixin（UI 构建 + 渲染 + 分组）
+├─ app_geometry.py     GeometryMixin（窗口几何/折叠/贴边/移动缩放）
+└─ app_interact.py     InteractionMixin + PhraseMixin（交互/粘贴/条目操作）
+```
+
+### 四个跨版本反复踩的坑，各固化到唯一承载点
+
+| 坑 | 承载点 |
+|---|---|
+| pack 空间分配/顺序 | `widgets.pack_static_then_fill()` + `app_ui._repack_tool_buttons()` |
+| Tk 事件不冒泡 | `widgets.bind_recursive()`（递归接管滚轮/双击） |
+| DPI 未声明测量失真 | `win32.init_dpi_awareness()`（`main()` 第一行调用） |
+| 压测/自测隐式写盘 | `runtime.NO_SAVE` 单一布尔源 + `ClawBoard.py` 模块属性桥接 |
+
+### 统一状态管理（R3）
+
+所有运行时状态字段收敛到 `config.AppState`（dataclass），`ClawBoard.__init__` 一次性复制到实例。
+彻底消除"某个字段只在一条分支里赋值"的隐式初始化 —— 这正是 v1.4.5 hotfix 里两个真崩溃的根因。
+
+### 数据兼容（NFR2）
+
+持久化结构保持 `dict`（TypedDict 只做静态检查，运行时零差异），`norm_item/validate/migrate`
+逐字搬移，`json.dump(ensure_ascii=False, indent=1)` + `os.replace` 原子写不变。C 版仍读同一份数据文件。
+
+### import 兼容（本次最易翻车点）
+
+保留 `ClawBoard.py` 作为 re-export 聚合层，**未改任何测试文件**。`C.NO_SAVE = True`（重绑定）
+通过 `types.ModuleType.__setattr__` 桥接转发到 `runtime.NO_SAVE`；`C.DEFAULT_SETTINGS`/`C.T`
+靠共享 dict 原地改值天然兼容。
+
+### 验证
+
+- **127 项全绿**：`test_core.py` 27 + `test_refactor.py` 12（新增）+ `_t14.py` 38 + `_t22.py` 26 + `_t24.py` 24
+- 数据兼容回环、import 兼容、打包链路（PyInstaller hiddenimports 全列出）均通过
+- 重构后 exe 实跑启动正常（pid 30320），无异常
+
+### 文档
+
+- `docs/架构重构PRD.md`（产品经理）
+- `docs/架构设计.md` + `docs/class-diagram.mermaid` + `docs/sequence-diagram.mermaid`（架构师）
+
+---
+
 ## v1.4.5 hotfix · 两个从 crash.log 里挖出来的真崩溃
 
 这两个 bug 都是**排查"压缩上下文"时顺手看 crash.log 发现的**，之前所有自测都没覆盖到 ——

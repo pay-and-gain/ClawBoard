@@ -1,0 +1,62 @@
+sequenceDiagram
+    autonumber
+    %% ============ ① 启动链路 ============
+    participant M as main() [ClawBoard.py]
+    participant W as win32
+    participant A as ClawBoard [app.py]
+    participant D as DataMixin
+    participant H as HiddenWindow [hotkey.py]
+
+    M->>W: init_dpi_awareness()
+    M->>W: single_instance()
+    alt 互斥体已存在
+        W-->>M: False → 聚焦已有实例并退出
+    end
+    M->>A: ClawBoard(root)
+    A->>D: load_data() → validate() → (migrate() 如需)
+    A->>A: apply_theme(self.st) + AppState 字段复制到 self
+    A->>A: build_ui() → apply_geometry() → save(True)
+    A->>H: setup_system() → HiddenWindow.start() → tray_add()
+    A->>A: render() → poll_clip() / poll_bg()
+
+    %% ============ ② 剪贴板监听 → 入库 ============
+    participant P as poll_clip [SystemMixin]
+    participant C as clipboard
+    participant S as classify
+    participant I as ingest [DataMixin]
+
+    loop 每 400ms
+        P->>C: clip_seq()
+        alt seq 变化
+            P->>C: clip_is_private()?（smart_private 时）
+            P->>C: clip_read()
+            P->>C: scan_sensitive(txt)
+            alt skip_sensitive 命中
+                P->>P: tip() 后跳过
+            else
+                P->>I: ingest(txt, hits)
+                I->>I: capture_source() + 忽略/长度过滤（非 manual）
+                alt 重复内容
+                    I->>I: rec = dup（置顶，copy_count+1）
+                else 新内容
+                    I->>S: classify()/detect_content_type() 入库
+                end
+                I->>I: crop_items() → save(True) → render()
+            end
+        end
+    end
+
+    %% ============ ③ 粘贴链路 ============
+    participant K as on_click_item [InteractionMixin]
+    participant PA as paste [InteractionMixin]
+
+    K->>PA: paste(text, cid=id)
+    PA->>PA: trim_for_paste(text)
+    PA->>I: 刷新 last_used_at → save(True)
+    PA->>C: clip_write(text)
+    alt autopaste 且未隐藏
+        PA->>PA: root.withdraw() → _paste_worker(hwnd)（后台线程）
+        PA->>W: force_foreground(hwnd)
+        PA->>W: send_ctrl_v()（先 all_keys_up）
+        PA->>PA: _need_show=True → 主循环恢复面板
+    end
