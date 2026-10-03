@@ -17,4 +17,6 @@
   app.py          class ClawBoard 组合根 + 统一状态初始化
 入口 ClawBoard.py 保留为 re-export 聚合层，对外符号与老版本完全一致。
 """
-__version__ = '1.4.5'
+# 版本号的唯一来源是 config.APP_VER（config.py 为包内叶子模块，不反向 import 本包，
+# 故此处 from ... import 不会造成循环 import）。切勿在此再硬编码第二份版本号 —— 会再次过期。
+from clawboard.config import APP_VER as __version__   # noqa: E402

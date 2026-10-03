@@ -71,6 +71,14 @@ def parse_time_token(v, now_ms):
         base = datetime.datetime(n.tm_year, n.tm_mon, n.tm_mday)
         a = base + datetime.timedelta(hours=int(m.group(1)), minutes=int(m.group(2)))
         b = base + datetime.timedelta(hours=int(m.group(3)), minutes=int(m.group(4)))
+        # 跨午夜：起时间晚于止时间（如 22:00-02:00）时把止时间顺延一天，
+        # 使区间为 [a, b) 跨越午夜。否则 a > b 会让 lo <= ts < hi 恒为假，
+        # 搜索静默返回 0 条 —— 用户以为那段时间没数据。
+        # 起止相同（09:00-09:00）走同一分支 → 顺延为跨整天的 24h 区间：
+        # 「空白时段」没有实际意义，24h 才是符合直觉的语义（既不静默丢数据，
+        # 也避免用户误以为整天都被排除）；故用 b <= a。
+        if b <= a:
+            b += datetime.timedelta(days=1)
         return (int(a.timestamp() * 1000), int(b.timestamp() * 1000))
     return parse_date(v)
 

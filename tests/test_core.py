@@ -72,12 +72,27 @@ class TestQuery(unittest.TestCase):
         self.assertEqual(len(got), 0)
 
     def test_time_slot(self):
+        # 用固定白天时段（10:00-12:00）+ 对应时间戳构造条目，不依赖运行时刻。
+        # 原实现用 now-1h..now+1h，在 23:00~00:59 运行时起时间会跨午夜回绕，
+        # 测试因此时好时坏（flaky）。固定时段后稳定可复现。
         import datetime
-        n = datetime.datetime.now()
-        a = (n - datetime.timedelta(hours=1)).strftime('%H:%M')
-        b = (n + datetime.timedelta(hours=1)).strftime('%H:%M')
-        got, _ = query.match('time:%s-%s' % (a, b), [item('x', ts=NOW)])
+        d = datetime.datetime.now().replace(hour=11, minute=0, second=0, microsecond=0)
+        ts = int(d.timestamp() * 1000)                     # 当天 11:00
+        got, _ = query.match('time:10:00-12:00', [item('x', ts=ts)])
         self.assertEqual(len(got), 1)
+        # 12:30 在白天时段之外，不该命中
+        ts2 = int((d.replace(hour=12, minute=30)).timestamp() * 1000)
+        got2, _ = query.match('time:10:00-12:00', [item('y', ts=ts2)])
+        self.assertEqual(len(got2), 0)
+
+    def test_time_slot_cross_midnight(self):
+        # 跨午夜时段 22:00-02:00 的回归由 tests/_t36.py 全面覆盖，
+        # 这里只做一条冒烟：23:00 与 01:00 都应命中。
+        import datetime
+        d = datetime.datetime.now().replace(hour=23, minute=0, second=0, microsecond=0)
+        ts_late = int(d.timestamp() * 1000)                 # 当天 23:00
+        self.assertEqual(
+            len(query.match('time:22:00-02:00', [item('a', ts=ts_late)])[0]), 1)
 
     def test_bad_syntax_no_crash(self):
         c = query.parse('time:notatime type:zzz size:abc is:zzz')
