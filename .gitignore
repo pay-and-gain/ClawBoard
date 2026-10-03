@@ -35,10 +35,7 @@ _ui_shot.py
 
 # ---- 临时产物 ----
 _t*.out
-_t1*.py
-_t2[0-1].py
 _t2[0-1].out
-_t3*.py
 _p*.txt
 _p*.py
 shot_*.png

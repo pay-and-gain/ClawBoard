@@ -26,6 +26,7 @@ from clawboard.win32 import (force_foreground, send_ctrl_v,
                              window_rect, rects_overlap)
 from clawboard.widgets import Dialog, SplitDialog, CopyToast, ContentPreview
 from clawboard.dialogs import SettingsWindow, TransformWindow, ExportDialog
+from clawboard.command_palette import CommandPalette
 
 import query as Q          # F3 查询解析器（独立模块，可单测）
 
@@ -455,6 +456,10 @@ class InteractionMixin(PhraseMixin):
     # ---------- 设置 ----------
     def open_settings(self):
         SettingsWindow(self)
+
+    # ---------- 命令面板（Ctrl+Shift+P） ----------
+    def open_command_palette(self):
+        CommandPalette(self)
 
     # ---------- F3 搜索：历史 / 帮助 ----------
     def on_search_return(self, e=None):

@@ -50,6 +50,7 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         root.bind('<Control-t>', lambda e: self.open_transform())
         root.bind('<Control-e>', lambda e: self.open_export())
         root.bind('<Control-q>', lambda e: self.quit_app())
+        root.bind('<Control-Shift-P>', lambda e: self.open_command_palette())
         # 等比缩放：Ctrl+= 放大一档 / Ctrl+- 缩小一档（Ctrl+0 已被快速粘贴占用）
         root.bind('<Control-equal>', lambda e: self.cycle_ui_scale(1))
         root.bind('<Control-minus>', lambda e: self.cycle_ui_scale(-1))
