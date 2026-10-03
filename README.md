@@ -63,6 +63,8 @@ pyinstaller ClawBoard.spec
 
 ## 📖 文档
 
+🌐 **[在线文档](https://pay-and-gain.github.io/ClawBoard/)** —— 网页版，可切换中 / 英文
+
 | 文档 | 内容 |
 |---|---|
 | [制作思路](docs/制作思路.md) · [English](docs/DESIGN.en.md) | **功能说明 + 使用指南 + 设计思路**：需求来源、方法顺序、技术选型、实现步骤、踩坑、实测数据、FAQ |

@@ -63,6 +63,8 @@ built with `ClawBoardC/build.bat` (requires MSVC). Both builds **share the same 
 
 ## 📖 Documentation
 
+🌐 **[Online docs](https://pay-and-gain.github.io/ClawBoard/)** — web version, switch between Chinese / English
+
 | Document | Content |
 |---|---|
 | [Design notes](docs/DESIGN.en.md) · [中文](docs/制作思路.md) | **Features + usage guide + design thinking**: where requirements came from, method order, tech choices, implementation steps, pitfalls, measured numbers, FAQ |
