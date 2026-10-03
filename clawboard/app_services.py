@@ -26,7 +26,9 @@ from clawboard.win32 import (
     capture_source, window_title_of,
     start_keyboard_hook, stop_keyboard_hook, send_backspaces, send_ctrl_v,
 )
-from clawboard.clipboard import clip_seq, clip_read, clip_is_private, scan_sensitive, clip_write
+from clawboard.clipboard import (
+    clip_seq, clip_read, clip_read_files, clip_is_private, scan_sensitive, clip_write,
+)
 from clawboard.trigger import TriggerEngine
 from clawboard.image import clipboard_has_image, read_clipboard_dib, dib_to_png
 from clawboard.tag import detect_tags
@@ -506,6 +508,12 @@ class SystemMixin:
                     self._ingest_image()
                 else:
                     txt = clip_read()
+                    if not (txt and txt.strip()):
+                        # 资源管理器复制文件：剪贴板只有 CF_HDROP、没有文本，
+                        # 把文件路径当普通文本记录（多条用换行连接）。
+                        files = clip_read_files()
+                        if files:
+                            txt = '\n'.join(files)
                     if txt and txt.strip():
                         if len(txt) > MAX_TEXT:
                             txt = txt[:MAX_TEXT] + '\n…（内容超长已截断）'

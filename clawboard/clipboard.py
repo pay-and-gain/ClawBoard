@@ -9,8 +9,8 @@ import re
 
 from clawboard import runtime
 from clawboard.win32 import (
-    u32, k32, CF_UNICODETEXT, GMEM_MOVEABLE,
-    CF_NAME_EXCLUDE, CF_NAME_INCLUDE_HISTORY,
+    u32, k32, CF_UNICODETEXT, CF_HDROP, GMEM_MOVEABLE,
+    CF_NAME_EXCLUDE, CF_NAME_INCLUDE_HISTORY, shell32,
 )
 
 
@@ -35,6 +35,49 @@ def clip_read():
             return ctypes.wstring_at(p)
         finally:
             k32.GlobalUnlock(h)
+    finally:
+        u32.CloseClipboard()
+
+
+# DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0) 返回文件个数（不取路径）
+_DRAGQUERY_COUNT = 0xFFFFFFFF
+
+
+def clip_read_files():
+    """读取剪贴板里的 CF_HDROP 文件列表（资源管理器 Ctrl+C 复制文件时）。
+
+    Windows 在资源管理器里复制文件时不放 CF_UNICODETEXT，只放 CF_HDROP（格式 15），
+    所以 clip_read() 会返回 None、上层看不到任何内容。这里用 shell32.DragQueryFileW
+    把被复制文件的完整路径逐个取出来。返回 list[str]；无文件/失败返回 []。
+
+    注意：DragQueryFileW 的第一个参数就是 GetClipboardData(CF_HDROP) 返回的 HDROP
+    句柄本身（64 位），其 argtypes/restype 已在 win32 里声明，避免句柄被截断。
+    本函数只在此处开一次剪贴板，不要在 OpenClipboard 期间嵌套调用别的开剪贴板的函数。
+    """
+    if not u32.IsClipboardFormatAvailable(CF_HDROP):
+        return []
+    if not u32.OpenClipboard(None):
+        return []
+    try:
+        h = u32.GetClipboardData(CF_HDROP)
+        if not h:
+            return []
+        n = shell32.DragQueryFileW(h, _DRAGQUERY_COUNT, None, 0)
+        if not n:
+            return []
+        paths = []
+        for i in range(int(n)):
+            need = shell32.DragQueryFileW(h, i, None, 0)   # 该路径的字符数（不含结尾 NUL）
+            if not need:
+                continue
+            buf = ctypes.create_unicode_buffer(need + 1)
+            if shell32.DragQueryFileW(h, i, buf, need + 1):
+                p = buf.value
+                if p:
+                    paths.append(p)
+        return paths
+    except Exception:
+        return []
     finally:
         u32.CloseClipboard()
 

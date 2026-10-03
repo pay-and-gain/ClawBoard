@@ -20,6 +20,7 @@ psapi = ctypes.WinDLL('psapi')
 advapi = ctypes.WinDLL('advapi32', use_last_error=True)
 
 CF_UNICODETEXT = 13
+CF_HDROP = 15                 # 资源管理器按 Ctrl+C 复制文件时的格式（HDROP 句柄列表）
 GMEM_MOVEABLE = 0x0002
 HWND_MESSAGE = wintypes.HWND(-3)
 WM_HOTKEY = 0x0312
@@ -107,6 +108,14 @@ u32.DestroyIcon.restype = wintypes.BOOL
 sh32 = ctypes.WinDLL('shell32', use_last_error=True)
 sh32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.c_void_p]
 sh32.Shell_NotifyIconW.restype = wintypes.BOOL
+# shell32 的别名，供「读取 CF_HDROP 文件路径」使用。
+# 坑③同类：DragQueryFileW 的第一个参数 HDROP 是 64 位句柄，且返回 c_uint（文件数/字符数），
+# 不声明 argtypes/restype 会被 ctypes 按 c_int 截断 64 位句柄（本项目此前 GetClipboardData /
+# GlobalSize 就栽在这里），所以这里必须显式声明。
+shell32 = sh32
+shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT,
+                                   wintypes.LPWSTR, wintypes.UINT]
+shell32.DragQueryFileW.restype = wintypes.UINT
 u32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ctypes.c_ulong]
 u32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
 u32.RegisterClipboardFormatW.restype = wintypes.UINT
