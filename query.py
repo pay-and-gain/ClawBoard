@@ -11,8 +11,8 @@ F3 · 高级搜索语法解析器（纯函数，无 UI 依赖，可单测）
   app:chrome                 来源应用（中文/模糊）
   type:text                  内容类型
   size:>1mb / size:<100      大小过滤
-  is:fav / is:sens / is:url  标记过滤
-  -关键词 / -app:xxx         排除
+  is:fav / is:sens / is:url / is:est / is:pin  标记过滤
+  -关键词 / -app:xxx / -is:pin  排除
 
 解析结果 compile 成谓词函数（本项目是 JSON 内存列表，无 SQL 层，
 因此编译为 Python 谓词 + 倒排索引，而非 SQL WHERE；同样可单测、同样防注入）。
@@ -24,7 +24,7 @@ UNIT = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
 SIZE_UNIT = {'b': 1, 'kb': 1024, 'k': 1024, 'mb': 1048576, 'm': 1048576,
              'gb': 1073741824, 'g': 1073741824}
 KNOWN_TYPES = ('text', 'url', 'json', 'multiline', 'image', 'filelist', 'empty')
-KNOWN_IS = ('fav', 'sens', 'url', 'est')
+KNOWN_IS = ('fav', 'sens', 'url', 'est', 'pin')
 
 
 def day_range(y, m, d):
@@ -86,7 +86,8 @@ def parse_size_token(v):
 def parse(q):
     """把查询串解析成结构化条件。无法识别的 token 一律当普通关键词，绝不抛异常"""
     cond = {'terms': [], 'not_terms': [], 'time': [], 'app': [], 'not_app': [],
-            'type': [], 'not_type': [], 'size': [], 'is': [], 'errors': []}
+            'type': [], 'not_type': [], 'size': [], 'is': [], 'is_neg': [],
+            'errors': []}
     for tok in (q or '').split():
         if not tok:
             continue
@@ -118,7 +119,7 @@ def parse(q):
             elif low.startswith('is:'):
                 v = body[3:].strip().lower()
                 if v in KNOWN_IS:
-                    cond['is'].append(v)
+                    (cond['is_neg'] if neg else cond['is']).append(v)
                 else:
                     cond['errors'].append('未知标记：' + v)
             else:
@@ -126,6 +127,21 @@ def parse(q):
         except Exception as e:
             cond['errors'].append('%s：%s' % (body, e))
     return cond
+
+
+def _is_hit(f, it):
+    """五种 is: 标记的统一命中判定（正向/负向共用）"""
+    if f == 'fav':
+        return bool(it.get('fav'))
+    if f == 'sens':
+        return bool(it.get('sens'))
+    if f == 'est':
+        return bool(it.get('is_estimated'))
+    if f == 'url':
+        return (it.get('content_type') or '') == 'url'
+    if f == 'pin':
+        return bool(it.get('pinned'))
+    return False
 
 
 def compile_pred(cond):
@@ -139,6 +155,7 @@ def compile_pred(cond):
     not_types = cond['not_type']
     sizes = cond['size']
     isf = cond['is']
+    is_neg = cond.get('is_neg', [])
 
     def pred(it):
         text = (it.get('text') or '').lower()
@@ -179,13 +196,10 @@ def compile_pred(cond):
                 if (not neg) and (not hit):
                     return False
         for f in isf:
-            if f == 'fav' and not it.get('fav'):
+            if not _is_hit(f, it):
                 return False
-            if f == 'sens' and not it.get('sens'):
-                return False
-            if f == 'est' and not it.get('is_estimated'):
-                return False
-            if f == 'url' and (it.get('content_type') or '') != 'url':
+        for f in is_neg:
+            if _is_hit(f, it):
                 return False
         return True
     return pred
@@ -195,7 +209,7 @@ def match(q, items):
     """便利函数：直接过滤列表"""
     cond = parse(q)
     if not any(cond[k] for k in ('terms', 'not_terms', 'time', 'app', 'not_app',
-                                 'type', 'not_type', 'size', 'is')):
+                                 'type', 'not_type', 'size', 'is', 'is_neg')):
         return list(items), cond
     p = compile_pred(cond)
     return [x for x in items if p(x)], cond
@@ -212,5 +226,6 @@ SYNTAX_HELP = [
     ('app:chrome', '来源应用（支持中文、模糊）'),
     ('type:url', '类型：text/url/json/multiline'),
     ('size:>1mb', '大小过滤（b/kb/mb/gb）'),
-    ('is:fav', '收藏 / is:sens 敏感 / is:est 时间为估算'),
+    ('is:fav', '收藏 / is:sens 敏感 / is:url 链接'),
+    ('is:est', '时间为估算 / is:pin 固定置顶'),
 ]

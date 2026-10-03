@@ -167,6 +167,8 @@ class InteractionMixin(PhraseMixin):
         m.add_command(label='🔧 文本变换', command=self.open_transform)
         m.add_command(label='★ 收藏' if not it.get('fav') else '☆ 取消收藏',
                       command=lambda: self.toggle_fav(it['id']))
+        m.add_command(label='📌 固定' if not it.get('pinned') else '📌 取消固定',
+                      command=lambda: self.toggle_item_pin(it['id']))
         m.add_command(label='🕘 查看详情', command=lambda: self.show_detail(it))
         m.add_command(label='↗ 选中这条用于导出',
                       command=lambda: (self.vlist.multi.add(it['id']),
@@ -193,6 +195,20 @@ class InteractionMixin(PhraseMixin):
         for x in pool:
             if x['id'] == cid:
                 x['fav'] = 0 if x.get('fav') else 1
+        self.save(True)
+        self.render()
+
+    def toggle_item_pin(self, cid):
+        """固定/取消固定条目（搜索态置顶用）。
+
+        注意：这里不叫 toggle_pin——GeometryMixin 已有一个 toggle_pin() 是「窗口
+        置顶」（标题栏 📌 按钮在用），且它在 MRO 里排在 InteractionMixin 之前，
+        同名方法会被它遮蔽、右键菜单调用会抛 TypeError。故用独立命名。
+        """
+        pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
+        for x in pool:
+            if x['id'] == cid:
+                x['pinned'] = 0 if x.get('pinned') else 1
         self.save(True)
         self.render()
 
@@ -267,6 +283,7 @@ class InteractionMixin(PhraseMixin):
             for x in pool:
                 if x['id'] == cid:
                     x['last_used_at'] = now_ms()
+                    x['use_count'] = int(x.get('use_count') or 0) + 1
                     break
             self.save(True)
         if not clip_write(text):

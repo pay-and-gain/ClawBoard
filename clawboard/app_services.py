@@ -49,6 +49,8 @@ class DataMixin:
         it.setdefault('source_title', None)
         it.setdefault('copy_count', 1)
         it.setdefault('fav', 0)
+        it.setdefault('use_count', 0)
+        it.setdefault('pinned', 0)
         it.setdefault('meta', None)
         it.setdefault('sens', None)
         it.setdefault('time', time.strftime('%m-%d %H:%M',

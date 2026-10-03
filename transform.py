@@ -229,6 +229,59 @@ TRANSFORMS = [
 MAP = {k: f for k, _, f in TRANSFORMS}
 
 
+# ---------- 智能推荐 ----------
+def _looks_base64(s):
+    """形状判定：只含 base64 字母表、'=' 结尾、长度>=8 且为 4 的倍数"""
+    s = (s or '').strip()
+    if len(s) < 8 or len(s) % 4 != 0:
+        return False
+    return re.fullmatch(r'[A-Za-z0-9+/]+=+', s) is not None
+
+
+def _looks_identifier(s):
+    """含英文字母且无空白/中文 → 可能是英文标识符"""
+    s = (s or '').strip()
+    if not s:
+        return False
+    if not re.search(r'[A-Za-z]', s):
+        return False
+    if re.search(r'\s', s):
+        return False
+    if re.search(r'[\u4e00-\u9fff]', s):
+        return False
+    return True
+
+
+def recommend(text):
+    """按待变换文本的特征返回推荐变换 key 列表（按优先级，可为空）。
+
+    各规则独立判定、命中即追加；多个规则同时命中时按规则顺序拼接。
+    纯粹是启发式排序依据，判断错了也只是推荐不准，绝不报错。
+    """
+    if not isinstance(text, str):
+        return []
+    s = text or ''
+    out = []
+    try:
+        json.loads(s)
+        out += ['jsonfmt', 'jsonmin']
+    except Exception:
+        pass
+    if re.search(r'<[a-z/]', s, re.I):
+        out.append('deformat')
+    if re.search(r'https?://', s):
+        out += ['exurl', 'urldec']
+    if re.search(r'[\uff01-\uff5e\u3000]', s):
+        out.append('half')
+    if _looks_base64(s):
+        out.append('b64dec')
+    if '\n' in s:
+        out += ['sortline', 'uniqline', 'dropblank']
+    if _looks_identifier(s):
+        out += ['camel', 'snake', 'pascal', 'kebab']
+    return out
+
+
 def apply(key, text):
     f = MAP.get(key)
     if not f:

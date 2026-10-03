@@ -324,6 +324,13 @@ class UiMixin:
             pool, cond = Q.match(q, pool)
             if cond['errors']:
                 self.search_err = cond['errors'][0]
+            # 搜索态按「固定 → 使用次数 → 最近使用」排序；
+            # 默认浏览（q 为空）保持插入顺序不动。
+            pool = sorted(pool, key=lambda it: (
+                -(it.get('pinned') or 0),
+                -(it.get('use_count') or 0),
+                -(it.get('last_used_at') or it.get('created_at') or 0),
+            ))
             kw = cond['terms'][0] if cond['terms'] else ''
         for it in pool:
             text = it['text']
@@ -357,6 +364,8 @@ class UiMixin:
                 badge = '%s %s' % (kind_icon(k), human_size(size))
             if it.get('fav'):
                 disp = '★ ' + disp
+            if it.get('pinned'):
+                disp = '📌 ' + disp
             out.append({'id': it['id'], 'disp': disp, 'text': text, 'sub': sub,
                         'badge': badge, 'kind': self.tab, 'sens': hits, 'kind_auto': k,
                         'created_at': it.get('created_at'),

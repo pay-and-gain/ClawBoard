@@ -459,8 +459,29 @@ class TransformWindow:
         sb.pack(side='left', fill='y', padx=(2, 0))
         # Windows 的 Tk Listbox 自带没有任何滚轮绑定，必须自己接管
         self.lb.bind('<MouseWheel>', self.lb_wheel)
-        for _, label, _ in tx().TRANSFORMS:
-            self.lb.insert('end', label)
+        # 智能推荐：把最可能的变换排到最前（加 ★ 前缀），其余按原顺序跟在后面。
+        # self._keys 与 Listbox 的每一行一一对应（分隔占位行对应 None），
+        # run() 只按 _keys 反查，避免依赖 label 文本。
+        txm = tx()
+        rec = txm.recommend(text)
+        self._keys = []
+        labels = {k: label for k, label, _ in txm.TRANSFORMS}
+        if rec:
+            recset = set(rec)
+            for key in rec:
+                if key in labels:
+                    self.lb.insert('end', '★ ' + labels[key])
+                    self._keys.append(key)
+            self.lb.insert('end', '────────')
+            self._keys.append(None)
+            for key, label, _ in txm.TRANSFORMS:
+                if key not in recset:
+                    self.lb.insert('end', label)
+                    self._keys.append(key)
+        else:
+            for key, label, _ in txm.TRANSFORMS:
+                self.lb.insert('end', label)
+                self._keys.append(key)
         self.lb.bind('<<ListboxSelect>>', lambda e: self.run())
 
         rf = tk.Frame(mid, bg=T['bg'])
@@ -514,7 +535,9 @@ class TransformWindow:
         sel = self.lb.curselection()
         if not sel:
             return
-        key = tx().TRANSFORMS[int(sel[0])][0]
+        key = self._keys[int(sel[0])]
+        if key is None:          # 分隔占位行：不触发任何变换
+            return
         src = self.src.get('1.0', 'end-1c')
         if len(src.encode('utf-8')) > 5 * 1024 * 1024:
             self.out.delete('1.0', 'end')
