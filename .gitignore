@@ -44,3 +44,6 @@ _p*.py
 shot_*.png
 ui_*.png
 ClawBoardC/ClawBoardC_selftest.txt
+
+# 发行产物（安装包 / 压缩包，由 packaging/ 脚本生成）
+release/

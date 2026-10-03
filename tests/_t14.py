@@ -10,6 +10,8 @@ try:
 except Exception:
     pass
 
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ClawBoard as C
 
 ok_all = True

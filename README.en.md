@@ -15,6 +15,16 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
   <img src="docs/images/settings-advanced.png" alt="Settings - advanced" width="290">
 </p>
 
+## 📥 Download
+
+| Package | File | Notes |
+|---|---|---|
+| **Installer** (recommended) | `ClawBoard-1.5.2-setup.exe` | Double-click to install; adds Start-menu and desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-1.5.2-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
+
+👉 Everything lives on the [**Releases page**](../../releases/latest).
+
 ## ✨ Features
 
 - **Clipboard history** — auto capture, dedupe, configurable cap, starring; hover for time, right-click for details
@@ -28,25 +38,31 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 
 ## 🚀 Quick start
 
-### Just run it
-Grab `ClawBoard.exe` from [Releases](../../releases) and double-click. The data file is created next to the exe.
+### Option 1 — Installer
+Download `ClawBoard-1.5.2-setup.exe` and follow the prompts (Windows 10 / 11).
 
-### From source
+### Option 2 — Portable
+Download `ClawBoard-1.5.2-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+
+### Option 3 — From source
 ```bash
+git clone https://github.com/pay-and-gain/ClawBoard.git
+cd ClawBoard
 python ClawBoard.py     # requires Python 3 + tkinter (bundled with Windows)
 ```
+No pip dependencies.
 
-No pip dependencies. Windows 10 / 11.
-
-### Build an exe
+### Build it yourself
 ```bash
 pip install pyinstaller
-pyinstaller ClawBoard.spec
+pyinstaller packaging/ClawBoard.spec --noconfirm
+# output: dist/ClawBoard.exe; the data file is created next to the exe
 ```
+Scripts for the installer (Inno Setup) and the portable zip live in [`packaging/`](packaging/).
 
 ### C build (optional)
 [`ClawBoardC/`](ClawBoardC/) is a pure Win32 + GDI implementation (~2,500 lines, 205 KB binary, ~15 MB memory),
-built with `ClawBoardC/build.bat` (requires MSVC). Both builds **share the same data file** and can be swapped freely.
+built via `ClawBoardC/build.bat` (requires MSVC). Both builds **share the same data file** and can be swapped freely.
 
 ## ⌨️ Shortcuts
 
@@ -91,6 +107,9 @@ clawboard/              Python package (16 responsibility modules, 4 layers)
 query.py                search syntax parser
 transform.py            27 text transforms
 ClawBoardC/             C implementation
+packaging/              build config (PyInstaller spec, icon, launcher, installer script)
+tests/                  regression tests (177 cases)
+└─ testdata/            test data generator
 docs/                   design docs + screenshots
 ```
 
@@ -99,13 +118,13 @@ Dependency direction (no circular imports): `config` (leaf) → domain → syste
 ## 🧪 Tests
 
 ```bash
-python test_core.py       # search syntax (27)
-python test_refactor.py   # refactor unit tests (12)
-python _t14.py            # content classification (38)
-python _t22.py            # toolbar layout (26)
-python _t24.py            # collapse / duplicate capture (24)
-python _t25.py            # edge resize (25)
-python _t26.py            # UI scaling (25)
+python tests/test_core.py        # search syntax (27)
+python tests/test_refactor.py    # refactor unit tests (12)
+python tests/_t14.py             # content classification (38)
+python tests/_t22.py             # toolbar layout (26)
+python tests/_t24.py             # collapse / duplicate capture (24)
+python tests/_t25.py             # edge resize (25)
+python tests/_t26.py             # UI scaling (25)
 ```
 
 **177** regression tests in total, covering layout, geometry, data and interaction paths.

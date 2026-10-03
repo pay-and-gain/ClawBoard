@@ -19,5 +19,5 @@ if not defined PY (
   pause
   exit /b 1
 )
-start "" "%PY%" "%~dp0ClawBoard.py"
+start "" "%PY%" "%~dp0..\ClawBoard.py"
 endlocal

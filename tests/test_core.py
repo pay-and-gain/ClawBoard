@@ -7,7 +7,7 @@ import json
 import base64
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import query
 import transform as tr
 

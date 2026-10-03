@@ -15,6 +15,16 @@
   <img src="docs/images/settings-advanced.png" alt="设置 - 进阶" width="290">
 </p>
 
+## 📥 下载
+
+| 方式 | 文件 | 说明 |
+|---|---|---|
+| **安装包**（推荐） | `ClawBoard-1.5.2-setup.exe` | 双击安装，自动创建开始菜单与桌面快捷方式，带卸载项 |
+| **绿色版** | `ClawBoard-1.5.2-portable.zip` | 解压即用，不写注册表、不留残留 |
+| **源码** | `Source code (zip/tar.gz)` | GitHub 在 Release 页自动提供；也可 `git clone` |
+
+👉 全部文件在 [**Releases 页面**](../../releases/latest)。
+
 ## ✨ 特性
 
 - **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
@@ -28,25 +38,32 @@
 
 ## 🚀 快速开始
 
-### 直接用
-下载 [Releases](../../releases) 里的 `ClawBoard.exe`，双击运行。数据文件生成在 exe 旁边。
+### 方式一：装安装包
+下载 `ClawBoard-1.5.2-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
 
-### 从源码运行
+### 方式二：绿色版
+下载 `ClawBoard-1.5.2-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
+
+### 方式三：从源码运行
 ```bash
+git clone https://github.com/pay-and-gain/ClawBoard.git
+cd ClawBoard
 python ClawBoard.py     # 需要 Python 3 + tkinter（Windows 自带）
 ```
+零 pip 依赖。
 
-零 pip 依赖。Windows 10 / 11。
-
-### 打包成 exe
+### 自己打包
 ```bash
 pip install pyinstaller
-pyinstaller ClawBoard.spec
+pyinstaller packaging/ClawBoard.spec --noconfirm
+# 产物在 dist/ClawBoard.exe，数据文件落在 exe 旁边
 ```
+安装包（Inno Setup）与绿色版（zip）的脚本见 [`packaging/`](packaging/)。
 
 ### C 版（可选）
 [`ClawBoardC/`](ClawBoardC/) 是纯 Win32 + GDI 自绘的 C 实现（约 2500 行，产物 205 KB，内存约 15 MB），
-用 `ClawBoardC/build.bat` 编译（需 MSVC）。两版**共用同一份数据文件**，可互换使用。
+用 `packaging/启动ClawBoard.bat` 同类方式编译（需 MSVC，见 `ClawBoardC/build.bat`）。
+两版**共用同一份数据文件**，可互换使用。
 
 ## ⌨️ 快捷键
 
@@ -68,8 +85,9 @@ pyinstaller ClawBoard.spec
 | 文档 | 内容 |
 |---|---|
 | [制作思路](docs/制作思路.md) · [English](docs/DESIGN.en.md) | **功能说明 + 使用指南 + 设计思路**：需求来源、方法顺序、技术选型、实现步骤、踩坑、实测数据、FAQ |
-| [使用说明](使用说明.md) | 详细操作手册 |
+| [使用说明](docs/使用说明.md) | 详细操作手册 |
 | [架构设计](docs/架构设计.md) | 分层结构、模块划分、依赖方向、调用流程 |
+| [需求与进度](docs/需求全景.md) · [PROGRESS](docs/PROGRESS.md) | 需求全景与开发过程记录 |
 | [CHANGELOG](CHANGELOG.md) | 逐版本改动记录 |
 
 ## 🏗️ 项目结构
@@ -92,6 +110,9 @@ clawboard/              Python 包（16 个职责模块，四层架构）
 query.py                搜索语法解析器
 transform.py            27 项文本变换
 ClawBoardC/             C 语言版本
+packaging/              打包配置（PyInstaller spec、图标、启动脚本、安装包脚本）
+tests/                  回归测试（177 项）
+└─ testdata/            测试数据生成器
 docs/                   设计文档 + 截图
 ```
 
@@ -100,13 +121,13 @@ docs/                   设计文档 + 截图
 ## 🧪 测试
 
 ```bash
-python test_core.py       # 搜索语法单测（27 项）
-python test_refactor.py   # 重构单测（12 项）
-python _t14.py            # 内容自适应（38 项）
-python _t22.py            # 工具条布局（26 项）
-python _t24.py            # 折叠 / 重复复制（24 项）
-python _t25.py            # 边缘拉伸（25 项）
-python _t26.py            # UI 等比缩放（25 项）
+python tests/test_core.py        # 搜索语法单测（27 项）
+python tests/test_refactor.py    # 重构单测（12 项）
+python tests/_t14.py             # 内容自适应（38 项）
+python tests/_t22.py             # 工具条布局（26 项）
+python tests/_t24.py             # 折叠 / 重复复制（24 项）
+python tests/_t25.py             # 边缘拉伸（25 项）
+python tests/_t26.py             # UI 等比缩放（25 项）
 ```
 
 共 **177 项**回归测试，覆盖布局、几何、数据、交互等核心路径。

@@ -14,6 +14,8 @@ import io
 import os
 import tempfile
 
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ClawBoard as C
 import tkinter as tk
 
