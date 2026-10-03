@@ -21,12 +21,14 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
   <img src="docs/images/settings-advanced.png" alt="Settings - advanced" width="290">
 </p>
 
+👉 New here? Read the [**Getting Started guide**](docs/getting-started.en.md) — up and running in 30 seconds, fluent in 5 minutes.
+
 ## 📥 Download
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-2.2.2-setup.exe` | Double-click to install; adds Start-menu and desktop shortcuts plus an uninstaller |
-| **Portable** | `ClawBoard-2.2.2-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Installer** (recommended) | `ClawBoard-2.2.3-setup.exe` | Double-click to install; adds Start-menu and desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-2.2.3-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
 👉 Everything lives on the [**Releases page**](../../releases/latest).
@@ -40,7 +42,7 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 - **Auto-tagging** — auto-detect email / phone / number / date / URL / code / JSON, filter with `tag:`
 - **Trigger snippets** — set a short trigger (`dz` → address) and expand it in any app as you type
 - **Command palette** — `Ctrl+Shift+P` to open, type to fuzzy-filter and run
-- **Image clipboard** — screenshots / copied images are captured and previewed in the corner
+- **Image clipboard** — screenshots / copied images are captured, previewed in the corner, and **pasted back** (record / preview / paste, fully symmetric with text); copied image *files* are recorded as their path
 - **27 text transforms** — encode/decode, case, line ops, hashes (MD5/SHA1/SHA256), JSON formatting…
 - **Batch export** — TXT / CSV (with BOM) / JSON / Markdown
 - **Quick paste** — `Ctrl+1..9` / `Ctrl+0` pastes items 1–10 directly
@@ -50,10 +52,10 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 ## 🚀 Quick start
 
 ### Option 1 — Installer
-Download `ClawBoard-2.2.2-setup.exe` and follow the prompts (Windows 10 / 11).
+Download `ClawBoard-2.2.3-setup.exe` and follow the prompts (Windows 10 / 11).
 
 ### Option 2 — Portable
-Download `ClawBoard-2.2.2-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+Download `ClawBoard-2.2.3-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 
 ### Option 3 — From source
 ```bash
@@ -94,8 +96,11 @@ built via `ClawBoardC/build.bat` (requires MSVC). Both builds **share the same d
 
 | Document | Content |
 |---|---|
+| [**Getting Started**](docs/getting-started.en.md) · [中文](docs/getting-started.md) | **New here? Start here**: 30-second quick start + 5-minute tutorial + core features one by one |
 | [Design notes](docs/DESIGN.en.md) · [中文](docs/制作思路.md) | **Features + usage guide + design thinking**: where requirements came from, method order, tech choices, implementation steps, pitfalls, measured numbers, FAQ |
-| [Architecture](docs/架构设计.md) | Layers, module split, dependency direction, call flows |
+| [User manual](docs/使用说明.md) (Chinese) | Detailed operations manual |
+| [Architecture](docs/架构设计.md) (Chinese) | Layers, module split, dependency direction, call flows |
+| [Requirements & progress](docs/需求全景.md) · [PROGRESS](docs/PROGRESS.md) (Chinese) | Requirement overview and development log |
 | [CHANGELOG](CHANGELOG.md) | Version-by-version changes |
 
 ## 🏗️ Project layout
@@ -119,7 +124,7 @@ query.py                search syntax parser
 transform.py            27 text transforms
 ClawBoardC/             C implementation
 packaging/              build config (PyInstaller spec, icon, launcher, installer script)
-tests/                  regression tests (177 cases)
+tests/                  regression tests (335 cases)
 └─ testdata/            test data generator
 docs/                   design docs + screenshots
 ```
@@ -131,19 +136,28 @@ Dependency direction (no circular imports): `config` (leaf) → domain → syste
 ```bash
 python tests/test_core.py        # search syntax (27)
 python tests/test_refactor.py    # refactor unit tests (12)
-python tests/_t14.py             # content classification (38)
+python tests/_t14.py             # content classification (34)
 python tests/_t22.py             # toolbar layout (26)
 python tests/_t24.py             # collapse / duplicate capture (24)
 python tests/_t25.py             # edge resize (25)
 python tests/_t26.py             # UI scaling (25)
+python tests/_t27.py             # data directory selection (21)
+python tests/_t28.py             # paste without full-window flash (19)
+python tests/_t29.py             # transform ranking + frequency sort (29)
+python tests/_t30.py             # command palette (21)
+python tests/_t31.py             # trigger engine (13)
+python tests/_t32.py             # pinyin search + polyphonic phrases (18)
+python tests/_t33.py             # image DIB↔PNG round-trip (17)
+python tests/_t34.py             # auto-tagging (16)
+python tests/_t35.py             # file-path capture via CF_HDROP (8)
 ```
 
-**177** regression tests in total, covering layout, geometry, data and interaction paths.
+**335** regression tests in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
 
 ## 🎯 Design trade-offs
 
 - **Zero third-party deps**: tkinter for UI, ctypes straight to Win32 for system features — no network, no dependency-version traps, copy-and-run
-- **Text-only by design**: handles text clipboard only, no image/file support (keeps it simple)
+- **Text-first, images too**: text is the core, but images are equally supported — record, preview and **paste** (since v2.2.0; zero-dependency hand-written PNG codec with DIB↔PNG conversion both ways). Copying an image *file* in Explorer records its **path**, not the pixels
 - **JSON instead of SQLite**: single file, easy to back up, hand-editable; safety comes from versioned migration + atomic writes
 - **Two implementations**: Python validates the complex logic, C proves how small it gets without an interpreter
 

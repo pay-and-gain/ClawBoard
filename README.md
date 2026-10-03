@@ -21,12 +21,14 @@
   <img src="docs/images/settings-advanced.png" alt="设置 - 进阶" width="290">
 </p>
 
+👉 第一次用？看 [**新手教程**](docs/getting-started.md) —— 30 秒上手，5 分钟摸透全部核心功能。
+
 ## 📥 下载
 
 | 方式 | 文件 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `ClawBoard-2.2.2-setup.exe` | 双击安装，自动创建开始菜单与桌面快捷方式，带卸载项 |
-| **绿色版** | `ClawBoard-2.2.2-portable.zip` | 解压即用，不写注册表、不留残留 |
+| **安装包**（推荐） | `ClawBoard-2.2.3-setup.exe` | 双击安装，自动创建开始菜单与桌面快捷方式，带卸载项 |
+| **绿色版** | `ClawBoard-2.2.3-portable.zip` | 解压即用，不写注册表、不留残留 |
 | **源码** | `Source code (zip/tar.gz)` | GitHub 在 Release 页自动提供；也可 `git clone` |
 
 👉 全部文件在 [**Releases 页面**](../../releases/latest)。
@@ -50,10 +52,10 @@
 ## 🚀 快速开始
 
 ### 方式一：装安装包
-下载 `ClawBoard-2.2.2-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
+下载 `ClawBoard-2.2.3-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
 
 ### 方式二：绿色版
-下载 `ClawBoard-2.2.2-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
+下载 `ClawBoard-2.2.3-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
 
 ### 方式三：从源码运行
 ```bash
@@ -95,6 +97,7 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 
 | 文档 | 内容 |
 |---|---|
+| [**新手教程**](docs/getting-started.md) · [English](docs/getting-started.en.md) | **第一次用？从这里开始**：30 秒上手 + 5 分钟教程 + 核心功能逐个上手 |
 | [制作思路](docs/制作思路.md) · [English](docs/DESIGN.en.md) | **功能说明 + 使用指南 + 设计思路**：需求来源、方法顺序、技术选型、实现步骤、踩坑、实测数据、FAQ |
 | [使用说明](docs/使用说明.md) | 详细操作手册 |
 | [架构设计](docs/架构设计.md) | 分层结构、模块划分、依赖方向、调用流程 |
@@ -122,7 +125,7 @@ query.py                搜索语法解析器
 transform.py            27 项文本变换
 ClawBoardC/             C 语言版本
 packaging/              打包配置（PyInstaller spec、图标、启动脚本、安装包脚本）
-tests/                  回归测试（318 项）
+tests/                  回归测试（335 项）
 └─ testdata/            测试数据生成器
 docs/                   设计文档 + 截图
 ```
@@ -134,22 +137,23 @@ docs/                   设计文档 + 截图
 ```bash
 python tests/test_core.py        # 搜索语法单测（27 项）
 python tests/test_refactor.py    # 重构单测（12 项）
-python tests/_t14.py             # 内容自适应（38 项）
+python tests/_t14.py             # 内容自适应（34 项）
 python tests/_t22.py             # 工具条布局（26 项）
 python tests/_t24.py             # 折叠 / 重复复制（24 项）
 python tests/_t25.py             # 边缘拉伸（25 项）
 python tests/_t26.py             # UI 等比缩放（25 项）
-python tests/_t27.py             # 数据目录选址（24 项）
+python tests/_t27.py             # 数据目录选址（21 项）
 python tests/_t28.py             # 粘贴不整窗闪（19 项）
 python tests/_t29.py             # 变换推荐 + 频率排序（29 项）
-python tests/_t30.py             # 命令面板（23 项）
+python tests/_t30.py             # 命令面板（21 项）
 python tests/_t31.py             # 触发词引擎（13 项）
-python tests/_t32.py             # 拼音搜索（12 项）
-python tests/_t33.py             # 图片 DIB→PNG（5 项）
+python tests/_t32.py             # 拼音搜索 + 多音字词组（18 项）
+python tests/_t33.py             # 图片 DIB↔PNG 往返（17 项）
 python tests/_t34.py             # 内容自动标签（16 项）
+python tests/_t35.py             # 文件路径记录 CF_HDROP（8 项）
 ```
 
-共 **318 项**回归测试，覆盖布局、几何、数据、交互、搜索、粘贴、图片等核心路径。
+共 **335 项**回归测试，覆盖布局、几何、数据、交互、搜索、粘贴、图片、文件路径等核心路径。
 
 ## 🗺️ 迭代路线
 
@@ -168,7 +172,7 @@ python tests/_t34.py             # 内容自动标签（16 项）
 ## 🎯 设计取舍
 
 - **零第三方依赖**：界面用自带的 tkinter，系统能力全用 ctypes 直调 Win32 —— 不用联网、不会被库版本坑、复制即跑
-- **文本为主、图片为辅**：文本剪贴板是核心，图片支持记录与预览（零依赖手写 PNG 编码，暂不支持粘贴图片）
+- **文本为主、图片为辅**：文本剪贴板是核心，图片同样支持记录、预览与**粘贴**（v2.2.0 起，零依赖手写 PNG 编解码，DIB↔PNG 双向转换）
 - **数据用 JSON 而非 SQLite**：单文件、易备份、可手改；配版本化迁移与原子写保证安全
 - **双语言实现**：Python 版验证复杂逻辑，C 版验证脱离解释器能压到多小
 
