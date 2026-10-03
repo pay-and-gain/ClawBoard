@@ -591,3 +591,64 @@ class ContentPreview:
             pass
 
 
+class ImagePreview:
+    """图片条目的角落预览：加载 PNG 显示大图，太大则等比缩小。"""
+
+    W, H = 460, 340
+    GAP = 12
+
+    def __init__(self, app, image_path, meta=''):
+        self.app = app
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes('-topmost', True)
+        self.win.attributes('-alpha', 0.0)
+        self.win.configure(bg=T['line'])
+        box = tk.Frame(self.win, bg=T['panel'])
+        box.pack(fill='both', expand=True, padx=1, pady=1)
+        head = tk.Frame(box, bg=T['panel'])
+        head.pack(fill='x', padx=10, pady=(8, 4))
+        tk.Label(head, text='图片', bg=T['panel'], fg=T['acc'],
+                 font=FONT_B).pack(side='left')
+        if meta:
+            tk.Label(head, text=meta, bg=T['panel'], fg=T['fg2'],
+                     font=FONT_SM).pack(side='right')
+        self.img = tk.PhotoImage(file=image_path)
+        while self.img.width() > self.W or self.img.height() > self.H:
+            self.img = self.img.subsample(2, 2)
+        tk.Label(box, image=self.img, bg=T['card']).pack(fill='both', expand=True,
+                                                         padx=8, pady=(0, 8))
+        x, y = self._pos()
+        w = max(140, self.img.width() + 20)
+        h = max(100, self.img.height() + 44)
+        self.win.geometry('%dx%d+%d+%d' % (w, h, x, y))
+        self._fade_in(0.0)
+
+    def _pos(self):
+        try:
+            r = self.app.root
+            rl, rt = r.winfo_x(), r.winfo_y()
+            sw = self.win.winfo_screenwidth()
+            sh = self.win.winfo_screenheight()
+            if rl + r.winfo_width() // 2 < sw // 2:
+                return sw - self.W - self.GAP, sh - self.H - 62
+            return self.GAP, sh - self.H - 62
+        except Exception:
+            return 12, 12
+
+    def _fade_in(self, a):
+        a = min(0.96, a + 0.2)
+        try:
+            self.win.attributes('-alpha', a)
+        except Exception:
+            return
+        if a < 0.96:
+            self.win.after(14, lambda: self._fade_in(a))
+
+    def close(self):
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+
+

@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## v2.0.0 · 图片剪贴板（② 战略）
+
+截图、复制图片现在也会被记录、预览。列表里显示「图片 宽×高」，键盘浏览（↑↓）时角落预览大图。
+
+实现（零依赖，纯标准库 + ctypes）：
+- `clawboard/image.py`：DIB ↔ 剪贴板读写 + `dib_to_png`（BITMAPINFOHEADER 解析 + zlib 手写
+  PNG 编码，只处理 32 位 BGRA——微信/QQ/系统截图的通用格式）。无 PIL。
+- `app_services.py`：`poll_clip` 检测到剪贴板是图片（CF_DIB）时走 `_ingest_image`：
+  读 DIB → 转 PNG → 存 `images/` 目录 → 记录条目（含 image_path/宽高）。
+- `app_ui.py`：图片条目显示「图片 W×H」。
+- `widgets.py` ImagePreview：角落大图预览（超 460×340 自动 subsample 缩小）。
+- `.gitignore` 忽略 `images/`（运行时图片数据）。
+
+已知限制：暂不支持「粘贴图片」（阶段 2）；超量裁剪后旧图文件暂未自动清理。
+
+新增 `tests/_t33.py`（5 项）。技术验证：构造 DIB → 写剪贴板 → 读回 → PNG → PhotoImage 加载全链路通过。
+
 ## v1.9.0 · 拼音搜索（② 战略）
 
 搜拼音能命中中文内容——记不清字也能搜到。搜 `zhanghao` 或 `zh` 命中含「账号」的条目。

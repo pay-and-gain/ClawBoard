@@ -15,7 +15,7 @@ import tkinter as tk
 from clawboard import runtime
 from clawboard.config import (
     APP_NAME, APP_VER, DATA_FILE, CRASH_LOG, DEFAULT_SETTINGS,
-    FONT, MAX_TEXT, SCHEMA_VERSION, rotate_log_if_needed,
+    FONT, MAX_TEXT, SCHEMA_VERSION, rotate_log_if_needed, BASE_DIR,
 )
 from clawboard.theme import T
 from clawboard.runtime import uid, now_str
@@ -28,6 +28,7 @@ from clawboard.win32 import (
 )
 from clawboard.clipboard import clip_seq, clip_read, clip_is_private, scan_sensitive, clip_write
 from clawboard.trigger import TriggerEngine
+from clawboard.image import clipboard_has_image, read_clipboard_dib, dib_to_png
 from clawboard.hotkey import HiddenWindow
 from clawboard.widgets import Dialog
 
@@ -445,6 +446,42 @@ class SystemMixin:
             self._hk_down = False
 
     # ---------- 循环 ----------
+    def _ingest_image(self):
+        """剪贴板里有图片时入库：读 DIB → 转 PNG → 存盘 → 记录条目。"""
+        dib = read_clipboard_dib()
+        if not dib:
+            return
+        try:
+            png, w, h = dib_to_png(dib)
+        except Exception as e:
+            self.note('图片转换失败：%s' % e)
+            return
+        img_dir = os.path.join(BASE_DIR, 'images')
+        try:
+            os.makedirs(img_dir, exist_ok=True)
+        except Exception:
+            return
+        fname = '%d.png' % now_ms()
+        try:
+            with open(os.path.join(img_dir, fname), 'wb') as f:
+                f.write(png)
+        except Exception as e:
+            self.note('图片保存失败：%s' % e)
+            return
+        ts = now_ms()
+        rec = {'id': uid(), 'text': '[图片]', 'created_at': ts, 'updated_at': ts,
+               'seq': self.next_seq(), 'content_type': 'image',
+               'image_path': fname, 'image_w': w, 'image_h': h,
+               'copy_count': 1, 'fav': 0, 'is_estimated': 0}
+        self.data['clip'].insert(0, rec)
+        lim = int(self.st['max_items'])
+        if len(self.data['clip']) > lim:
+            self.data['clip'] = crop_items(self.data['clip'], lim)
+        self.save(True)
+        if self.tab == 'clip':
+            self.render()
+        self.tip('已记录图片 %d×%d' % (w, h))
+
     def poll_clip(self):
         if not self.st['listen']:
             runtime.LAST_SEQ = clip_seq()
@@ -457,6 +494,8 @@ class SystemMixin:
                 if self.st.get('smart_private', True) and clip_is_private():
                     # 密码管理器用这个标记告诉所有监听者「这条别记」
                     self.tip('这条带了「不要记录」标记，已跳过')
+                elif clipboard_has_image():
+                    self._ingest_image()
                 else:
                     txt = clip_read()
                     if txt and txt.strip():

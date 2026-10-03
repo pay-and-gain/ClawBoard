@@ -342,12 +342,19 @@ class UiMixin:
                 k = classify(text)[0]
                 it['kind_auto'] = k
             disp = text
-            if hits and self.st['mask_sensitive'] and not it.get('mask_off'):
+            is_img = (it.get('content_type') == 'image')
+            if is_img:
+                k = 'image'
+                disp = '图片 %s×%s' % (it.get('image_w'), it.get('image_h'))
+            elif hits and self.st['mask_sensitive'] and not it.get('mask_off'):
                 disp = mask_text(text, hits)
             size = int(it.get('content_size') or 0)
             if self.tab == 'phrase':
                 sub = name or preview(text, 28)
                 badge = human_size(byte_size(text))
+            elif is_img:
+                sub = '%s · 图片' % (it.get('source_app') or 'unknown')
+                badge = '%s×%s' % (it.get('image_w'), it.get('image_h'))
             else:
                 parts = []
                 if self.st['show_time']:
@@ -370,7 +377,8 @@ class UiMixin:
                         'badge': badge, 'kind': self.tab, 'sens': hits, 'kind_auto': k,
                         'created_at': it.get('created_at'),
                         'est': it.get('is_estimated'),
-                        'app': it.get('source_app') or 'unknown'})
+                        'app': it.get('source_app') or 'unknown',
+                        'image_path': it.get('image_path')})
         return out, sel, kw
 
     def render(self):

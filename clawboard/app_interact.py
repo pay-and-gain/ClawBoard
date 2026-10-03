@@ -12,10 +12,11 @@ InteractionMixin：on_click_item / on_menu_item / on_hover_item / toggle_fav / s
              open_query_help / current_target_text / open_transform / open_export。
 """
 import time
+import os
 import threading
 import tkinter as tk
 
-from clawboard.config import FONT
+from clawboard.config import FONT, BASE_DIR
 from clawboard.theme import T
 from clawboard.runtime import uid
 from clawboard.classify import human_size, preview, to_plain
@@ -24,7 +25,8 @@ from clawboard.clipboard import clip_read, clip_write
 from clawboard.win32 import (force_foreground, send_ctrl_v,
                              paste_message, can_paste_message,
                              window_rect, rects_overlap)
-from clawboard.widgets import Dialog, SplitDialog, CopyToast, ContentPreview
+from clawboard.widgets import (Dialog, SplitDialog, CopyToast, ContentPreview,
+                               ImagePreview)
 from clawboard.dialogs import SettingsWindow, TransformWindow, ExportDialog
 from clawboard.command_palette import CommandPalette
 
@@ -537,6 +539,17 @@ class InteractionMixin(PhraseMixin):
             return
         if not text:
             return
+        img_name = (it or {}).get('image_path')
+        if img_name:
+            full = os.path.join(BASE_DIR, 'images', img_name)
+            if os.path.exists(full):
+                meta = '%s×%s' % ((it or {}).get('image_w'),
+                                  (it or {}).get('image_h'))
+                try:
+                    self._preview = ImagePreview(self, full, meta)
+                except Exception:
+                    self._preview = None
+                return
         kind = (it or {}).get('kind_auto') or 'text'
         meta = '%d 字符' % len(text)
         try:

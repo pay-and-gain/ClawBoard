@@ -21,6 +21,7 @@ crash.log
 debug.log
 *.log
 导出_*
+images/
 
 # ---- 个人 / 课程材料（含身份信息，绝不开源）----
 ClawBoard制作思路.docx
