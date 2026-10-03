@@ -27,7 +27,7 @@ from clawboard.config import (
     FONT, FONT_B, FONT_SM, FONT_TITLE, FONT_MONO,
     ITEM_H, CARD_GAP, WHEEL_LINES, BAR_H, TOOL_H, MIN_W, MIN_H, MAX_TEXT,
     RESIZE_ZONE, SCHEMA_VERSION, CLASSIFY_MAX, DEFAULT_SETTINGS,
-    UI_SCALE, UI_SCALE_LEVELS, scaled,
+    UI_SCALE, UI_SCALE_LEVELS, scaled, rotate_log_if_needed,
 )
 from clawboard.runtime import NO_SAVE, LAST_SEQ, TX, tx, uid, now_str
 
@@ -75,6 +75,7 @@ from clawboard.app import ClawBoard
 def install_excepthook():
     def hook(etype, val, tb):
         try:
+            rotate_log_if_needed(CRASH_LOG)
             with open(CRASH_LOG, 'a', encoding='utf-8') as f:
                 f.write('\n==== 未捕获异常 %s ====\n' % time.strftime('%F %T'))
                 f.write(''.join(traceback.format_exception(etype, val, tb)))
@@ -94,6 +95,7 @@ def tk_error(root):
             sys.stderr.flush()
             return
         try:
+            rotate_log_if_needed(CRASH_LOG)
             with open(CRASH_LOG, 'a', encoding='utf-8') as f:
                 f.write('\n==== Tk 回调异常 %s ====\n' % time.strftime('%F %T'))
                 f.write(text)

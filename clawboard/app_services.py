@@ -14,7 +14,7 @@ import tkinter as tk
 from clawboard import runtime
 from clawboard.config import (
     APP_NAME, APP_VER, DATA_FILE, CRASH_LOG, DEFAULT_SETTINGS,
-    FONT, MAX_TEXT, SCHEMA_VERSION,
+    FONT, MAX_TEXT, SCHEMA_VERSION, rotate_log_if_needed,
 )
 from clawboard.theme import T
 from clawboard.runtime import uid, now_str
@@ -189,6 +189,8 @@ class DataMixin:
         if runtime.NO_SAVE:
             return
         try:
+            # crash.log 上限：超过 512KB 截断，只保留最近 ~256KB（诊断只看最近的）
+            rotate_log_if_needed(CRASH_LOG)
             with open(CRASH_LOG, 'a', encoding='utf-8') as f:
                 f.write('[%s] %s\n' % (time.strftime('%F %T'), msg))
         except Exception:

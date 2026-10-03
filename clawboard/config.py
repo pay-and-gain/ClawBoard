@@ -63,6 +63,23 @@ def scaled(base):
     """
     return max(1, int(base * UI_SCALE))
 
+
+def rotate_log_if_needed(path, max_bytes=512 * 1024, keep_bytes=256 * 1024):
+    """日志文件超过上限时截断，只保留最近（尾部）一段。
+
+    crash.log 会无限增长（每次启动/异常都 append），不设上限的话用几个月就能长到
+    几十 MB。超过 max_bytes 时截断到 keep_bytes，保留最近诊断、丢掉最旧记录。
+    """
+    try:
+        if os.path.exists(path) and os.path.getsize(path) > max_bytes:
+            with open(path, 'rb') as f:
+                f.seek(max(0, os.path.getsize(path) - keep_bytes))
+                tail = f.read()
+            with open(path, 'wb') as f:
+                f.write(b'...[log truncated, keeping recent tail]...\n' + tail)
+    except Exception:
+        pass
+
 # 超长内容直接降级为纯文本，别在正则上浪费时间（classify 使用）。
 CLASSIFY_MAX = 128000
 

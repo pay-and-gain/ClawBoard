@@ -82,11 +82,23 @@ def match_ignore(app_name, title, apps_raw, titles_raw):
 
 
 def backup_data():
-    """迁移前备份，返回备份路径（失败返回 None）"""
+    """迁移前备份（保留最近 3 份 .bak / .bak.1 / .bak.2），返回最新备份路径。
+
+    轮转：旧的 .bak.1 → .bak.2，.bak → .bak.1，再写新的 .bak。
+    这样即使连续多次迁移，也能回溯到更早的版本。
+    """
     if not os.path.exists(DATA_FILE):
         return None
     bak = DATA_FILE + '.bak'
     try:
+        for i in (2, 1):                          # 先腾位置，从旧到新
+            src = bak + ('.1' if i == 2 else '')
+            dst = bak + '.%d' % i
+            if os.path.exists(src):
+                try:
+                    os.replace(src, dst)
+                except OSError:
+                    pass
         with open(DATA_FILE, 'rb') as a:
             with open(bak, 'wb') as b:
                 b.write(a.read())
