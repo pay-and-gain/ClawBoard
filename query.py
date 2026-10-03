@@ -21,6 +21,7 @@ import re
 import time
 
 from clawboard.pinyin import to_pinyin, to_pinyin_initials
+from clawboard.tag import normalize_tag
 
 UNIT = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
 SIZE_UNIT = {'b': 1, 'kb': 1024, 'k': 1024, 'mb': 1048576, 'm': 1048576,
@@ -89,7 +90,7 @@ def parse(q):
     """把查询串解析成结构化条件。无法识别的 token 一律当普通关键词，绝不抛异常"""
     cond = {'terms': [], 'not_terms': [], 'time': [], 'app': [], 'not_app': [],
             'type': [], 'not_type': [], 'size': [], 'is': [], 'is_neg': [],
-            'errors': []}
+            'tag': [], 'not_tag': [], 'errors': []}
     for tok in (q or '').split():
         if not tok:
             continue
@@ -103,6 +104,12 @@ def parse(q):
                     cond['errors'].append('无法识别的时间：' + body)
                 else:
                     cond['time'].append((r, neg))
+            elif low.startswith('tag:'):
+                v = normalize_tag(body[4:])
+                if v:
+                    (cond['not_tag'] if neg else cond['tag']).append(v)
+                else:
+                    cond['errors'].append('未知标签：' + body[4:])
             elif low.startswith('app:'):
                 v = body[4:].strip()
                 (cond['not_app'] if neg else cond['app']).append(v.lower())
@@ -158,6 +165,8 @@ def compile_pred(cond):
     sizes = cond['size']
     isf = cond['is']
     is_neg = cond.get('is_neg', [])
+    tags = cond.get('tag', [])
+    not_tags = cond.get('not_tag', [])
 
     def pred(it):
         text = (it.get('text') or '').lower()
@@ -170,6 +179,12 @@ def compile_pred(cond):
                 return False
         for t in not_terms:
             if t in hay:
+                return False
+        if tags or not_tags:
+            ts = it.get('tags') or []
+            if tags and not all(t in ts for t in tags):
+                return False
+            if not_tags and any(t in ts for t in not_tags):
                 return False
         if apps or not_apps:
             app = (it.get('source_app') or 'unknown').lower()
@@ -213,7 +228,8 @@ def match(q, items):
     """便利函数：直接过滤列表"""
     cond = parse(q)
     if not any(cond[k] for k in ('terms', 'not_terms', 'time', 'app', 'not_app',
-                                 'type', 'not_type', 'size', 'is', 'is_neg')):
+                                 'type', 'not_type', 'size', 'is', 'is_neg',
+                                 'tag', 'not_tag')):
         return list(items), cond
     p = compile_pred(cond)
     return [x for x in items if p(x)], cond
@@ -232,4 +248,5 @@ SYNTAX_HELP = [
     ('size:>1mb', '大小过滤（b/kb/mb/gb）'),
     ('is:fav', '收藏 / is:sens 敏感 / is:url 链接'),
     ('is:est', '时间为估算 / is:pin 固定置顶'),
+    ('tag:email', '标签：邮箱/手机号/数字/日期/链接/代码/JSON/密码/Token'),
 ]

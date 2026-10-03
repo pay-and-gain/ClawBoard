@@ -13,6 +13,7 @@ from clawboard.config import (APP_NAME, BAR_H, TOOL_H, FONT, FONT_B, FONT_SM,
 from clawboard.theme import T
 from clawboard.classify import classify, byte_size, human_size, kind_icon, preview
 from clawboard.timefmt import rel_time
+from clawboard.tag import TAG_LABELS
 from clawboard.clipboard import mask_text
 from clawboard.widgets import Dialog
 from clawboard.vlist import VirtualList
@@ -367,6 +368,10 @@ class UiMixin:
                     parts.append('×%d' % it['copy_count'])
                 if hits:
                     parts.append('⚠' + '/'.join(hits))
+                tags = it.get('tags') or []
+                if tags:
+                    parts.append('🏷' + '/'.join(TAG_LABELS.get(t, t)
+                                                for t in tags[:3]))
                 sub = ' · '.join(parts)
                 badge = '%s %s' % (kind_icon(k), human_size(size))
             if it.get('fav'):

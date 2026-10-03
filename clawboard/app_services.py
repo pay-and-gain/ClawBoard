@@ -29,6 +29,7 @@ from clawboard.win32 import (
 from clawboard.clipboard import clip_seq, clip_read, clip_is_private, scan_sensitive, clip_write
 from clawboard.trigger import TriggerEngine
 from clawboard.image import clipboard_has_image, read_clipboard_dib, dib_to_png
+from clawboard.tag import detect_tags
 from clawboard.hotkey import HiddenWindow
 from clawboard.widgets import Dialog
 
@@ -257,6 +258,9 @@ class DataMixin:
                'kind_auto': classify(txt)[0],   # 入库时判一次类型，渲染层不再重算
                'content_size': byte_size(txt), 'copy_count': 1, 'fav': 0,
                'is_estimated': 0}
+            tags = detect_tags(txt)
+            if tags:
+                rec['tags'] = tags
         # 空值字段一律不落盘：1 万条能省下 MB 级内存与文件体积
         if title and self.st['record_title']:
             rec['source_title'] = title
