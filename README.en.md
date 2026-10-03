@@ -19,8 +19,8 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-1.8.0-setup.exe` | Double-click to install; adds Start-menu and desktop shortcuts plus an uninstaller |
-| **Portable** | `ClawBoard-1.8.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Installer** (recommended) | `ClawBoard-1.9.0-setup.exe` | Double-click to install; adds Start-menu and desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-1.9.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
 👉 Everything lives on the [**Releases page**](../../releases/latest).
@@ -39,10 +39,10 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 ## 🚀 Quick start
 
 ### Option 1 — Installer
-Download `ClawBoard-1.8.0-setup.exe` and follow the prompts (Windows 10 / 11).
+Download `ClawBoard-1.9.0-setup.exe` and follow the prompts (Windows 10 / 11).
 
 ### Option 2 — Portable
-Download `ClawBoard-1.8.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+Download `ClawBoard-1.9.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 
 ### Option 3 — From source
 ```bash

@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v1.9.0 · 拼音搜索（② 战略）
+
+搜拼音能命中中文内容——记不清字也能搜到。搜 `zhanghao` 或 `zh` 命中含「账号」的条目。
+
+实现（零依赖）：
+- `clawboard/pinyin_data.py`：内置拼音表（20892 个常用汉字 → 全拼，去声调，ü 记作 v）。
+  数据来自 mozillazg/pinyin-data（MIT，version 0.15.0），用 `_gen_pinyin.py` 从原始
+  pinyin.txt 筛选生成。
+- `clawboard/pinyin.py`：`to_pinyin`（全拼）/ `to_pinyin_initials`（首字母）纯函数。
+- `query.py`：搜索谓词里把正文的全拼 + 首字母纳入匹配 hay，拼音关键词也能命中。
+
+已知局限：多音字取单字表第一读音（如「重庆」→ zhongqing 而非 chongqing），
+后续可引入 phrase-pinyin-data 词组表纠正。
+
+新增 `tests/_t32.py`（12 项）。性能：100 次 to_pinyin 约 0.11ms，无压力。
+
 ## v1.8.0 · 触发词快速粘贴（① 快赢）
 
 给常用语设一个短触发词（如地址设 `dz`），在设置里打开「触发词快速粘贴」后，任何程序输入

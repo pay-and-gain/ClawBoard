@@ -20,6 +20,8 @@ F3 · 高级搜索语法解析器（纯函数，无 UI 依赖，可单测）
 import re
 import time
 
+from clawboard.pinyin import to_pinyin, to_pinyin_initials
+
 UNIT = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
 SIZE_UNIT = {'b': 1, 'kb': 1024, 'k': 1024, 'mb': 1048576, 'm': 1048576,
              'gb': 1073741824, 'g': 1073741824}
@@ -160,7 +162,9 @@ def compile_pred(cond):
     def pred(it):
         text = (it.get('text') or '').lower()
         name = (it.get('name') or '').lower()
-        hay = text + ' ' + name
+        # 拼音纳入搜索：搜 'zhanghao' 或 'zh' 能命中含「账号」的条目
+        hay = (text + ' ' + name + ' ' + to_pinyin(text) + ' '
+               + to_pinyin_initials(text))
         for t in terms:
             if t not in hay:
                 return False
