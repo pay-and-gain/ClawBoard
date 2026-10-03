@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## v1.5.2 · UI 等比缩放档位（50% / 75% / 100% / 125% / 150%）
+
+用户要求"整体等比例缩小 50%，并增加相关能力"。落地为**可切换的 UI 等比缩放**：
+
+- 字体（tk scaling）+ 布局尺寸（`scaled()`）+ 窗口几何 + 最小尺寸**一起等比缩放**。
+- 快捷键 **Ctrl+=** 放大一档 / **Ctrl+-** 缩小一档；设置面板「界面缩放」点击循环切换。
+- 缩放持久化到设置，重启按档位恢复。默认 100%。
+
+实现要点：
+- `config.scaled(base)`：布局像素尺寸按当前缩放系数等比缩放，ITEM_H/CARD_GAP/TOOL_H/
+  BAR_H/MIN_W/MIN_H/RESIZE_ZONE 全部改走它。
+- 字体走 `tk scaling = BASE_SCALING × UI_SCALE`（BASE_SCALING 是真实 DPI 基准）。
+
+排查中修掉三个真 bug（都值得记）：
+1. `from config import UI_SCALE` 是 **import 快照**，不随运行时更新 → 改 `config.UI_SCALE` 属性访问。
+2. 改窗口 geometry 会被**旧 minsize clamp**（和折叠"先放开下限"同一个坑）→ 先 `minsize(1,1)` 再 geometry。
+3. frozen 下 `tk scaling` 延迟到窗口映射后才反映真实 DPI，直读会误判 125% 为 100%
+   （exe 实测最小尺寸从 350×425 错回 280×340）→ 改用 **Win32 GetDpiForSystem 直读系统 DPI**。
+
+验证：新增 `_t26.py` 25 项；全量 **177 项全绿**（27+12+38+26+24+25+25）。
+APP_VER 补到 1.5.2（v1.5.0/v1.5.1 重构时漏更新）。
+
+---
+
 ## v1.5.1 · 工具条扩大 + 窗口四边四角随意拉伸
 
 用户截图反馈"下方按钮被遮挡"。排查出两个根因，全部修复：
