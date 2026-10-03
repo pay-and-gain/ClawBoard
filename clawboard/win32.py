@@ -377,18 +377,36 @@ def window_title_of(hwnd):
     return t or None
 
 
-def dpi_scale(root):
-    """当前屏幕相对 100% 的缩放系数。
+def system_dpi():
+    """真实系统 DPI（96/120/144…），不依赖 Tk scaling 的初始化时机。
 
-    Tk 在 DPI 感知模式下：`tk scaling` = 每点占多少像素（96 DPI 时 1.333，120 DPI 时 1.667）。
-    125% 缩放下字体被放大 1.25 倍，同样的物理宽度能装下的字会少两成 ——
-    所以「最小尺寸」这类按像素写死的阈值必须乘上这个系数，否则在缩放屏上会显得特别小。
+    frozen 环境下 Tk 的 tk scaling 会延迟到窗口映射后才反映真实 DPI，
+    直接读它会拿到默认 1.333、把 125% 缩放误判成 100%。所以改用 Win32 直读。
     """
     try:
-        s = float(root.tk.call('tk', 'scaling'))
+        dpi = ctypes.windll.user32.GetDpiForSystem()   # Win10 1607+ / Win11
+        if dpi:
+            return int(dpi)
     except Exception:
-        s = 1.3333333
-    k = s / 1.3333333
+        pass
+    try:
+        hdc = ctypes.windll.user32.GetDC(0)
+        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)   # LOGPIXELSX
+        ctypes.windll.user32.ReleaseDC(0, hdc)
+        if dpi:
+            return int(dpi)
+    except Exception:
+        pass
+    return 96
+
+
+def dpi_scale(root):
+    """当前屏幕相对 100% 的缩放系数（96 DPI=1.0，120 DPI=1.25）。
+
+    用 Win32 GetDpiForSystem 直读系统 DPI，不读 tk scaling —— 后者在 frozen 下
+    会延迟生效，且已被 UI 缩放（config.UI_SCALE）改写，读它会双重缩放/误判。
+    """
+    k = system_dpi() / 96.0
     return k if 0.5 <= k <= 4.0 else 1.0
 
 

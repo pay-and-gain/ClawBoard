@@ -2,7 +2,8 @@
 """VirtualList 虚拟滚动列表：固定行高窗口化渲染，5000 条只创建可视区 widget。"""
 import tkinter as tk
 
-from clawboard.config import ITEM_H, CARD_GAP, WHEEL_LINES, FONT, FONT_SM, FONT_MONO
+from clawboard.config import (scaled, ITEM_H, CARD_GAP, WHEEL_LINES,
+                              FONT, FONT_SM, FONT_MONO)
 from clawboard.theme import T
 from clawboard.classify import preview
 from clawboard.widgets import Tip, ThinBar, pack_static_then_fill
@@ -113,21 +114,21 @@ class VirtualList(tk.Frame):
         n = len(self.items)
         if n <= 0 or not rows:
             return
-        total = n * ITEM_H
+        total = n * scaled(ITEM_H)
         h = max(1, self.canvas.winfo_height())
-        top = self.canvas.canvasy(0) + rows * ITEM_H
+        top = self.canvas.canvasy(0) + rows * scaled(ITEM_H)
         top = max(0.0, min(max(0.0, total - h), top))
         self.canvas.yview_moveto(top / float(total))
         self.update_view()
 
     def yview_step(self, px):
         """按像素步进滚动（bench 与键盘翻页用）"""
-        self.canvas.yview_scroll(max(1, int(px / ITEM_H)), 'units')
+        self.canvas.yview_scroll(max(1, int(px / scaled(ITEM_H))), 'units')
 
     def scroll_to_index(self, i):
-        total = max(1, len(self.items) * ITEM_H)
+        total = max(1, len(self.items) * scaled(ITEM_H))
         h = max(1, self.canvas.winfo_height())
-        self.canvas.yview_moveto(max(0.0, min(1.0, (i * ITEM_H - h / 2.0) / float(total))))
+        self.canvas.yview_moveto(max(0.0, min(1.0, (i * scaled(ITEM_H) - h / 2.0) / float(total))))
         self.update_view()
 
     def update_view(self):
@@ -135,19 +136,19 @@ class VirtualList(tk.Frame):
         w = max(60, self.canvas.winfo_width())
         self._vw = w
         if self._last_w != w:
-            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
+            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * scaled(ITEM_H))))
             self._last_w = w
         else:
-            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * ITEM_H)))
+            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * scaled(ITEM_H))))
         if n == 0:
             self.clear_pool()
             self._show_empty()
             return
         self._hide_empty()
-        h = max(ITEM_H, self.canvas.winfo_height())
+        h = max(scaled(ITEM_H), self.canvas.winfo_height())
         top = self.canvas.canvasy(0)
-        start = max(0, int(top // ITEM_H))
-        end = min(n, int((top + h) // ITEM_H) + 2)
+        start = max(0, int(top // scaled(ITEM_H)))
+        end = min(n, int((top + h) // scaled(ITEM_H)) + 2)
         for i in list(self.pool):
             if i < start or i >= end:
                 self._drop(i)
@@ -157,10 +158,10 @@ class VirtualList(tk.Frame):
                 f = self._mk_item(i)
                 self.pool[i] = f
                 self.wids[i] = self.canvas.create_window(
-                    (0, i * ITEM_H + CARD_GAP // 2), window=f, anchor='nw',
-                    width=w, height=ITEM_H - CARD_GAP)
+                    (0, i * scaled(ITEM_H) + scaled(CARD_GAP) // 2), window=f, anchor='nw',
+                    width=w, height=scaled(ITEM_H) - scaled(CARD_GAP))
             else:
-                self.canvas.coords(self.wids[i], 0, i * ITEM_H + CARD_GAP // 2)
+                self.canvas.coords(self.wids[i], 0, i * scaled(ITEM_H) + scaled(CARD_GAP) // 2)
                 if f._vw != w:
                     self.canvas.itemconfig(self.wids[i], width=w)
                     f._vw = w
@@ -169,7 +170,7 @@ class VirtualList(tk.Frame):
             self._fill(f, i)
 
     def _mk_item(self, i):
-        f = tk.Frame(self.canvas, bg=T['card'], height=ITEM_H - CARD_GAP, cursor='hand2')
+        f = tk.Frame(self.canvas, bg=T['card'], height=scaled(ITEM_H) - scaled(CARD_GAP), cursor='hand2')
         f.pack_propagate(False)
         f._idx = i
         f._vw = 0

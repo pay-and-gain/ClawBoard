@@ -8,7 +8,8 @@ build_ui / _sync_ph / mk_tab / _layout_tool / more_menu / mk_tool_btn / tip / co
 import tkinter as tk
 import tkinter.font as tkfont
 
-from clawboard.config import APP_NAME, BAR_H, TOOL_H, FONT, FONT_B, FONT_SM, FONT_TITLE
+from clawboard.config import (APP_NAME, BAR_H, TOOL_H, FONT, FONT_B, FONT_SM,
+                              FONT_TITLE, scaled)
 from clawboard.theme import T
 from clawboard.classify import classify, byte_size, human_size, kind_icon, preview
 from clawboard.timefmt import rel_time
@@ -25,7 +26,7 @@ class UiMixin:
         r = self.root
         for w in list(r.winfo_children()):
             w.destroy()
-        self.bar = tk.Frame(r, bg=T['panel'], height=BAR_H, cursor='fleur')
+        self.bar = tk.Frame(r, bg=T['panel'], height=scaled(BAR_H), cursor='fleur')
         self.bar.pack(fill='x')
         self.bar.pack_propagate(False)
         # 标题占满剩余宽度：整条标题栏（除了右边三个按钮）都是双击折叠的热区
@@ -73,7 +74,7 @@ class UiMixin:
                                  self.on_menu_item, self.on_hover_item)
         self.vlist.pack(fill='both', expand=True, padx=(6, 0), pady=4)
 
-        self.tool = tk.Frame(self.body, bg=T['panel'], height=TOOL_H)
+        self.tool = tk.Frame(self.body, bg=T['panel'], height=scaled(TOOL_H))
         self.tool.pack(fill='x')
         self.tool.pack_propagate(False)
         # width=8 只是"请求宽度"，靠 expand 去吃剩余空间。默认 20 字符会把工具条撑爆，
@@ -185,7 +186,7 @@ class UiMixin:
         if w == self._last_tw:
             return
         self._last_tw = w
-        hidden = tuple(t for t, need in self.TOOL_HIDE_AT if w < need)
+        hidden = tuple(t for t, need in self.TOOL_HIDE_AT if w < scaled(need))
         if hidden == getattr(self, '_tool_hidden', None):
             return
         self._tool_hidden = hidden

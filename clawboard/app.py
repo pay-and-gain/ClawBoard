@@ -32,6 +32,8 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         self.st = self.data['settings']
         self._seq = max([int(x.get('seq') or 0) for x in self.data['clip']] or [0])
         apply_theme(self.st)
+        # 等比缩放必须在 build_ui 之前：字体走 tk scaling，布局尺寸走 scaled()
+        self.apply_ui_scale_init()
 
         root.title(APP_NAME)
         root.overrideredirect(True)
@@ -48,6 +50,9 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         root.bind('<Control-t>', lambda e: self.open_transform())
         root.bind('<Control-e>', lambda e: self.open_export())
         root.bind('<Control-q>', lambda e: self.quit_app())
+        # 等比缩放：Ctrl+= 放大一档 / Ctrl+- 缩小一档（Ctrl+0 已被快速粘贴占用）
+        root.bind('<Control-equal>', lambda e: self.cycle_ui_scale(1))
+        root.bind('<Control-minus>', lambda e: self.cycle_ui_scale(-1))
         # Ctrl+1..9 / Ctrl+0 → 直接粘贴第 1..10 项
         # （PasteBar ClipboardHistoryQuickPastePage.tsx:307，0 表示第 10 项）
         for _i in range(1, 10):

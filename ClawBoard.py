@@ -26,7 +26,8 @@ from clawboard.config import (
     APP_NAME, APP_VER, BASE_DIR, DATA_FILE, ICON_FILE, CRASH_LOG,
     FONT, FONT_B, FONT_SM, FONT_TITLE, FONT_MONO,
     ITEM_H, CARD_GAP, WHEEL_LINES, BAR_H, TOOL_H, MIN_W, MIN_H, MAX_TEXT,
-    SCHEMA_VERSION, CLASSIFY_MAX, DEFAULT_SETTINGS,
+    RESIZE_ZONE, SCHEMA_VERSION, CLASSIFY_MAX, DEFAULT_SETTINGS,
+    UI_SCALE, UI_SCALE_LEVELS, scaled,
 )
 from clawboard.runtime import NO_SAVE, LAST_SEQ, TX, tx, uid, now_str
 
@@ -46,7 +47,7 @@ from clawboard.timefmt import (
 # ---- re-export：系统接入层（对外符号与老版本一致） ----
 from clawboard.win32 import (
     u32, k32, psapi, sh32,
-    mem_mb, cpu_ms, monitors, visible_ratio, dpi_scale,
+    mem_mb, cpu_ms, monitors, visible_ratio, dpi_scale, system_dpi,
     proc_name_of, window_title_of, capture_source,
     force_foreground, all_keys_up, send_ctrl_v, send_key,
     single_instance, init_dpi_awareness,

@@ -9,7 +9,7 @@ import tkinter as tk
 
 from clawboard.config import (
     BASE_DIR, DEFAULT_SETTINGS, SCHEMA_VERSION, WHEEL_LINES,
-    FONT, FONT_B, FONT_SM,
+    FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS,
 )
 from clawboard.theme import T, set_theme
 from clawboard.runtime import tx
@@ -48,6 +48,7 @@ class SettingsWindow:
         self.row_close_action(body)
         self.row_theme(body)
         self.row_bgcolor(body)
+        self.row_ui_scale(body)
         self.row_switch(body, '折叠时贴到屏幕右下角', 'collapse_to_corner')
         self.row_hotkey(body)
         self.row_int(body, '历史最大条数（10-5000）', 'max_items')
@@ -75,6 +76,31 @@ class SettingsWindow:
         self.sc.bind_wheel_tree()          # 所有子控件接管滚轮
         center_on(self.win, app.root, 380, 470)
         self.win.after(80, self.sc._on_inner)
+
+    def row_ui_scale(self, master):
+        """界面等比缩放：点击在 50%/75%/100%/125%/150% 间循环切换"""
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        tk.Label(r, text='界面缩放（整体等比缩放，Ctrl+= / Ctrl+- 也可调）',
+                 bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(side='left')
+        lb = tk.Label(r, text='', bg=T['card'], fg=T['fg'], font=FONT_SM,
+                      padx=8, pady=2, cursor='hand2')
+        lb.pack(side='right')
+
+        def paint():
+            v = float(self.app.st.get('ui_scale') or 1.0)
+            lb.configure(text='%d%%' % int(v * 100))
+
+        def setv(_=None):
+            levels = list(UI_SCALE_LEVELS)
+            cur = float(self.app.st.get('ui_scale') or 1.0)
+            i = levels.index(cur) if cur in levels else levels.index(1.0)
+            nxt = levels[(i + 1) % len(levels)]
+            self.app.set_ui_scale(nxt)
+            paint()
+
+        lb.bind('<Button-1>', setv)
+        paint()
 
     def row_close_action(self, master):
         """点 ✕ 的行为：默认隐藏到托盘，也可改成直接退出"""

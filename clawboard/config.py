@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.4.5'
+APP_VER = '1.5.2'
 
 # frozen 时数据文件必须落在 exe 旁边（onefile 的临时目录退出即销毁）；
 # 脚本运行时 BASE_DIR 是本包目录的上一级（即项目根，与 ClawBoard.py 同目录）。
@@ -47,6 +47,22 @@ MAX_TEXT = 200000    # 单条文本入库上限（字符）
 
 SCHEMA_VERSION = 3
 
+# ---------- UI 等比缩放 ----------
+# 用户可切换的整体缩放档位（等比例缩放字体 + 布局尺寸 + 最小尺寸）。
+# 1.0 是默认；0.5 即"整体缩小一半"。切换后 rebuild UI 生效。
+UI_SCALE_LEVELS = (0.5, 0.75, 1.0, 1.25, 1.5)
+UI_SCALE = 1.0        # 当前缩放系数（档位切换时更新，rebuild 生效）
+
+
+def scaled(base):
+    """把 100% 基准下的布局像素尺寸按当前 UI 缩放系数等比缩放。
+
+    只作用于「逻辑布局尺寸」（ITEM_H/TOOL_H/BAR_H/CARD_GAP/RESIZE_ZONE 等）；
+    字体走 tk scaling（见 runtime.BASE_SCALING），DPI 由 dpi_scale 单独处理。
+    两者独立相乘，保证整体等比缩放。
+    """
+    return max(1, int(base * UI_SCALE))
+
 # 超长内容直接降级为纯文本，别在正则上浪费时间（classify 使用）。
 CLASSIFY_MAX = 128000
 
@@ -69,6 +85,7 @@ DEFAULT_SETTINGS.update(
     collapsed=False,     # 上次退出时是不是折叠着的
     collapse_to_corner=True,   # 折叠时贴到屏幕右下角（留在原处太突兀）
     bg_color='',         # 自定义背景色，空=用主题默认
+    ui_scale=1.0,        # UI 等比缩放档位（0.5/0.75/1.0/1.25/1.5）
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 

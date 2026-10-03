@@ -10,18 +10,79 @@ import re
 import ctypes
 from ctypes import wintypes
 
-from clawboard.config import BAR_H, MIN_W, MIN_H, RESIZE_ZONE
+from clawboard import config
+from clawboard import runtime
+from clawboard.config import (BAR_H, MIN_W, MIN_H, RESIZE_ZONE,
+                              UI_SCALE_LEVELS, scaled)
 from clawboard.theme import T, apply_theme
 from clawboard.win32 import u32, monitors, dpi_scale, visible_ratio
 
 
 class GeometryMixin:
+    # ---------- UI 等比缩放 ----------
+    def apply_ui_scale_init(self):
+        """启动时：记录真实 DPI 的 tk scaling，并应用存档里的 UI 缩放档位。
+
+        必须在 build_ui 之前调用（字体走 tk scaling、布局尺寸走 scaled()，
+        两者都要在构建 UI 前就位）。BASE_SCALING 是真实 DPI 值，UI 缩放只改
+        实时 tk scaling，绝不回写 BASE_SCALING —— 否则 dpi_scale() 双重缩放。
+        """
+        # frozen 环境下 tk scaling 会延迟到窗口映射后才反映真实 DPI，
+        # 所以 BASE_SCALING 用 system_dpi 推算（= 1.333 × DPI 系数），不读 tk scaling。
+        runtime.BASE_SCALING = 1.3333333 * dpi_scale(self.root)
+        lvl = float(self.st.get('ui_scale') or 1.0)
+        if lvl not in UI_SCALE_LEVELS:
+            lvl = 1.0
+        config.UI_SCALE = lvl
+        self.root.tk.call('tk', 'scaling', runtime.BASE_SCALING * lvl)
+
+    def set_ui_scale(self, level):
+        """切换 UI 等比缩放档位。窗口尺寸、字体、布局、最小尺寸一起等比缩放。"""
+        level = float(level)
+        if level not in UI_SCALE_LEVELS or level == config.UI_SCALE:
+            return
+        old = config.UI_SCALE
+        config.UI_SCALE = level
+        self.st['ui_scale'] = level
+        self.root.tk.call('tk', 'scaling', runtime.BASE_SCALING * level)
+        if not self.collapsed:
+            # 窗口几何也等比缩放（相对屏幕左上角不动，宽高按比例）。
+            # 关键：必须先放开旧 minsize，否则 geometry 会被它 clamp 住
+            # （和折叠时"先放开下限"同一个坑，v1.4.1 就踩过）。
+            ratio = level / old
+            w = max(1, int(self.root.winfo_width() * ratio))
+            h = max(1, int(self.root.winfo_height() * ratio))
+            mw, mh = self.min_size()
+            w, h = max(mw, w), max(mh, h)
+            x, y = self.root.winfo_x(), self.root.winfo_y()
+            w, h, x, y = self.fit_geometry(w, h, x, y)
+            self.root.minsize(1, 1)               # 先放开旧下限
+            self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+            self.root.minsize(mw, mh)             # 再设回缩放后的新下限
+        self.rebuild()
+        if not self.collapsed:
+            self.root.minsize(*self.min_size())
+        self.tip('已缩放至 %d%%' % int(level * 100))
+        self.save(True)
+
+    def cycle_ui_scale(self, step):
+        """按档位步进缩放（+1 放大一档 / -1 缩小一档），用于快捷键"""
+        levels = list(UI_SCALE_LEVELS)
+        cur = config.UI_SCALE if config.UI_SCALE in levels else 1.0
+        i = levels.index(cur)
+        j = max(0, min(len(levels) - 1, i + step))
+        if j != i:
+            self.set_ui_scale(levels[j])
+
     # ---------- 几何 ----------
     def min_size(self):
         """面板最小**物理**尺寸：按 DPI 换算，保证在 125%/150% 缩放的屏幕上
-        也不会小到"正文装不下几个字"（否则就是用户看到的那种"里面没有内容"）"""
+        也不会小到"正文装不下几个字"（否则就是用户看到的那种"里面没有内容"）；
+        再乘 UI 缩放档位 —— 整体缩小时最小尺寸也跟着等比缩小。"""
         k = dpi_scale(self.root)
-        return int(MIN_W * k), int(MIN_H * k)
+        # 必须用 config.UI_SCALE（模块属性），不能 import 快照 ——
+        # 快照在 set_ui_scale 更新 config.UI_SCALE 后不会跟着变
+        return int(MIN_W * k * config.UI_SCALE), int(MIN_H * k * config.UI_SCALE)
 
     def apply_geometry(self):
         """恢复位置。必须完整落在某一个显示器内：跨屏缝隙会让面板看起来开着却点不到"""
@@ -31,9 +92,9 @@ class GeometryMixin:
             # 折叠态启动时 _restore 还没被赋过值，先把"展开后该回到哪"算好存起来。
             # 漏了这一步的话，第一次点「—」展开会 AttributeError（真实 crash.log 见过）
             self._restore = self._expanded_geometry()
-            w, h, x, y = self.fit_geometry(210, BAR_H, *(self._saved_pos()))
+            w, h, x, y = self.fit_geometry(210, scaled(BAR_H), *(self._saved_pos()))
             self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
-            self.root.minsize(160, BAR_H)
+            self.root.minsize(160, scaled(BAR_H))
             self.body.pack_forget()
             return
         mw, mh = self.min_size()
@@ -149,7 +210,7 @@ class GeometryMixin:
                   'se': 'bottom_right_corner', 'sw': 'bottom_left_corner'}
 
     def _resize_dir(self, e):
-        """鼠标落在窗口边缘 RESIZE_ZONE 内时返回方向（'n'/'se'/…），否则 None"""
+        """鼠标落在窗口边缘 scaled(RESIZE_ZONE) 内时返回方向（'n'/'se'/…），否则 None"""
         if self.collapsed or self.hidden:
             return None
         try:
@@ -160,7 +221,7 @@ class GeometryMixin:
         w, h = self.root.winfo_width(), self.root.winfo_height()
         if w <= 1 or h <= 1:          # 未布局/折叠态的假尺寸，不判定
             return None
-        z = RESIZE_ZONE
+        z = scaled(RESIZE_ZONE)
         left, right = x <= z, x >= w - z
         top, bottom = y <= z, y >= h - z
         d = ''
@@ -322,12 +383,12 @@ class GeometryMixin:
         if self.collapsed:
             self._restore = self.root.geometry()
             self.body.pack_forget()
-            self.root.minsize(160, BAR_H)   # 先放开最小尺寸，否则折叠不成一条标题栏
+            self.root.minsize(160, scaled(BAR_H))   # 先放开最小尺寸，否则折叠不成一条标题栏
             if self.st.get('collapse_to_corner', True):
-                x, y = self.corner_pos(210, BAR_H)     # 贴到右下角
+                x, y = self.corner_pos(210, scaled(BAR_H))     # 贴到右下角
             else:
                 x, y = self.root.winfo_x(), self.root.winfo_y()
-            self.root.geometry('210x%d+%d+%d' % (BAR_H, x, y))
+            self.root.geometry('210x%d+%d+%d' % (scaled(BAR_H), x, y))
         else:
             mw, mh = self.min_size()
             self.root.minsize(mw, mh)
