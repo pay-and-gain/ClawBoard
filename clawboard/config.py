@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.5.2'
+APP_VER = '1.5.3'
 
 # frozen 时数据文件必须落在 exe 旁边（onefile 的临时目录退出即销毁）；
 # 脚本运行时 BASE_DIR 是本包目录的上一级（即项目根，与 ClawBoard.py 同目录）。

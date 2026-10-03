@@ -65,8 +65,8 @@ if app.collapsed:                     # 双保险：存档里若还是折叠态�
 
 # ---------- 1. 宽面板：7 个全在，顺序正确 ----------
 setw(640)
-check('宽面板 7 个按钮全在', len(vis()) == 7, str(vis()))
-check('宽面板顺序 ＋拆删清🔧?⚙', vis_x() == ['＋', '拆', '删', '清', '🔧', '?', '⚙'],
+check('宽面板 6 个按钮全在', len(vis()) == 6, str(vis()))
+check('宽面板顺序 ＋拆删清🔧⚙', vis_x() == ['＋', '拆', '删', '清', '🔧', '⚙'],
       str(vis_x()))
 check('宽面板无溢出按钮', not app.more_btn.winfo_ismapped())
 check('宽面板无裁切', not clipped(), str(clipped()))
@@ -75,12 +75,12 @@ check('宽面板无裁切', not clipped(), str(clipped()))
 setw(320)
 v = vis_x()
 check('窄面板藏起 ＋拆', '＋' not in v and '拆' not in v, str(v))
-check('窄面板保留 删🔧?⚙', all(t in v for t in ('删', '🔧', '?', '⚙')), str(v))
+check('窄面板保留 删🔧?⚙', all(t in v for t in ('删', '🔧', '⚙')), str(v))
 check('窄面板出现 ⋯ 溢出按钮', app.more_btn.winfo_ismapped())
 check('窄面板无裁切', not clipped(), str(clipped()))
 ent = app.search_entry.winfo_width()
 check('窄面板搜索框 >= 120px', ent >= 120, '%dpx' % ent)
-check('窄面板记录了收起项', set(app._tool_hidden) == {'＋', '拆', '清'},
+check('窄面板记录了收起项', set(app._tool_hidden) == {'＋', '拆'},
       str(app._tool_hidden))
 
 # ---------- 3. 最小宽度 280：搜索框仍可用 ----------
@@ -92,12 +92,12 @@ check('MIN_W 280 下无裁切', not clipped(), str(clipped()))
 
 # ---------- 4. 宽→窄→宽 来回切：顺序必须还原（这是修掉的真 bug） ----------
 setw(640)
-check('来回切换后顺序还原', vis_x() == ['＋', '拆', '删', '清', '🔧', '?', '⚙'],
+check('来回切换后顺序还原', vis_x() == ['＋', '拆', '删', '清', '🔧', '⚙'],
       str(vis_x()))
 setw(320)
 setw(640)
 check('两轮来回后顺序仍正确',
-      vis_x() == ['＋', '拆', '删', '清', '🔧', '?', '⚙'], str(vis_x()))
+      vis_x() == ['＋', '拆', '删', '清', '🔧', '⚙'], str(vis_x()))
 check('两轮来回后 ⋯ 已隐藏', not app.more_btn.winfo_ismapped())
 check('两轮来回后 _tool_hidden 清空', app._tool_hidden == (), str(app._tool_hidden))
 
@@ -110,7 +110,7 @@ check('折叠态（宽度退化 1px）不污染 _last_tw', app._last_tw == 0, st
 app.body.pack(fill='both', expand=True)
 root.update()
 setw(320)
-check('展开后仍能正常收起', set(app._tool_hidden) == {'＋', '拆', '清'},
+check('展开后仍能正常收起', set(app._tool_hidden) == {'＋', '拆'},
       str(app._tool_hidden))
 
 # ---------- 6. 溢出菜单里确实有被收起的项，且能回调 ----------

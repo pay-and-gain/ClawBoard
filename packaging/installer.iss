@@ -7,7 +7,7 @@
 ; 路径均相对本 .iss 文件所在目录（packaging\），因此 ..\ 指向项目根。
 
 #define MyAppName "ClawBoard"
-#define MyAppVersion "1.5.2"
+#define MyAppVersion "1.5.3"
 #define MyAppPublisher "ClawBoard"
 #define MyAppURL "https://github.com/pay-and-gain/ClawBoard"
 #define MyAppExeName "ClawBoard.exe"

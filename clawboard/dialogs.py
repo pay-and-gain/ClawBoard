@@ -8,8 +8,8 @@ import subprocess
 import tkinter as tk
 
 from clawboard.config import (
-    BASE_DIR, DEFAULT_SETTINGS, SCHEMA_VERSION, WHEEL_LINES,
-    FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS,
+    APP_NAME, APP_VER, BASE_DIR, DATA_FILE, DEFAULT_SETTINGS, SCHEMA_VERSION,
+    WHEEL_LINES, FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS,
 )
 from clawboard.theme import T, set_theme
 from clawboard.runtime import tx
@@ -32,9 +32,10 @@ class SettingsWindow:
         dark_top(self.win, '设置')
         self.win.attributes('-topmost', True)
         self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
-        # 内容放进可滚动容器：选项变多了也不怕窗口装不下
+        # 内容放进可滚动容器：选项变多了也不怕窗口装不下。
+        # 注意：**先不 pack** —— 固定尺寸的底部区（数据管理 + 按钮）必须先 pack 到底部，
+        # 否则带 expand 的滚动区会先把空间吃掉，底部按钮被压成 17px（实测踩过）。
         self.sc = ScrollFrame(self.win)
-        self.sc.pack(fill='both', expand=True, padx=(14, 8), pady=(10, 0))
         body = self.sc.inner
         self.row_switch(body, '监听剪贴板', 'listen')
         self.row_switch(body, '单击后自动粘贴到上一窗口', 'autopaste')
@@ -60,8 +61,9 @@ class SettingsWindow:
                       '例：keepass, *bitwarden*, 微信')
         self.row_text(body, '忽略标题匹配的窗口（正则，分号分隔）', 'ignore_titles',
                       '例：密码; Password; ^私密')
-        btns = tk.Frame(self.win, bg=T['bg'])    # 固定在窗口底部，不跟着内容滚
-        btns.pack(fill='x', padx=14, pady=(8, 10))
+        # ---- 底部按钮区（先 pack 到最底部；固定尺寸控件必须先占位，否则被 expand 挤扁）----
+        btns = tk.Frame(self.win, bg=T['bg'])
+        btns.pack(side='bottom', fill='x', padx=14, pady=(8, 10))
         b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
                      padx=16, pady=5, cursor='hand2')
         b.pack(side='right')
@@ -72,10 +74,108 @@ class SettingsWindow:
         q.pack(side='left')
         q.bind('<Button-1>', lambda e: (app.save(True), safe_release(self.win),
                                         self.win.destroy(), app.quit_app()))
+
+        # ---- 数据管理区（在按钮区之上）：导出全部 / 彻底清理 ----
+        danger = tk.Frame(self.win, bg=T['bg'])
+        danger.pack(side='bottom', fill='x', padx=14, pady=(6, 0))
+        tk.Label(danger, text='数据', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                 anchor='w').pack(fill='x')
+        drow = tk.Frame(danger, bg=T['bg'])
+        drow.pack(fill='x', pady=(2, 0))
+        ex = tk.Label(drow, text='导出全部数据', bg=T['card'], fg=T['fg'],
+                      font=FONT_SM, padx=10, pady=4, cursor='hand2')
+        ex.pack(side='left')
+        ex.bind('<Button-1>', lambda e: self.export_all())
+        wb = tk.Label(drow, text='彻底清理所有数据', bg=T['danger'], fg='#fff',
+                      font=FONT_SM, padx=10, pady=4, cursor='hand2')
+        wb.pack(side='left', padx=(8, 0))
+        wb.bind('<Button-1>', lambda e: self.wipe_all())
+
+        # ---- 可滚动内容区（最后 pack，吃剩余空间）----
+        self.sc.pack(fill='both', expand=True, padx=(14, 8), pady=(10, 0))
         self.win.bind('<Escape>', lambda e: (safe_release(self.win), self.win.destroy()))
         self.sc.bind_wheel_tree()          # 所有子控件接管滚轮
         center_on(self.win, app.root, 380, 470)
         self.win.after(80, self.sc._on_inner)
+
+    def export_all(self):
+        """把剪贴板历史 + 常用语全部导出为一个 JSON 文件。
+
+        选 JSON 的理由：① 保留全部字段（时间/来源/类型/收藏/标签…），
+        ② 结构清晰、将来可直接再导入，③ 格式化后人也读得懂。
+        文件名带时间戳，不会互相覆盖。
+        """
+        clip = self.app.data.get('clip') or []
+        groups = self.app.data.get('groups') or []
+        n_phrase = sum(len(g.get('items') or []) for g in groups)
+        if not clip and not n_phrase:
+            self.app.tip('没有可导出的内容')
+            return
+        payload = {
+            'app': APP_NAME,
+            'version': APP_VER,
+            'exported_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'clip_count': len(clip),
+            'phrase_count': n_phrase,
+            'clip': clip,
+            'groups': groups,
+        }
+        name = 'ClawBoard导出_全部_%s.json' % time.strftime('%Y%m%d_%H%M%S')
+        path = os.path.join(BASE_DIR, name)
+        tmp = path + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, path)          # 先写临时文件再原子替换，防半截文件
+            self.app.tip('已导出 %d 条剪贴板 + %d 条常用语 → %s'
+                         % (len(clip), n_phrase, name))
+        except Exception as e:
+            self.app.tip('导出失败：%s' % e)
+
+    def wipe_all(self):
+        """一键彻底清理：清空全部数据 + 关闭开机自启 + 删除数据文件。
+
+        目的是让用户"无忧删除程序"—— 清完只剩程序本体，直接删文件夹即可。
+        不可撤销，所以先弹二次确认（列出会删掉什么）。
+        """
+        def do():
+            # 1) 关闭开机自启（清 HKCU\...\Run\ClawBoard）
+            try:
+                set_autostart(False)
+            except Exception:
+                pass
+            # 2) 清空内存里的数据
+            self.app.data['clip'] = []
+            self.app.data['groups'] = [{'name': '默认', 'items': []}]
+            self.app.data['gi'] = 0
+            self.app.data['search_history'] = []
+            self.app.data['geom'] = None
+            try:
+                self.app.save(True)
+            except Exception:
+                pass
+            # 3) 删除数据文件与全部备份轮转
+            removed = 0
+            for p in (DATA_FILE, DATA_FILE + '.bak', DATA_FILE + '.bak.1',
+                      DATA_FILE + '.bak.2', DATA_FILE + '.tmp'):
+                try:
+                    if os.path.exists(p):
+                        os.remove(p)
+                        removed += 1
+                except Exception:
+                    pass
+            try:
+                self.app.render()
+            except Exception:
+                pass
+            self.app.tip('已彻底清理：删除 %d 个数据文件，已关闭开机自启' % removed)
+
+        self.app.confirm(
+            '确定要彻底清理吗？此操作不可撤销：\n\n'
+            '· 删除全部剪贴板历史与常用语\n'
+            '· 关闭开机自启（清理注册表项）\n'
+            '· 删除本地全部数据文件与备份\n\n'
+            '清理完成后，直接删除程序文件夹即彻底卸载。', do)
 
     def row_ui_scale(self, master):
         """界面等比缩放：点击在 50%/75%/100%/125%/150% 间循环切换"""
