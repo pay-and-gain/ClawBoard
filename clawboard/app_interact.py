@@ -458,13 +458,28 @@ class InteractionMixin(PhraseMixin):
                 self.paste(it['text'], True, it['id'])
                 return
 
+    def _purge_image_files(self, items):
+        """删除一批图片条目对应的 PNG 文件（被删/清空/裁剪的图片不再留盘）。"""
+        img_dir = os.path.join(BASE_DIR, 'images')
+        for x in items:
+            name = (x or {}).get('image_path')
+            if name and (x or {}).get('content_type') == 'image':
+                try:
+                    os.remove(os.path.join(img_dir, name))
+                except Exception:
+                    pass
+
     def del_item(self, cid, kind):
         if kind == 'clip':
+            victim = next((x for x in self.data['clip'] if x['id'] == cid), None)
+            self._purge_image_files([victim] if victim else [])
             self.data['clip'] = [x for x in self.data['clip'] if x['id'] != cid]
             if self.sel_clip == cid:
                 self.sel_clip = None
         else:
             g = self.cur_group()
+            victim = next((x for x in g['items'] if x['id'] == cid), None)
+            self._purge_image_files([victim] if victim else [])
             g['items'] = [x for x in g['items'] if x['id'] != cid]
             if self.sel_phrase == cid:
                 self.sel_phrase = None
@@ -483,6 +498,9 @@ class InteractionMixin(PhraseMixin):
             favs = [x for x in self.data['clip'] if x.get('fav')] if self.st.get('keep_on_clear') else []
 
             def do_clear():
+                removed = ([x for x in self.data['clip'] if x not in favs]
+                           if favs else self.data['clip'])
+                self._purge_image_files(removed)
                 self.data['clip'] = favs
                 self.sel_clip = None
                 self.save(True)
@@ -509,7 +527,17 @@ class InteractionMixin(PhraseMixin):
 
     # ---------- 命令面板（Ctrl+Shift+P） ----------
     def open_command_palette(self):
-        CommandPalette(self)
+        # 已有面板时聚焦而不是叠加打开（重复按 Ctrl+Shift+P 不再弹多个）
+        p = getattr(self, '_command_palette', None)
+        if p is not None:
+            try:
+                if p.win.winfo_exists():
+                    p.win.lift()
+                    p.win.focus_force()
+                    return
+            except Exception:
+                pass
+        self._command_palette = CommandPalette(self)
 
     # ---------- F3 搜索：历史 / 帮助 ----------
     def on_search_return(self, e=None):

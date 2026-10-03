@@ -272,6 +272,8 @@ class DataMixin:
                              daemon=True).start()
         lim = int(self.st['max_items'])
         if len(self.data['clip']) > lim:
+            removed = [x for x in self.data['clip'][lim:] if not x.get('fav')]
+            self._purge_image_files(removed)
             self.data['clip'] = crop_items(self.data['clip'], lim)
         self.save(True)
         if self.tab == 'clip':
@@ -480,6 +482,8 @@ class SystemMixin:
         self.data['clip'].insert(0, rec)
         lim = int(self.st['max_items'])
         if len(self.data['clip']) > lim:
+            removed = [x for x in self.data['clip'][lim:] if not x.get('fav')]
+            self._purge_image_files(removed)
             self.data['clip'] = crop_items(self.data['clip'], lim)
         self.save(True)
         if self.tab == 'clip':
