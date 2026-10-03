@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
-"""v2.2.x 自测：query 时隙解析跨午夜修复（time:22:00-02:00 等）。
+"""v2.2.x 自测：query 时隙解析（跨午夜 + 以 now 为锚 + 起止相同空集）。
 
-用固定时间戳构造条目（当天某个整点），不依赖运行时刻，可稳定复现。
+关键：所有用例都用**固定的基准日整点时间戳**，并通过直接调用
+parse_time_token(v, now_ms) 显式传入 now，从而完全控制「锚点」，
+不依赖运行时刻，可稳定复现（无论几点跑结果都一样）。
+
 覆盖：
-  - 跨午夜命中（午夜前 23:00 / 午夜后 01:00）
-  - 跨午夜排除（12:00 不在区间）
-  - 白天正常（回归）
-  - 不跨界正常（回归）
+  A. 夜间视角（now=23:00）的跨午夜命中/排除
+  B. 凌晨视角（now=00:30）以 now 为锚：命中昨晚（关键新用例）
+  C. 白天不受影响 + 凌晨搜白天时段的过去取向
+  D. 不跨界 22:00-23:59 在凌晨的行为
+  E. 起止相同 → 空集（不再是 24h）+ parse() errors 提示
+  F. 负向谓词（-time:）在固定 now 下的整链路
 """
 import io
 import datetime
@@ -29,17 +34,13 @@ def check(name, cond, extra=''):
                              ('  ' + extra) if extra else ''))
 
 
-def ts_at(hour, minute=0, day_offset=0):
-    """基准日（+day_offset 天）的 hour:minute 时间戳（毫秒）。
+# 固定基准日：取运行日的日期，但所有时刻都用整点，故与「现在几点」无关。
+_BASE = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
-    只用整点时刻，与「现在几点」无关，因此不受运行时刻影响。
-    day_offset 用于构造跨午夜区间的「午夜后」一侧：
-    time:22:00-02:00 的窗口是 [今天 22:00, 次日 02:00)，
-    所以 01:00 那一侧必须落在「次日」。
-    """
-    d = (datetime.datetime.now().replace(hour=hour, minute=minute,
-                                         second=0, microsecond=0)
-         + datetime.timedelta(days=day_offset))
+
+def at(hour, minute=0, day_offset=0):
+    """基准日（+day_offset 天）hour:minute 的时间戳（毫秒）"""
+    d = _BASE + datetime.timedelta(days=day_offset, hours=hour, minutes=minute)
     return int(d.timestamp() * 1000)
 
 
@@ -49,48 +50,111 @@ def item(text, ts):
             'fav': 0, 'is_estimated': 0, 'sens': None, 'created_at': ts}
 
 
-def hits(q, it):
-    return len(Q.match(q, [it])[0])
+def hit_at(q, ts, now_ms):
+    """在指定 now 下，判断 ts 是否命中 q 的时隙（复刻 compile_pred 的 lo<=ts<hi）"""
+    r = Q.parse_time_token(q, now_ms)
+    if r is None:
+        return False
+    lo, hi = r[0], r[1]
+    return lo <= ts < hi
 
 
-# ---------- 1. 跨午夜主用例：22:00-02:00 ----------
-# 窗口锚定为 [今天 22:00, 次日 02:00)，故午夜后一侧用 day_offset=1（次日 01:00）。
-slot = 'time:22:00-02:00'
-check('22:00-02:00 命中 23:00（午夜前）', hits(slot, item('a', ts_at(23, 0))) == 1,
-      str(hits(slot, item('a', ts_at(23, 0)))))
-check('22:00-02:00 命中 次日 01:00（午夜后）',
-      hits(slot, item('b', ts_at(1, 0, day_offset=1))) == 1,
-      str(hits(slot, item('b', ts_at(1, 0, day_offset=1)))))
-check('22:00-02:00 不命中 12:00（区间外）', hits(slot, item('c', ts_at(12, 0))) == 0,
-      str(hits(slot, item('c', ts_at(12, 0)))))
-check('22:00-02:00 命中 22:00（左闭边界）', hits(slot, item('d', ts_at(22, 0))) == 1)
-check('22:00-02:00 不命中 次日 02:00（右开边界）',
-      hits(slot, item('e', ts_at(2, 0, day_offset=1))) == 0)
+# ================= A. 夜间视角（now = 今天 23:00）=================
+NOW_EVE = at(23, 0)
+check('A1 22:00-02:00 @now23:00 命中今天23:00',
+      hit_at('22:00-02:00', at(23, 0), NOW_EVE) is True)
+check('A2 22:00-02:00 @now23:00 不命中今天12:00',
+      hit_at('22:00-02:00', at(12, 0), NOW_EVE) is False)
+check('A3 22:00-02:00 @now23:00 左闭：命中今天22:00',
+      hit_at('22:00-02:00', at(22, 0), NOW_EVE) is True)
+check('A4 22:00-02:00 @now23:00 右开：不命中次日02:00',
+      hit_at('22:00-02:00', at(2, 0, day_offset=1), NOW_EVE) is False)
+check('A5 22:00-02:00 @now23:00 命中次日01:00（窗口后半段）',
+      hit_at('22:00-02:00', at(1, 0, day_offset=1), NOW_EVE) is True)
 
-# ---------- 2. 回归：白天正常，不受修复影响 ----------
-check('11:00-13:00 命中 12:00（白天回归）',
-      hits('time:11:00-13:00', item('f', ts_at(12, 0))) == 1)
-check('11:00-13:00 不命中 14:00（白天区间外）',
-      hits('time:11:00-13:00', item('g', ts_at(14, 0))) == 0)
+# ================= B. 凌晨视角（now = 今天 00:30）—— 关键新用例 =================
+NOW_DAWN = at(0, 30)
+check('B1 22:00-02:00 @now00:30 命中昨天23:00（核心修复）',
+      hit_at('22:00-02:00', at(23, 0, day_offset=-1), NOW_DAWN) is True,
+      'lo/hi=%s' % str(Q.parse_time_token('22:00-02:00', NOW_DAWN)))
+check('B2 22:00-02:00 @now00:30 命中今天00:30（窗口内）',
+      hit_at('22:00-02:00', at(0, 30), NOW_DAWN) is True)
+check('B3 22:00-02:00 @now00:30 命中昨天22:00（左闭）',
+      hit_at('22:00-02:00', at(22, 0, day_offset=-1), NOW_DAWN) is True)
+check('B4 22:00-02:00 @now00:30 不命中今天02:00（右开）',
+      hit_at('22:00-02:00', at(2, 0), NOW_DAWN) is False)
+check('B5 22:00-02:00 @now00:30 不命中昨天12:00（区间外）',
+      hit_at('22:00-02:00', at(12, 0, day_offset=-1), NOW_DAWN) is False)
 
-# ---------- 3. 回归：不跨界（22:00-23:59）仍正常，不该被误判成跨午夜 ----------
-check('22:00-23:59 命中 23:00（不跨界回归）',
-      hits('time:22:00-23:59', item('h', ts_at(23, 0))) == 1)
-check('22:00-23:59 不命中 00:30（顺延一天不该被触发）',
-      hits('time:22:00-23:59', item('i', ts_at(0, 30))) == 0)
+# ================= C. 白天视角（now = 今天 12:00）不受影响 =================
+NOW_DAY = at(12, 0)
+check('C1 11:00-13:00 @now12:00 命中今天12:00',
+      hit_at('11:00-13:00', at(12, 0), NOW_DAY) is True)
+check('C2 11:00-13:00 @now12:00 不命中今天14:00',
+      hit_at('11:00-13:00', at(14, 0), NOW_DAY) is False)
+check('C3 11:00-13:00 @now12:00 不前移：不命中昨天12:00',
+      hit_at('11:00-13:00', at(12, 0, day_offset=-1), NOW_DAY) is False)
+# C4：历史搜索的过去取向 —— 凌晨搜白天时段，锚点回退到「昨天那一段」
+check('C4 11:00-13:00 @now00:30 前移命中昨天11:00-13:00（历史过去取向）',
+      hit_at('11:00-13:00', at(12, 0, day_offset=-1), NOW_DAWN) is True)
+check('C5 11:00-13:00 @now00:30 不命中今天12:00（尚未发生）',
+      hit_at('11:00-13:00', at(12, 0), NOW_DAWN) is False)
 
-# ---------- 4. 起止相同：09:00-09:00 → 顺延一天 = 跨整天 24h 区间（见 query.py 注释）----------
-check('09:00-09:00 命中 10:00（24h 区间语义）',
-      hits('time:09:00-09:00', item('j', ts_at(10, 0))) == 1)
-check('09:00-09:00 命中 次日 03:00（24h 区间语义，午夜另一侧）',
-      hits('time:09:00-09:00', item('k', ts_at(3, 0, day_offset=1))) == 1)
+# ================= D. 不跨界 22:00-23:59 在凌晨的行为 =================
+check('D1 22:00-23:59 @now00:30 前移命中昨天23:00',
+      hit_at('22:00-23:59', at(23, 0, day_offset=-1), NOW_DAWN) is True)
+check('D2 22:00-23:59 @now00:30 不命中今天23:00（已在未来）',
+      hit_at('22:00-23:59', at(23, 0), NOW_DAWN) is False)
+check('D3 22:00-23:59 @now23:00 命中今天23:00（晚上不前移）',
+      hit_at('22:00-23:59', at(23, 0), NOW_EVE) is True)
 
-# ---------- 5. 负向：-time:22:00-02:00 排除跨午夜区间 ----------
-r, _ = Q.match('-time:22:00-02:00', [item('late', ts_at(23, 0)),
-                                     item('noon', ts_at(12, 0))])
-check('负向 -time:22:00-02:00 排除 23:00、保留 12:00',
-      len(r) == 1 and r[0]['text'] == 'noon',
-      str([x['text'] for x in r]))
+# ================= E. 起止相同 → 空集（不再是 24h）=================
+# 直接对区间断言：lo >= hi（lo<=ts<hi 恒为假）
+r = Q.parse_time_token('09:00-09:00', NOW_DAY)
+check('E1 09:00-09:00 返回空区间（lo >= hi）',
+      r is not None and r[0] >= r[1], 'r=%s' % str(r))
+check('E2 09:00-09:00 带 err 提示（三元组）', len(r) == 3, 'r=%s' % str(r))
+check('E3 09:00-09:00 不命中今天10:00（不再 24h）',
+      hit_at('09:00-09:00', at(10, 0), NOW_DAY) is False)
+check('E4 09:00-09:00 不命中次日03:00（不再 24h）',
+      hit_at('09:00-09:00', at(3, 0, day_offset=1), NOW_DAY) is False)
+r2 = Q.parse_time_token('00:00-00:00', NOW_DAY)
+check('E5 00:00-00:00 亦为空区间', r2 is not None and r2[0] >= r2[1], 'r=%s' % str(r2))
+# parse() 层把该提示写进 errors（搜索框据此变红提示）
+c = Q.parse('time:09:00-09:00')
+check('E6 parse() 收集到起止相同的 errors 提示',
+      any('相同' in e for e in c['errors']), str(c['errors']))
+# 常规合法时隙不应产生 errors
+c2 = Q.parse('time:22:00-02:00')
+check('E7 parse() 常规时隙无 errors', c2['errors'] == [], str(c2['errors']))
+
+# ================= F. 负向谓词 =================
+# 用固定 now 走完整 parse+compile：构造昨晚 23:00 条目，-time:22:00-02:00 时
+# 该时段整体前移命中，故应被排除。
+import query as _Q  # noqa: E402
+
+
+def match_at(q, items, now_ms):
+    """在固定 now 下走完整 match（临时替换 time.time 以确保锚点可控）"""
+    import time as _t
+    orig = _t.time
+    _t.time = lambda: now_ms / 1000.0
+    try:
+        return _Q.match(q, items)[0]
+    finally:
+        _t.time = orig
+
+
+now = NOW_DAWN
+items = [item('昨晚23点', at(23, 0, day_offset=-1)),
+         item('今天中午', at(12, 0)),
+         item('今天00:30', at(0, 30))]
+pos = [x['text'] for x in match_at('time:22:00-02:00', items, now)]
+check('F1 @now00:30 正向命中「昨晚23点」「今天00:30」',
+      set(pos) == {'昨晚23点', '今天00:30'}, str(pos))
+neg = [x['text'] for x in match_at('-time:22:00-02:00', items, now)]
+check('F2 @now00:30 负向排除窗口内、保留「今天中午」',
+      neg == ['今天中午'], str(neg))
 
 with io.open(os.path.join(tempfile.gettempdir(), '_t36.out'), 'w',
              encoding='utf-8') as f:

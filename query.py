@@ -68,17 +68,42 @@ def parse_time_token(v, now_ms):
     if m:
         n = time.localtime(now_ms / 1000.0)
         import datetime
+        h1, m1 = int(m.group(1)), int(m.group(2))
+        h2, m2 = int(m.group(3)), int(m.group(4))
+        # 起止完全相同的时段在语义上无意义（用户多半写错，或想表达"就那一分钟"）。
+        # 不扩成 24h 全天（那会把整桶数据静默放行，方向相反地骗人），
+        # 而是返回空区间（lo == hi，lo <= ts < hi 恒为假 = 命中 0 条），
+        # 并通过第三元 err 让 parse() 把提示透传到搜索框（红框 + 文案）。
+        if (h1, m1) == (h2, m2):
+            t0 = datetime.datetime(n.tm_year, n.tm_mon, n.tm_mday)
+            t0 += datetime.timedelta(hours=h1, minutes=m1)
+            t0ms = int(t0.timestamp() * 1000)
+            return (t0ms, t0ms, '起止时间相同，时段为空：' + v)
         base = datetime.datetime(n.tm_year, n.tm_mon, n.tm_mday)
-        a = base + datetime.timedelta(hours=int(m.group(1)), minutes=int(m.group(2)))
-        b = base + datetime.timedelta(hours=int(m.group(3)), minutes=int(m.group(4)))
-        # 跨午夜：起时间晚于止时间（如 22:00-02:00）时把止时间顺延一天，
-        # 使区间为 [a, b) 跨越午夜。否则 a > b 会让 lo <= ts < hi 恒为假，
-        # 搜索静默返回 0 条 —— 用户以为那段时间没数据。
-        # 起止相同（09:00-09:00）走同一分支 → 顺延为跨整天的 24h 区间：
-        # 「空白时段」没有实际意义，24h 才是符合直觉的语义（既不静默丢数据，
-        # 也避免用户误以为整天都被排除）；故用 b <= a。
+        a = base + datetime.timedelta(hours=h1, minutes=m1)
+        b = base + datetime.timedelta(hours=h2, minutes=m2)
+        # ---- 时隙锚定规则（务必看清，两处调整的先后顺序有意义）----
+        # 1) 跨午夜顺延：起时间晚于止时间（如 22:00-02:00）时把止时间 +1 天，
+        #    得到 [今天22:00, 次日02:00)，否则 a > b 会让 lo <= ts < hi 恒为假、
+        #    搜索静默返回 0 条 —— 用户以为那段时间没数据。用 b <= a（含相等），
+        #    起止相同的分支已提前 return 拦截，故此处实际是 b < a。
         if b <= a:
             b += datetime.timedelta(days=1)
+        # 2) 以 now 为锚（关键）：把整段窗口对齐到「起时刻 a 最近一次已经发生的时刻」，
+        #    即保证 a <= now < a+24h。若 a 落在「未来」（a > now），说明用户是在
+        #    该时隙的起点之前搜索（典型：凌晨 00:30 搜 22:00-02:00，想找昨晚复制的东西），
+        #    此时整段窗口前移一天：
+        #      · 22:00-02:00 → [昨天22:00, 今天02:00)，命中昨晚 23:00 / 今天 00:30；
+        #      · 22:00-23:59（不跨界）→ [昨天22:00, 昨天23:59)，命中昨晚 23:00。
+        #    理由：这是**历史记录**搜索，默认取向是「过去的、最近的那个窗口」。
+        #    · 晚上 23:00 搜 22:00-02:00：a=今天22:00 <= now → 不前移，命中今天23:00；
+        #    · 白天 12:00 搜 11:00-13:00：a=今天11:00 <= now → 不前移，命中今天12:00；
+        #    · 凌晨 00:14 搜 11:00-13:00：a=今天11:00 > now → 前移到昨天 11:00-13:00
+        #      （凌晨找的是「昨天那个白天窗口」，符合历史搜索的过去取向）。
+        #    顺序：先顺延（让 a/b 成为合法递增区间），再看 now 决定是否前移。
+        if int(a.timestamp() * 1000) > now_ms:
+            a -= datetime.timedelta(days=1)
+            b -= datetime.timedelta(days=1)
         return (int(a.timestamp() * 1000), int(b.timestamp() * 1000))
     return parse_date(v)
 
@@ -110,8 +135,15 @@ def parse(q):
                 r = parse_time_token(body[5:], int(time.time() * 1000))
                 if r is None:
                     cond['errors'].append('无法识别的时间：' + body)
+                    continue
+                # parse_time_token 在软性写法问题（如起止相同）时返回三元组
+                # (lo, hi, err)：区间照常入列（此时为空区间，命中 0 条），
+                # 同时把提示透传给搜索框。
+                if len(r) == 3:
+                    cond['time'].append(((r[0], r[1]), neg))
+                    cond['errors'].append(r[2])
                 else:
-                    cond['time'].append((r, neg))
+                    cond['time'].append(((r[0], r[1]), neg))
             elif low.startswith('tag:'):
                 v = normalize_tag(body[4:])
                 if v:
