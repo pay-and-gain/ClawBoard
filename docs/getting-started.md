@@ -50,7 +50,7 @@
 3. 安装完成会自动创建开始菜单和桌面快捷方式，并附带卸载项。
 
 > [!NOTE]
-> 用安装包装到 `C:\Program Files` 时，数据会存到 `%APPDATA%\ClawBoard\`（因为 Program Files 对普通用户只读）。详见 [FAQ：数据存在哪？](#faq)。
+> 用安装包装到 `C:\Program Files` 时，数据会存到 `%APPDATA%\ClawBoard\`（因为 Program Files 对普通用户只读）。详见 [FAQ：数据存在哪？](#常见问题-faq)。
 
 </details>
 
@@ -124,7 +124,7 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 练完上面，再挑几个试试，基本就摸透了：
 
 - **任务 A · 搜索** —— 按 <kbd>Ctrl</kbd>+<kbd>F</kbd> 聚焦搜索框，输入关键词，列表实时过滤。试试中文、英文，甚至拼音：输入 `zhanghao` 或 `zh`，也能命中含「账号」的条目。
-- **任务 B · 收藏** —— 把鼠标移到一条常用内容上，右键 → 收藏（或按 <kbd>Delete</kbd> 旁边的高频操作）。收藏项在「清空历史」时会被保留。
+- **任务 B · 收藏** —— 把鼠标移到一条常用内容上，右键 → 收藏。收藏项在「清空历史」时会被保留。
 - **任务 C · 图片** —— 用系统截图工具（<kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>）截一张图，面板里会出现「图片 宽×高」；选中它，角落会弹出大图预览。
 
 > [!TIP]
@@ -178,7 +178,7 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 
 **是什么**：复制内容会被自动识别并打上标签，列表里带 🏷 标记。
 
-**怎么用**：用 `tag:xxx` 一键筛选。识别类型包括：邮箱 / 手机号 / 数字 / 日期 / 链接 / 代码 / JSON / 密码 / Token。支持中文别名（`tag:邮箱`）。
+**怎么用**：用 `tag:xxx` 一键筛选。识别类型共 11 类：邮箱 / 手机号 / 身份证 / 银行卡 / 数字 / 日期 / 链接 / 代码 / JSON / 密码 / Token。支持中文别名（`tag:邮箱`）。
 
 **小技巧**：JSON 优先于代码 —— `{"a":1}` 会被识别为 JSON 而不是代码。
 
@@ -279,7 +279,7 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 ## 常见问题 FAQ
 
 **Q1：按 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> 没反应？热键被占用了怎么办？**
-可能是被其他程序抢占了。到 **设置** 里把唤起热键改成 <kbd>Alt</kbd>+<kbd>V</kbd> 或 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>。若新热键仍被占用，程序会**自动降级为轮询检测**，依然能唤起，只是响应稍慢。
+可能是被其他程序抢占了。到 **设置** 里把唤起热键改成 <kbd>Alt</kbd>+<kbd>V</kbd> 或 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>。若热键注册失败，程序会**自动降级为轮询检测**（退回监听默认的 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>），依然能唤起，只是响应稍慢。
 
 **Q2：数据存在哪？**
 一个 UTF-8 的 `ClawBoard数据.json` 文件。位置规则是**便携优先**：

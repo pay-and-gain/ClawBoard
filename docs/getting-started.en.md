@@ -178,7 +178,7 @@ Once you've done the above, try a few of these and you'll know your way around:
 
 **What it is**: copied content is auto-detected and tagged, shown with a 🏷 marker in the list.
 
-**How to use**: filter with `tag:xxx`. Detected types include email / phone / number / date / URL / code / JSON / password / token. Chinese aliases are supported (`tag:邮箱`).
+**How to use**: filter with `tag:xxx`. 11 types are detected: email / phone / ID card / bank card / number / date / URL / code / JSON / password / token. Chinese aliases are supported (`tag:邮箱`).
 
 **Tips**: JSON takes priority over code — `{"a":1}` is tagged JSON, not code.
 
@@ -279,7 +279,7 @@ Once you've done the above, try a few of these and you'll know your way around:
 ## FAQ
 
 **Q1: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> does nothing — the hotkey is taken. What do I do?**
-Something else probably grabbed it. Go to **Settings** and change the summon hotkey to <kbd>Alt</kbd>+<kbd>V</kbd> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>. If the new hotkey is also taken, the app **automatically falls back to polling detection** — it still works, just slightly less instantly.
+Something else probably grabbed it. Go to **Settings** and change the summon hotkey to <kbd>Alt</kbd>+<kbd>V</kbd> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>. If the hotkey can't be registered, the app **automatically falls back to polling detection** (falling back to monitoring the default <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) — it still works, just slightly less instantly.
 
 **Q2: Where is the data stored?**
 In a single UTF-8 file named `ClawBoard数据.json`. The location rule is **portable-first**:

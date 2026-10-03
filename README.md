@@ -125,7 +125,7 @@ query.py                搜索语法解析器
 transform.py            27 项文本变换
 ClawBoardC/             C 语言版本
 packaging/              打包配置（PyInstaller spec、图标、启动脚本、安装包脚本）
-tests/                  回归测试（335 项）
+tests/                  回归测试（336 项）
 └─ testdata/            测试数据生成器
 docs/                   设计文档 + 截图
 ```
@@ -142,18 +142,18 @@ python tests/_t22.py             # 工具条布局（26 项）
 python tests/_t24.py             # 折叠 / 重复复制（24 项）
 python tests/_t25.py             # 边缘拉伸（25 项）
 python tests/_t26.py             # UI 等比缩放（25 项）
-python tests/_t27.py             # 数据目录选址（21 项）
+python tests/_t27.py             # 数据目录选址（24 项）
 python tests/_t28.py             # 粘贴不整窗闪（19 项）
 python tests/_t29.py             # 变换推荐 + 频率排序（29 项）
 python tests/_t30.py             # 命令面板（21 项）
 python tests/_t31.py             # 触发词引擎（13 项）
 python tests/_t32.py             # 拼音搜索 + 多音字词组（18 项）
-python tests/_t33.py             # 图片 DIB↔PNG 往返（17 项）
+python tests/_t33.py             # 图片 DIB↔PNG 往返（15 项）
 python tests/_t34.py             # 内容自动标签（16 项）
 python tests/_t35.py             # 文件路径记录 CF_HDROP（8 项）
 ```
 
-共 **335 项**回归测试，覆盖布局、几何、数据、交互、搜索、粘贴、图片、文件路径等核心路径。
+共 **336 项**回归测试，覆盖布局、几何、数据、交互、搜索、粘贴、图片、文件路径等核心路径。
 
 ## 🗺️ 迭代路线
 

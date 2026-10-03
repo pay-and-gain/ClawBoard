@@ -124,7 +124,7 @@ query.py                search syntax parser
 transform.py            27 text transforms
 ClawBoardC/             C implementation
 packaging/              build config (PyInstaller spec, icon, launcher, installer script)
-tests/                  regression tests (335 cases)
+tests/                  regression tests (336 cases)
 └─ testdata/            test data generator
 docs/                   design docs + screenshots
 ```
@@ -141,18 +141,18 @@ python tests/_t22.py             # toolbar layout (26)
 python tests/_t24.py             # collapse / duplicate capture (24)
 python tests/_t25.py             # edge resize (25)
 python tests/_t26.py             # UI scaling (25)
-python tests/_t27.py             # data directory selection (21)
+python tests/_t27.py             # data directory selection (24)
 python tests/_t28.py             # paste without full-window flash (19)
 python tests/_t29.py             # transform ranking + frequency sort (29)
 python tests/_t30.py             # command palette (21)
 python tests/_t31.py             # trigger engine (13)
 python tests/_t32.py             # pinyin search + polyphonic phrases (18)
-python tests/_t33.py             # image DIB↔PNG round-trip (17)
+python tests/_t33.py             # image DIB↔PNG round-trip (15)
 python tests/_t34.py             # auto-tagging (16)
 python tests/_t35.py             # file-path capture via CF_HDROP (8)
 ```
 
-**335** regression tests in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
+**336** regression tests in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
 
 ## 🎯 Design trade-offs
 
