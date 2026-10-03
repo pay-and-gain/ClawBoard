@@ -45,7 +45,7 @@ Pick any one of the three options. **No installer dependencies, no pip, no netwo
 <details open>
 <summary><b>Option 1 · Installer (recommended)</b></summary>
 
-1. Download `ClawBoard-2.2.3-setup.exe` from the [Releases page](../../releases/latest).
+1. Download `ClawBoard-2.2.4-setup.exe` from the [Releases page](../../releases/latest).
 2. Double-click it and click "Next" through the wizard.
 3. It creates Start-menu and desktop shortcuts automatically and ships an uninstaller.
 
@@ -57,7 +57,7 @@ Pick any one of the three options. **No installer dependencies, no pip, no netwo
 <details>
 <summary><b>Option 2 · Portable (unzip and run)</b></summary>
 
-1. Download `ClawBoard-2.2.3-portable.zip`.
+1. Download `ClawBoard-2.2.4-portable.zip`.
 2. Unzip anywhere (a USB stick, your desktop, D: drive — all fine).
 3. Double-click `ClawBoard.exe`.
 
