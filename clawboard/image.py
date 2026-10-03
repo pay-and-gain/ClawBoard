@@ -5,8 +5,9 @@
 Tk 的 PhotoImage 只认 PNG/GIF/PGM，不认 DIB，所以这里用标准库 zlib 手动做
 DIB → PNG 转换（已验证全链路：构造 DIB → 写剪贴板 → 读回 → PNG → PhotoImage 加载）。
 
-PNG 编码只处理一种情况：32 位 BGRA（biBitCount=32），这是截图工具（微信/QQ/系统
-截图）最常见的格式。其它位深（24/16/8）后续按需扩展。
+PNG 编码支持两种位深：32 位 BGRA（biBitCount=32）与 24 位 BGR（biBitCount=24），
+这也是截图工具（微信/QQ/系统截图）最常见的格式。24 位转 PNG 时 alpha 补 255；
+biHeight 为负表示自顶向下存储，不再要求一定是自底向上。
 """
 import ctypes
 import os
@@ -41,22 +42,35 @@ k32.GlobalSize.restype = ctypes.c_size_t
 
 
 def dib_to_png(dib):
-    """DIB 字节 → (png 字节, 宽, 高)。只支持 32 位 BGRA。"""
+    """DIB 字节 → (png 字节, 宽, 高)。支持 32 位 BGRA 与 24 位 BGR。
+
+    biHeight 为负表示自顶向下存储（top-down），为正表示自底向上（bottom-up，
+    DIB 最常见）。PNG 一律自顶向下，因此 bottom-up 需要把行序翻转。
+    """
     biSize = struct.unpack_from('<I', dib, 0)[0]
     wpx = struct.unpack_from('<i', dib, 4)[0]
-    hpx = struct.unpack_from('<i', dib, 8)[0]
+    biHeight = struct.unpack_from('<i', dib, 8)[0]
     bitcount = struct.unpack_from('<H', dib, 14)[0]
-    if bitcount != 32:
-        raise ValueError('不支持的位深：%d（当前只支持 32 位）' % bitcount)
-    px = dib[biSize:]
-    stride = ((wpx * 4) + 3) & ~3           # 每行 4 字节对齐
+    if bitcount == 32:
+        bpp = 4
+    elif bitcount == 24:
+        bpp = 3
+    else:
+        raise ValueError('不支持的位深：%d（当前支持 24/32 位）' % bitcount)
 
+    topdown = biHeight < 0
+    hpx = abs(biHeight)
+    px = dib[biSize:]
+    stride = ((wpx * bpp) + 3) & ~3           # 每行 4 字节对齐
+
+    rows = range(hpx) if topdown else range(hpx - 1, -1, -1)
     raw = bytearray()
-    for y in range(hpx - 1, -1, -1):        # DIB 自底向上，PNG 自顶向下
-        row = px[y * stride:y * stride + wpx * 4]
+    for y in rows:
+        row = px[y * stride:y * stride + wpx * bpp]
         raw.append(0)                        # filter byte: None
-        for i in range(0, len(row), 4):      # BGRA → RGBA
-            b, g, r, a = row[i], row[i + 1], row[i + 2], row[i + 3]
+        for i in range(0, len(row), bpp):    # BGRA / BGR → RGBA
+            b, g, r = row[i], row[i + 1], row[i + 2]
+            a = row[i + 3] if bpp == 4 else 255
             raw += bytes((r, g, b, a))
 
     def chunk(typ, data):
