@@ -7,6 +7,12 @@
 A lightweight clipboard history + snippets panel that sits in a corner of your screen: search, text transforms, batch export, quick paste, plus a full set of privacy-oriented clipboard handling.
 
 <p align="center">
+  <a href="../../stargazers"><img src="https://img.shields.io/github/stars/pay-and-gain/ClawBoard?style=social" alt="stars"></a>
+</p>
+
+> 💛 **If this tool helps you, give it a Star** — every star keeps the updates coming. Found it useful? Share it with your friends and colleagues.
+
+<p align="center">
   <img src="docs/images/main-window.png" alt="ClawBoard main window" width="260">
 </p>
 
@@ -29,7 +35,12 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 
 - **Clipboard history** — auto capture, dedupe, configurable cap, starring; hover for time, right-click for details
 - **Phrases** — group management, word split (turn one block of text into many phrases), full CRUD
-- **Advanced search** — `app:` source / `time:` / `type:` / `size:` / `is:` / `-` exclude, multi-word AND + highlighting
+- **Advanced search** — `app:` source / `time:` / `type:` / `size:` / `is:` / `tag:` / `-` exclude, multi-word AND + highlighting
+- **Pinyin search** — search `zhanghao` or `zh` to hit Chinese entries, even when you can't recall the characters
+- **Auto-tagging** — auto-detect email / phone / number / date / URL / code / JSON, filter with `tag:`
+- **Trigger snippets** — set a short trigger (`dz` → address) and expand it in any app as you type
+- **Command palette** — `Ctrl+Shift+P` to open, type to fuzzy-filter and run
+- **Image clipboard** — screenshots / copied images are captured and previewed in the corner
 - **27 text transforms** — encode/decode, case, line ops, hashes (MD5/SHA1/SHA256), JSON formatting…
 - **Batch export** — TXT / CSV (with BOM) / JSON / Markdown
 - **Quick paste** — `Ctrl+1..9` / `Ctrl+0` pastes items 1–10 directly
