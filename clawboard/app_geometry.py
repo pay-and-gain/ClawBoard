@@ -10,7 +10,7 @@ import re
 import ctypes
 from ctypes import wintypes
 
-from clawboard.config import BAR_H, MIN_W, MIN_H
+from clawboard.config import BAR_H, MIN_W, MIN_H, RESIZE_ZONE
 from clawboard.theme import T, apply_theme
 from clawboard.win32 import u32, monitors, dpi_scale, visible_ratio
 
@@ -117,6 +117,9 @@ class GeometryMixin:
         self._mx, self._my = e.x_root, e.y_root
 
     def do_move(self, e):
+        # 边缘拉伸进行中时让位：否则拖标题栏上沿会同时"移动+拉伸"打架
+        if self._rz_dir:
+            return
         self.root.geometry('+%d+%d' % (self.root.winfo_x() + e.x_root - self._mx,
                                        self.root.winfo_y() + e.y_root - self._my))
         self.clamp_to_screen()
@@ -127,10 +130,102 @@ class GeometryMixin:
         self._rw, self._rh = self.root.winfo_width(), self.root.winfo_height()
 
     def do_resize(self, e):
-        w = max(240, self._rw + (e.x_root - self._rx))
-        h = max(160, self._rh + (e.y_root - self._ry))
+        # 下限必须用 min_size()（DPI 换算后的真实下限）。原来硬编码 max(240,160)
+        # 比 min_size 小一大截，两套下限打架：grip 能把窗口拉到比最小尺寸还小，
+        # 高度不足时工具条被 vlist 的 expand 挤出窗口 —— "下方按钮被遮挡"的元凶之一
+        mw, mh = self.min_size()
+        w = max(mw, self._rw + (e.x_root - self._rx))
+        h = max(mh, self._rh + (e.y_root - self._ry))
         self.root.geometry('%dx%d' % (w, h))
         self.vlist.update_view()
+
+    # ---------- 窗口边缘"随意拉伸"（四边 + 四角） ----------
+    # 无边框窗口没有系统边框可抓，自己在窗口四周留一条热区：
+    # 鼠标靠近边缘 → 光标变拉伸样式；按下拖动 → 按方向 resize（左/上边同时移动窗口）。
+    # 折叠态禁用（标题条 210x34 拉伸会破坏折叠布局）。
+
+    _CURSOR_OF = {'n': 'top_side', 's': 'bottom_side', 'e': 'right_side',
+                  'w': 'left_side', 'ne': 'top_right_corner', 'nw': 'top_left_corner',
+                  'se': 'bottom_right_corner', 'sw': 'bottom_left_corner'}
+
+    def _resize_dir(self, e):
+        """鼠标落在窗口边缘 RESIZE_ZONE 内时返回方向（'n'/'se'/…），否则 None"""
+        if self.collapsed or self.hidden:
+            return None
+        try:
+            x = e.x_root - self.root.winfo_rootx()
+            y = e.y_root - self.root.winfo_rooty()
+        except Exception:
+            return None
+        w, h = self.root.winfo_width(), self.root.winfo_height()
+        if w <= 1 or h <= 1:          # 未布局/折叠态的假尺寸，不判定
+            return None
+        z = RESIZE_ZONE
+        left, right = x <= z, x >= w - z
+        top, bottom = y <= z, y >= h - z
+        d = ''
+        if top:
+            d += 'n'
+        elif bottom:
+            d += 's'
+        if left:
+            d += 'w'
+        elif right:
+            d += 'e'
+        return d or None
+
+    def on_zone_motion(self, e):
+        """悬停边缘 → 切换拉伸光标（只在方向变化时 configure，避免每帧开销）"""
+        d = self._resize_dir(e)
+        if d == self._hover_dir:
+            return
+        self._hover_dir = d
+        self.root.configure(cursor=self._CURSOR_OF.get(d, ''))
+
+    def on_zone_press(self, e):
+        d = self._resize_dir(e)
+        if not d:
+            return
+        self._rz_dir = d
+        self._rz = (e.x_root, e.y_root,
+                    self.root.winfo_width(), self.root.winfo_height(),
+                    self.root.winfo_x(), self.root.winfo_y())
+
+    def on_zone_drag(self, e):
+        d = self._rz_dir
+        if not d:
+            return
+        x0, y0, w0, h0, wx0, wy0 = self._rz
+        dx, dy = e.x_root - x0, e.y_root - y0
+        mw, mh = self.min_size()
+        w, h, x, y = w0, h0, wx0, wy0
+        if 'e' in d:
+            w = max(mw, w0 + dx)
+        if 's' in d:
+            h = max(mh, h0 + dy)
+        if 'w' in d:                      # 拖左边：宽度变的同时窗口跟着走
+            w = max(mw, w0 - dx)
+            x = wx0 + (w0 - w)
+        if 'n' in d:
+            h = max(mh, h0 - dy)
+            y = wy0 + (h0 - h)
+        self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
+        self.clamp_to_screen()
+        self.vlist.update_view()
+
+    def on_zone_release(self, e):
+        if self._rz_dir:
+            self._rz_dir = None
+            self.save(True)               # 拉完把新尺寸存档（折叠态不会走到这）
+
+    def bind_edge_resize(self):
+        """在 root 上挂边缘拉伸的四件套。root 处于 bindtag 末位，
+        子控件的事件处理不受影响；do_move 里用 _rz_dir 让位避免拖动/拉伸打架。"""
+        r = self.root
+        r.bind('<Motion>', self.on_zone_motion)
+        r.bind('<ButtonPress-1>', self.on_zone_press)
+        r.bind('<B1-Motion>', self.on_zone_drag)
+        r.bind('<ButtonRelease-1>', self.on_zone_release)
 
     def toggle_pin(self):
         cur = bool(self.root.attributes('-topmost'))

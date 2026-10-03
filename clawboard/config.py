@@ -37,7 +37,10 @@ ITEM_H = 52          # 虚拟列表固定行高（含卡片之间的空隙）
 CARD_GAP = 4         # 卡片上下留出的空隙，条目之间不再糊成一片
 WHEEL_LINES = 3      # 滚轮一格滚几行（Windows 惯例是 3）
 BAR_H = 34            # 标题栏高度（也是折叠后露出来的高度），比原来 30 更好点
-TOOL_H = 40           # 工具条高度。36 时按钮上下只剩 5px 余量，一放大字号就被切掉一截
+TOOL_H = 48           # 工具条高度。40 时按钮(25px)+pady(14px)=39 只剩 1px 余量，
+                      # 125% DPI 下视觉上按钮紧贴上下边缘、像被切掉（用户截图反馈）。
+                      # 48 - 25 - 9*2 = 5px，上下各留 2.5px 呼吸空间
+RESIZE_ZONE = 6       # 窗口边缘"随意拉伸"热区宽度（px）：鼠标进入即变为拉伸光标
 MIN_W, MIN_H = 280, 340   # 面板最小尺寸。再小的话：标题栏 30 + 标签 32 + 工具条 36 一扣，
                           # 留给列表的宽度会被徽章/序号列吃掉，正文只剩几十像素 —— 看起来像"没有内容"
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
@@ -160,3 +163,5 @@ class AppState:
     _edge_tick: int = 0
     _edge_side: Optional[str] = None
     _edge_pos: Optional[tuple] = None
+    _rz_dir: Optional[str] = None         # 正在进行的边缘拉伸方向（'n'/'se'/…），None=没在拉
+    _hover_dir: Optional[str] = None      # 鼠标悬停的边缘方向（用于光标切换）

@@ -109,7 +109,7 @@ class UiMixin:
         # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
         self.more_btn = tk.Label(self.tool, text='⋯', bg=T['card'], fg=T['fg2'],
                                  font=FONT_B, width=3, cursor='hand2')
-        self.more_btn._pack_args = dict(side='left', padx=1, pady=7)
+        self.more_btn._pack_args = dict(side='left', padx=2, pady=9)
         self.more_btn.bind('<Button-1>', self.more_menu)
         self.more_btn.bind('<Enter>',
                            lambda e: (self.more_btn.configure(bg=T['card_h']),
@@ -126,6 +126,8 @@ class UiMixin:
         self.grip.bind('<ButtonPress-1>', self.start_resize)
         self.grip.bind('<B1-Motion>', self.do_resize)
         self.grip.lower()      # 拖动手柄在右下角，压住工具条按钮的话按钮就像"被遮住"了
+        # 窗口四周 6px 热区：四边 + 四角都能随意拉伸（不只右下角一个手柄）
+        self.bind_edge_resize()
         # 兜住"手滑拖到看不见"：折叠状态下不设下限，否则折不成 210x30
         if not getattr(self, 'collapsed', False):
             mw, mh = self.min_size()
@@ -157,12 +159,15 @@ class UiMixin:
         return f
 
     # 窗口不够宽时按优先级把次要按钮收进「⋯」溢出菜单（? 帮助和 ⚙ 设置永远直接可见，
-    # 删也跟着保留——有选中项时它是最高频的）。阈值是按算式推出来的，不是拍脑袋：
-    #   按钮 30px + padx 2 = 32px；搜索框要留 ≥120px（它是找历史的唯一入口）；
-    #   entry = W - 32*(可见按钮数 + 溢出按钮) - padx 12
-    #   W=380 放得下 7 个 → entry 144    W=356 放得下 6 个 → entry 152
-    #   W=324 放得下 5 个 → entry 152    W=280(MIN_W) 只剩 4 个 → entry 108，够用
-    TOOL_HIDE_AT = (('＋', 380), ('拆', 356), ('清', 324))
+    # 删也跟着保留——有选中项时它是最高频的）。阈值按算式推出来，不是拍脑袋：
+    #   按钮 30px + padx 2*2 = 34px；搜索框要留 ≥120px；entry padx 12px。
+    #   关键：收 1 个按钮进「⋯」不省空间（少一个普通按钮多一个 ⋯，总位数不变），
+    #   所以 ＋ 和 拆 必须同一阈值一起收，否则会出现"收了 1 个还是放不下"的尴尬档：
+    #   7 位（全显）      → W >= 34*7 + 12 + 120 = 370
+    #   6 位（收 ＋拆）    → W >= 34*6 + 12 + 120 = 336
+    #   5 位（收 ＋拆清）  → W >= 34*5 + 12 + 120 = 302
+    #   MIN_W=280 → 5 位 → entry 98，够输入（门槛 95）
+    TOOL_HIDE_AT = (('＋', 370), ('拆', 370), ('清', 336))
 
     def _layout_tool(self):
         """窄面板时把次要按钮收进「⋯」菜单，而不是让它们被压成残废。
@@ -211,13 +216,13 @@ class UiMixin:
                        self.more_btn.winfo_rooty() - 8)
 
     def mk_tool_btn(self, text, tip, cmd, menu_text=None):
-        # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示，靠 padx=1 省空间。
-        # 7 个按钮约占 224px；窄面板下由 _layout_tool 收进「⋯」菜单，
-        # 宁可挪走也不要留半个被压扁的按钮（用户看到的"被遮挡"）
+        # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示；padx=2 让按钮之间
+        # 有 4px 间距（padx=1 时 7 个按钮连成一坨，视觉上像被互相遮挡）。
+        # 窄面板下由 _layout_tool 收进「⋯」菜单，宁可挪走也不要挤扁
         b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
                      width=3, cursor='hand2')
-        # pady 让它垂直居中，不被工具条上下切掉；参数存一份给 _layout_tool 复原用
-        b._pack_args = dict(side='left', padx=1, pady=7)
+        # pady=9 垂直居中：TOOL_H 48 - 文字 25 - 9*2 = 5px 余量；参数存一份给 _layout_tool 复原
+        b._pack_args = dict(side='left', padx=2, pady=9)
         b._tip_text = tip                 # 悬停提示（可以长）
         b._menu_text = menu_text or tip   # 溢出菜单里的短文案
         b._tip_cmd = cmd

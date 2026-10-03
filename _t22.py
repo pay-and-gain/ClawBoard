@@ -81,8 +81,9 @@ check('窄面板记录了收起项', set(app._tool_hidden) == {'＋', '拆', '�
       str(app._tool_hidden))
 
 # ---------- 3. 最小宽度 280：搜索框仍可用 ----------
+# v1.5.1 按钮加大（34px/位）后，280 下 5 位占 182px，搜索框 98px —— 仍可输入
 setw(280)
-check('MIN_W 280 下搜索框 >= 100px', app.search_entry.winfo_width() >= 100,
+check('MIN_W 280 下搜索框 >= 95px', app.search_entry.winfo_width() >= 95,
       '%dpx' % app.search_entry.winfo_width())
 check('MIN_W 280 下无裁切', not clipped(), str(clipped()))
 
