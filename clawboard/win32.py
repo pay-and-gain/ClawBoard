@@ -493,3 +493,95 @@ def set_autostart(on):
         return True
     except Exception:
         return False
+
+
+# ---------------- 窗口外观：圆角 + Acrylic 毛玻璃 ----------------
+# 实验结论（本机 Win11 实测）：
+#   · 圆角 (DWMWA_WINDOW_CORNER_PREFERENCE=33) —— 有效，方角变圆角
+#   · Acrylic (SetWindowCompositionAttribute) —— 有效，窗口有毛玻璃底
+#   · Mica (DWMWA_SYSTEMBACKDROP_TYPE=38) —— 无效：overrideredirect 是 WS_POPUP，
+#     系统不给 Mica 背景（API 返回成功但视觉无变化）
+#   · 深色标题栏 —— 无意义（无边框窗口没有标题栏）
+# 重要：Tk 的 winfo_id() 是**子窗口**，DWM 属性必须设在**顶层窗口**上，
+#       对子窗口调用会返回 0x80070006（句柄无效）。
+_dwm = ctypes.windll.dwmapi
+
+DWMWA_WINDOW_CORNER_PREFERENCE = 33
+DWMWCP_DEFAULT = 0
+DWMWCP_DONOTROUND = 1
+DWMWCP_ROUND = 2
+
+u32.SetWindowCompositionAttribute.argtypes = [wintypes.HWND, ctypes.c_void_p]
+u32.SetWindowCompositionAttribute.restype = wintypes.BOOL
+WCA_ACCENT_POLICY = 19
+ACCENT_DISABLED = 0
+ACCENT_ENABLE_BLURBEHIND = 3
+ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
+
+
+class ACCENTPOLICY(ctypes.Structure):
+    _fields_ = [('AccentState', ctypes.c_int),
+                ('AccentFlags', ctypes.c_int),
+                ('GradientColor', ctypes.c_uint),   # 0xAABBGGRR（注意是 BGR）
+                ('AnimationId', ctypes.c_int)]
+
+
+class WINCOMPATTRDATA(ctypes.Structure):
+    _fields_ = [('Attribute', ctypes.c_int),
+                ('Data', ctypes.POINTER(ACCENTPOLICY)),
+                ('SizeOfData', ctypes.c_size_t)]
+
+
+def top_hwnd(root):
+    """取顶层窗口句柄。
+
+    Tk 的 winfo_id() 返回的是内部子窗口；DWM / 合成属性必须作用在顶层窗口上，
+    否则调用返回 0x80070006（ERROR_INVALID_HANDLE）。
+    """
+    try:
+        h = int(root.winfo_id())
+        p = u32.GetParent(wintypes.HWND(h))
+        return int(p) if p else h
+    except Exception:
+        return 0
+
+
+def set_rounded(root, on=True):
+    """窗口圆角。返回是否成功（老系统不支持时静默失败）。"""
+    try:
+        v = ctypes.c_int(DWMWCP_ROUND if on else DWMWCP_DONOTROUND)
+        hr = _dwm.DwmSetWindowAttribute(
+            wintypes.HWND(top_hwnd(root)),
+            ctypes.c_uint(DWMWA_WINDOW_CORNER_PREFERENCE),
+            ctypes.byref(v), ctypes.sizeof(v))
+        return hr == 0
+    except Exception:
+        return False
+
+
+def set_acrylic(root, on=True, color=0xB0252831):
+    """Acrylic 毛玻璃背景。
+
+    color 是 0xAABBGGRR（Alpha 在前、且是 BGR 顺序）。不透明窗口下只在外围
+    间隙露出模糊底；把窗口 -alpha 调低会整体变透（实测过 0.88 会太透，不建议）。
+    """
+    try:
+        accent = ACCENTPOLICY()
+        accent.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND if on else ACCENT_DISABLED
+        accent.AccentFlags = 2
+        accent.GradientColor = color
+        accent.AnimationId = 0
+        data = WINCOMPATTRDATA()
+        data.Attribute = WCA_ACCENT_POLICY
+        data.Data = ctypes.pointer(accent)
+        data.SizeOfData = ctypes.sizeof(accent)
+        return bool(u32.SetWindowCompositionAttribute(
+            wintypes.HWND(top_hwnd(root)), ctypes.byref(data)))
+    except Exception:
+        return False
+
+
+def apply_window_effects(root, rounded=True, frosted=True, frosted_color=0xB0252831):
+    """一次性应用窗口外观开关（圆角 + 毛玻璃）。返回 (圆角成功, 毛玻璃成功)。"""
+    return (set_rounded(root, rounded), set_acrylic(root, frosted, frosted_color))
+

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.5.3'
+APP_VER = '1.6.0'
 
 # frozen 时数据文件必须落在 exe 旁边（onefile 的临时目录退出即销毁）；
 # 脚本运行时 BASE_DIR 是本包目录的上一级（即项目根，与 ClawBoard.py 同目录）。
@@ -103,6 +103,11 @@ DEFAULT_SETTINGS.update(
     collapse_to_corner=True,   # 折叠时贴到屏幕右下角（留在原处太突兀）
     bg_color='',         # 自定义背景色，空=用主题默认
     ui_scale=1.0,        # UI 等比缩放档位（0.5/0.75/1.0/1.25/1.5）
+    rounded=True,        # 窗口圆角（Win11 质感，老系统自动静默忽略）
+    frosted=True,        # Acrylic 毛玻璃背景（观感依赖桌面壁纸，可在设置里关掉）
+    show_toast=True,     # 复制后弹出提示浮窗（行数/字符数 + 预览）
+    toast_ms=1800,       # 提示浮窗停留毫秒数
+    show_preview=True,   # 键盘浏览（↑↓）时在角落显示选中条目的完整内容
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
@@ -199,3 +204,6 @@ class AppState:
     _edge_pos: Optional[tuple] = None
     _rz_dir: Optional[str] = None         # 正在进行的边缘拉伸方向（'n'/'se'/…），None=没在拉
     _hover_dir: Optional[str] = None      # 鼠标悬停的边缘方向（用于光标切换）
+    _fx_supported: Optional[tuple] = None  # (圆角是否生效, 毛玻璃是否生效)，启动时探测一次
+    _pv_job: Optional[str] = None          # 角落预览的防抖定时器 id
+    _preview: Optional[object] = None      # 角落预览浮窗实例

@@ -67,6 +67,10 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
 
         self.build_ui()
         self.apply_geometry()
+        # 窗口外观（圆角 + 毛玻璃）必须等窗口真正建立后再设：太早调用 DWM 会
+        # 接受不了（读回圆角值仍是 0）。放在 geometry 之后、mainloop 之前。
+        self.root.update_idletasks()
+        self.apply_effects()
         self.save(True)      # 把修正后的位置立刻写回，避免下次启动又去纠正一遍
         self.setup_system()
         self.render()

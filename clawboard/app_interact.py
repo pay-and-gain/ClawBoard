@@ -21,7 +21,7 @@ from clawboard.classify import human_size, preview, to_plain
 from clawboard.timefmt import full_time, now_ms, rel_time
 from clawboard.clipboard import clip_read, clip_write
 from clawboard.win32 import force_foreground, send_ctrl_v
-from clawboard.widgets import Dialog, SplitDialog
+from clawboard.widgets import Dialog, SplitDialog, CopyToast, ContentPreview
 from clawboard.dialogs import SettingsWindow, TransformWindow, ExportDialog
 
 import query as Q          # F3 查询解析器（独立模块，可单测）
@@ -343,6 +343,7 @@ class InteractionMixin(PhraseMixin):
             self.sel_phrase = tgt
         self.vlist.sel = tgt
         self.vlist.scroll_to_index(nxt)
+        self.schedule_preview()      # 键盘浏览时在角落显示完整内容（防抖）
 
     def enter_sel(self):
         items = self.vlist.items
@@ -453,6 +454,59 @@ class InteractionMixin(PhraseMixin):
         body = '\n'.join('%-32s %s' % (a, b) for a, b in Q.SYNTAX_HELP)
         Dialog(self.root, '搜索语法', [('', body, True)],
                on_ok=lambda v: None, ok_text='知道了').show(540, 440)
+
+    def schedule_preview(self):
+        """选中变化后延迟显示角落预览（防抖：↑↓ 连按时不闪）。"""
+        if not self.st.get('show_preview', True):
+            return self.close_preview()
+        if getattr(self, '_pv_job', None):
+            try:
+                self.root.after_cancel(self._pv_job)
+            except Exception:
+                pass
+        self._pv_job = self.root.after(320, self._preview_now)
+
+    def _preview_now(self):
+        self._pv_job = None
+        self.close_preview()
+        try:
+            text, it = self.current_target_text()
+        except Exception:
+            return
+        if not text:
+            return
+        kind = (it or {}).get('kind_auto') or 'text'
+        meta = '%d 字符' % len(text)
+        try:
+            self._preview = ContentPreview(self, text, kind, meta)
+        except Exception:
+            self._preview = None
+
+    def close_preview(self):
+        p = getattr(self, '_preview', None)
+        if p:
+            try:
+                p.close()
+            except Exception:
+                pass
+            self._preview = None
+
+    def show_copy_toast(self, text):
+        """复制提示浮窗：写明行数/字符数 + 内容预览，淡入淡出、不抢焦点。
+
+        借鉴剪藏（wincpl）的果冻提示。可在设置里关掉（show_toast）。
+        """
+        try:
+            t = (text or '').strip()
+            if not t:
+                return
+            lines = t.count('\n') + 1
+            chars = len(t)
+            prev = preview(t, 42)
+            CopyToast(self, lines, chars, prev,
+                      ms=int(self.st.get('toast_ms') or 1800))
+        except Exception:
+            pass
 
     # ---------- F4 变换 / F5 导出 ----------
     def current_target_text(self):

@@ -15,10 +15,28 @@ from clawboard import runtime
 from clawboard.config import (BAR_H, MIN_W, MIN_H, RESIZE_ZONE,
                               UI_SCALE_LEVELS, scaled)
 from clawboard.theme import T, apply_theme
-from clawboard.win32 import u32, monitors, dpi_scale, visible_ratio
+from clawboard.win32 import (u32, monitors, dpi_scale, visible_ratio,
+                             apply_window_effects)
 
 
 class GeometryMixin:
+    # ---------- 窗口外观（圆角 + 毛玻璃）----------
+    def apply_effects(self):
+        """应用窗口外观开关（圆角 / Acrylic 毛玻璃）。
+
+        启动时调一次；用户在设置里切换开关后也会调。
+        老系统或不支持的环境下静默失败（不弹错、不影响功能）。
+        """
+        try:
+            r, f = apply_window_effects(
+                self.root,
+                rounded=bool(self.st.get('rounded', True)),
+                frosted=bool(self.st.get('frosted', True)),
+            )
+            self._fx_supported = (r, f)
+        except Exception:
+            self._fx_supported = (False, False)
+
     # ---------- UI 等比缩放 ----------
     def apply_ui_scale_init(self):
         """启动时：记录真实 DPI 的 tk scaling，并应用存档里的 UI 缩放档位。
@@ -375,6 +393,7 @@ class GeometryMixin:
         return max(l + 2, r - w - 14), max(t + 2, b - h - 62)
 
     def toggle_collapse(self):
+        self.close_preview()         # 折叠时角落预览一并收起
         self.collapsed = not self.collapsed
         # 折叠状态要跟着存盘：不然折叠着退出后，存档里剩下折叠尺寸，
         # 重启就成了"窗口是折叠大小、程序却以为自己展开着"
@@ -407,6 +426,7 @@ class GeometryMixin:
 
     def hide(self):
         """关闭按钮 / Esc：默认隐藏到托盘并气泡告知，也可在设置里改成直接退出"""
+        self.close_preview()         # 角落预览跟着一起收
         self.save()
         self.set_num_hint(False)     # 面板藏起来时，Ctrl 的 KeyRelease 可能收不到
         if self.st.get('close_action') == 'quit':

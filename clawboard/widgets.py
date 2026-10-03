@@ -8,7 +8,7 @@
 import re
 import tkinter as tk
 
-from clawboard.config import FONT, FONT_B, FONT_SM, WHEEL_LINES
+from clawboard.config import FONT, FONT_B, FONT_SM, FONT_MONO, WHEEL_LINES
 from clawboard.theme import T
 from clawboard.runtime import uid
 from clawboard.classify import preview
@@ -422,3 +422,172 @@ class ScrollFrame(tk.Frame):
         self._acc -= steps
         self.canvas.yview_scroll(-steps * WHEEL_LINES, 'units')
         return 'break'
+
+
+class CopyToast:
+    """复制提示浮窗（借鉴剪藏的果冻提示）。
+
+    复制内容后在屏幕角落弹一个小卡片：写明行数 / 字符数 + 内容预览，
+    淡入 → 停留 → 淡出，全程**不抢焦点**、不打断正在做的事。
+    面板正好占着右下角时自动改到左下角，避免遮挡（剪藏同款处理）。
+    """
+
+    W, H = 300, 84
+    GAP = 12
+
+    def __init__(self, app, lines, chars, text, ms=1800):
+        self.app = app
+        self.ms = ms
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes('-topmost', True)
+        self.win.attributes('-alpha', 0.0)          # 从全透明开始淡入
+        self.win.configure(bg=T['line'])
+        box = tk.Frame(self.win, bg=T['panel'])
+        box.pack(fill='both', expand=True, padx=1, pady=1)
+        head = tk.Frame(box, bg=T['panel'])
+        head.pack(fill='x', padx=10, pady=(8, 0))
+        tk.Label(head, text='已复制', bg=T['panel'], fg=T['acc'],
+                 font=FONT_B).pack(side='left')
+        tk.Label(head, text='%d 行 · %d 字符' % (lines, chars), bg=T['panel'],
+                 fg=T['fg2'], font=FONT_SM).pack(side='right')
+        tk.Label(box, text=text, bg=T['panel'], fg=T['fg'], font=FONT_SM,
+                 anchor='w', justify='left').pack(fill='x', padx=10, pady=(4, 8))
+        x, y = self._pos()
+        self.win.geometry('%dx%d+%d+%d' % (self.W, self.H, x, y))
+        self._fade_in(0.0)
+
+    def _pos(self):
+        """默认贴窗口所在屏幕的右下角；那儿被面板占着就改左下角。"""
+        try:
+            x, y = self.app.corner_pos(self.W, self.H)
+        except Exception:
+            x = self.win.winfo_screenwidth() - self.W - self.GAP
+            y = self.win.winfo_screenheight() - self.H - 62
+        try:
+            if not self.app.collapsed and not self.app.hidden:
+                r = self.app.root
+                if (abs(r.winfo_x() - x) < self.W + 20
+                        and abs(r.winfo_y() - y) < self.H + 20):
+                    x = 12                            # 面板在右下角 → 让到左下角
+        except Exception:
+            pass
+        return x, y
+
+    def _fade_in(self, a):
+        a = min(0.96, a + 0.16)
+        try:
+            self.win.attributes('-alpha', a)
+        except Exception:
+            return self._close()
+        if a < 0.96:
+            self.win.after(16, lambda: self._fade_in(a))
+        else:
+            self.win.after(self.ms, lambda: self._fade_out(0.96))
+
+    def _fade_out(self, a):
+        a -= 0.16
+        try:
+            self.win.attributes('-alpha', max(0.0, a))
+        except Exception:
+            return self._close()
+        if a > 0:
+            self.win.after(16, lambda: self._fade_out(a))
+        else:
+            self._close()
+
+    def _close(self):
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+
+
+class ContentPreview:
+    """选中即预览：在屏幕角落显示条目的**完整内容**。
+
+    借鉴剪藏（wincpl）的"角落完整预览"。面板里列表只显示截断的预览，
+    想看全文得右键；这里选中就直接在角落给出全文，长文本可滚动，
+    代码 / JSON 用等宽字体并保留缩进。
+
+    只读展示，不抢焦点；面板收起或隐藏时由 app 负责销毁。
+    """
+
+    W, H = 460, 340
+    GAP = 12
+
+    def __init__(self, app, text, kind='text', meta=''):
+        self.app = app
+        self.win = tk.Toplevel(app.root)
+        self.win.overrideredirect(True)
+        self.win.attributes('-topmost', True)
+        self.win.attributes('-alpha', 0.0)
+        self.win.configure(bg=T['line'])
+        box = tk.Frame(self.win, bg=T['panel'])
+        box.pack(fill='both', expand=True, padx=1, pady=1)
+        head = tk.Frame(box, bg=T['panel'])
+        head.pack(fill='x', padx=10, pady=(8, 4))
+        tk.Label(head, text='完整内容', bg=T['panel'], fg=T['acc'],
+                 font=FONT_B).pack(side='left')
+        if meta:
+            tk.Label(head, text=meta, bg=T['panel'], fg=T['fg2'],
+                     font=FONT_SM).pack(side='right')
+        # 文本区：只读 Text + 细滚动条（固定尺寸先 pack，见坑①）
+        wrap = tk.Frame(box, bg=T['panel'])
+        wrap.pack(fill='both', expand=True, padx=8, pady=(0, 8))
+        mono = kind in ('code', 'json')
+        self.txt = tk.Text(wrap, bg=T['card'], fg=T['fg'], bd=0, relief='flat',
+                           wrap='none' if mono else 'word',
+                           font=(FONT_MONO if mono else FONT),
+                           insertbackground=T['fg'], highlightthickness=0)
+        # 先 pack 滚动条占位，否则会被 Text 的 expand 挤成 1px（坑①）
+        bar = ThinBar(wrap, lambda f: self.txt.yview_moveto(f), width=8,
+                      on_wheel=self._wheel)
+        bar.pack(side='right', fill='y', padx=(4, 0))
+        self.txt.configure(yscrollcommand=bar.set)
+        self.txt.pack(side='left', fill='both', expand=True)
+        self.txt.insert('1.0', text or '')
+        self.txt.configure(state='disabled')
+        self.txt.bind('<MouseWheel>', self._wheel)
+        x, y = self._pos()
+        self.win.geometry('%dx%d+%d+%d' % (self.W, self.H, x, y))
+        self._fade_in(0.0)
+
+    def _wheel(self, e):
+        try:
+            self.txt.yview_scroll(-3 if e.delta > 0 else 3, 'units')
+        except Exception:
+            pass
+        return 'break'
+
+    def _pos(self):
+        """贴面板的另一侧角落，避免遮住面板自己。"""
+        try:
+            r = self.app.root
+            rl, rt = r.winfo_x(), r.winfo_y()
+            rr, rb = rl + r.winfo_width(), rt + r.winfo_height()
+            sw = self.win.winfo_screenwidth()
+            sh = self.win.winfo_screenheight()
+            # 面板在左半屏 → 预览放右下；否则放左下
+            if rl + r.winfo_width() // 2 < sw // 2:
+                return sw - self.W - self.GAP, sh - self.H - 62
+            return self.GAP, sh - self.H - 62
+        except Exception:
+            return 12, 12
+
+    def _fade_in(self, a):
+        a = min(0.96, a + 0.2)
+        try:
+            self.win.attributes('-alpha', a)
+        except Exception:
+            return
+        if a < 0.96:
+            self.win.after(14, lambda: self._fade_in(a))
+
+    def close(self):
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
+
+

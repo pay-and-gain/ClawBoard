@@ -49,6 +49,12 @@ class SettingsWindow:
         self.row_close_action(body)
         self.row_theme(body)
         self.row_bgcolor(body)
+        self.row_switch(body, '窗口圆角（Win11 质感）', 'rounded',
+                        after=self.app.apply_effects)
+        self.row_switch(body, '毛玻璃背景（Acrylic，观感依赖桌面壁纸）', 'frosted',
+                        after=self.app.apply_effects)
+        self.row_switch(body, '复制后弹出提示（行数/字符数）', 'show_toast')
+        self.row_switch(body, '键盘浏览时角落显示完整内容', 'show_preview')
         self.row_ui_scale(body)
         self.row_switch(body, '折叠时贴到屏幕右下角', 'collapse_to_corner')
         self.row_hotkey(body)
@@ -232,7 +238,7 @@ class SettingsWindow:
         lb.bind('<Button-1>', menu)
         paint()
 
-    def row_switch(self, master, text, key):
+    def row_switch(self, master, text, key, after=None):
         r = tk.Frame(master, bg=T['bg'])
         r.pack(fill='x', pady=3)
         tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(side='left')
@@ -250,6 +256,11 @@ class SettingsWindow:
             st[key] = not st.get(key)
             paint()
             self.app.save(True)
+            if after:                     # 需要立即生效的开关（如圆角/毛玻璃外观）
+                try:
+                    after()
+                except Exception:
+                    pass
         lb.bind('<Button-1>', toggle)
         paint()
 

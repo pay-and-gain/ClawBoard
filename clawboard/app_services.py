@@ -266,6 +266,9 @@ class DataMixin:
         self.save(True)
         if self.tab == 'clip':
             self.render()
+        # 复制提示浮窗（手动添加如拆词/变换不弹）
+        if not manual and self.st.get('show_toast', True):
+            self.show_copy_toast(txt)
 
     def _late_source(self, rid):
         """后台补抓来源：竞态下第一次可能抓到自己或抓空，50ms 后再试一次"""
