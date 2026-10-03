@@ -1,0 +1,6 @@
+OK    D1 纯文本仍被 ingest 且内容一致  ingested=[{'text': '这是一段普通文本 QA-text-123', 'hits': []}]
+OK    D2 敏感词 skip=False → ingest 且 hits 含手机号  ingested=[{'text': '联系方式 13800138000 请惠存', 'hits': ['手机号']}]
+OK    D3 敏感词 skip=True → 不入库，仅提示  ingested=[] tips=['检测到密码，按设置不入库']
+OK    D4 含敏感数字的文本路径正常入库  ingested=[{'text': 'C:\\data\\13800138000.jpg', 'hits': ['手机号']}]
+
+全部通过

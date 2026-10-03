@@ -1,0 +1,9 @@
+OK    B1 单个短英文路径往返一致  got=['C:\\a\\b.txt']
+OK    B2 多路径（中文+空格+emoji）往返一致  got=['C:\\Users\\pay and gain\\Desktop\\剪切板\\clawboard\\clipboard.py', 'C:\\Program Files\\My App\\with space.jpg', 'D:\\emoji😀目录\\图片 📷 合集\\照片 emoji.png']
+OK    B3 超长路径往返一致  len=340 got_len=[340]
+OK    B4 无 CF_HDROP（文本）返回 []  wrote=True got=[]
+OK    B5 多文件 poll_clip → 单条 ingest，\n 连接  write=True ingested=[{'text': 'C:\\q\\one.jpg\nD:\\two png\\带 空格.png\nE:\\三\\three.jpg', 'hits': [], 'manual': False}]
+OK    B6 单文件 poll_clip → ingest 该路径  write=True ingested=[{'text': 'C:\\only\\单文件.txt', 'hits': [], 'manual': False}]
+OK    B7 监听关闭 → 不 ingest（原语义不变）  ingested=[]
+
+全部通过
