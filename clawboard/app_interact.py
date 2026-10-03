@@ -5,7 +5,8 @@ PhraseMixin：add_phrase / save_as_phrase / push_phrase / edit_phrase / rename_p
              find / find_raw_item / split_words。
 InteractionMixin：on_click_item / on_menu_item / on_hover_item / toggle_fav / show_detail /
              toggle_sens / set_num_hint / quick_paste / trim_for_paste / paste /
-             _ensure_visible / _paste_worker / paste_plain_sel / paste_plain / move_sel /
+             _paste_message_worker / _restore_topmost / _paste_worker / paste_plain_sel /
+             paste_plain / move_sel /
              enter_sel / del_item / del_sel / clear_list / open_settings /
              on_search_return / search_menu / clear_history / select_all_visible /
              open_query_help / current_target_text / open_transform / open_export。
@@ -20,7 +21,8 @@ from clawboard.runtime import uid
 from clawboard.classify import human_size, preview, to_plain
 from clawboard.timefmt import full_time, now_ms, rel_time
 from clawboard.clipboard import clip_read, clip_write
-from clawboard.win32 import force_foreground, send_ctrl_v
+from clawboard.win32 import (force_foreground, send_ctrl_v,
+                             paste_message, can_paste_message)
 from clawboard.widgets import Dialog, SplitDialog, CopyToast, ContentPreview
 from clawboard.dialogs import SettingsWindow, TransformWindow, ExportDialog
 
@@ -271,19 +273,29 @@ class InteractionMixin(PhraseMixin):
             return False
         if (self.st['autopaste'] or force) and not self.hidden:
             hwnd = self.prev_hwnd
-            self.root.withdraw()
-            self.root.update()
-            threading.Thread(target=self._paste_worker, args=(hwnd,), daemon=True).start()
-            # 保险：万一后台线程没来得及恢复，1.5 秒后强制把面板叫回来
-            self.root.after(1500, self._ensure_visible)
+            # 视觉反馈：只闪被粘贴的那条，整窗不动
+            if cid:
+                self.vlist.flash(cid)
+            if can_paste_message(hwnd):
+                # 标准编辑控件（记事本/Word 等）：WM_PASTE 直接投递，
+                # 面板完全不参与焦点切换、不消失、不关置顶。
+                threading.Thread(target=self._paste_message_worker,
+                                 args=(hwnd,), daemon=True).start()
+            else:
+                # 浏览器 / Electron / UWP 等自绘控件：只能抢焦点 + Ctrl+V。
+                # 面板不 withdraw（不闪），只临时关置顶让目标窗口露出来；
+                # 粘完由 _paste_worker 恢复置顶。
+                self.root.attributes('-topmost', False)
+                threading.Thread(target=self._paste_worker, args=(hwnd,), daemon=True).start()
         return True
 
-    def _ensure_visible(self):
-        if not self.hidden and self.root.state() == 'withdrawn':
-            self.root.deiconify()
+    def _paste_message_worker(self, hwnd):
+        """WM_PASTE 投递线程：不抢焦点，面板全程不动。"""
+        paste_message(hwnd)
+
+    def _restore_topmost(self):
+        if not self.hidden:
             self.root.attributes('-topmost', True)
-            if not self.ensure_onscreen():
-                self.render()
 
     def _paste_worker(self, hwnd):
         """把焦点还给原窗口，再模拟 Ctrl+V。
@@ -301,8 +313,9 @@ class InteractionMixin(PhraseMixin):
         except Exception:
             ok = False
         time.sleep(0.12)
-        self._need_show = True
         self._paste_fail = not ok
+        # 面板没 withdraw，粘完恢复置顶即可（主线程里操作）
+        self.root.after(0, self._restore_topmost)
 
     def paste_plain_sel(self):
         items = self.vlist.items

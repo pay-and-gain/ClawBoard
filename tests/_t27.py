@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""v1.6.1 自测：数据目录选址（便携优先 / Program Files 回退 APPDATA）
+"""v1.6.2 自测：数据目录选址（便携优先 / Program Files 回退 APPDATA）
 
 背景：v1.6.0 之前 frozen 模式的 BASE_DIR 恒等于 exe 同目录。装到
 C:\\Program Files 后普通用户写不进去，save() 静默失败（只在 crash.log 里

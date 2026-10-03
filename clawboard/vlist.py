@@ -212,6 +212,41 @@ class VirtualList(tk.Frame):
         f._l2.configure(bg=c)
         f._badge.configure(bg=c)
 
+    def _find(self, cid):
+        """按 id 找到可视区里对应的卡片（滚出可视区的条目没有 widget，返回 None）。"""
+        for i, it in enumerate(self.items):
+            if it.get('id') == cid:
+                return self.pool.get(i)
+        return None
+
+    def flash(self, cid, times=3, gap=140):
+        """让某条卡片快速闪几下作为反馈（粘贴/收藏等），不整窗闪。
+
+        只改背景色、不碰选中态：base 取「选中/普通」色，闪烁期间在强调色与
+        base 之间来回切，最后停在 base。条目被滚出可视区（_find 返回 None）时
+        闪烁自然终止，不会有悬挂的 after。"""
+        f = self._find(cid)
+        if f is None:
+            return
+        base = T['card_s'] if cid == self.sel else T['card']
+        flash_c = T['acc']
+
+        def tick(remaining):
+            f2 = self._find(cid)
+            if f2 is None or remaining <= 0:
+                return
+            self._paint(f2, flash_c)
+            self.after(gap, lambda r=remaining: tock(r))
+
+        def tock(remaining):
+            f2 = self._find(cid)
+            if f2 is not None:
+                self._paint(f2, base)
+            if remaining > 1:
+                self.after(gap, lambda r=remaining: tick(r - 1))
+
+        tick(times)
+
     def _hover(self, i, on):
         f = self.pool.get(i)
         if not f or not (0 <= i < len(self.items)):
