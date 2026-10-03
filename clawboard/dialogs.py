@@ -55,6 +55,8 @@ class SettingsWindow:
                         after=self.app.apply_effects)
         self.row_switch(body, '复制后弹出提示（行数/字符数）', 'show_toast')
         self.row_switch(body, '键盘浏览时角落显示完整内容', 'show_preview')
+        self.row_switch(body, '触发词快速粘贴（在常用语里设触发词，如 dz→地址）',
+                        'trigger_enabled', after=self.app.apply_trigger_setting)
         self.row_ui_scale(body)
         self.row_switch(body, '折叠时贴到屏幕右下角', 'collapse_to_corner')
         self.row_hotkey(body)

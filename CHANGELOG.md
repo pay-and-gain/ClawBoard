@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v1.8.0 · 触发词快速粘贴（① 快赢）
+
+给常用语设一个短触发词（如地址设 `dz`），在设置里打开「触发词快速粘贴」后，任何程序输入
+`dz` 加空格/回车/标点，自动替换成完整内容——不用再唤面板、翻列表、点条目。
+
+技术实现（零依赖，纯标准库 + ctypes）：
+- `clawboard/trigger.py`：TriggerEngine 纯逻辑。维护输入缓冲区，末尾命中「触发词 + 分隔符」
+  且触发词前是词边界才触发；长触发词优先、退格同步缓冲区。可单测。
+- `clawboard/win32.py`：`start_keyboard_hook` 用 WH_KEYBOARD_LL 全局低级键盘钩子 + 独立线程
+  消息循环；`vk_to_char` 把 vkCode 转字符（美式键盘 + Shift/CapsLock）；`send_backspaces`。
+- `app_services.py`：`setup_trigger` / `_trigger_worker` / `apply_trigger_setting`。
+  匹配到后独立线程执行「退格删触发词+分隔符 → 写剪贴板 → Ctrl+V」，退出时卸载钩子。
+- 常用语新增 `trigger` 字段（新建/编辑对话框加「触发词」输入），设置里加开关（默认关）。
+
+注意：触发词基于物理按键字符，中文输入法下请切英文模式输入；替换文本通过剪贴板+粘贴，
+不污染历史（clip_write 同步 LAST_SEQ）。
+
+新增 `tests/_t31.py`（13 项）。技术验证：钩子能捕获按键、字符转换正确、全链路匹配通过。
+
 ## v1.7.0 · 命令面板（① 快赢）
 
 新增「命令面板」：热键 `Ctrl+Shift+P` 呼出居中浮层，输入命令名模糊过滤（大小写不敏感、

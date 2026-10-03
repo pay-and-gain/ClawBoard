@@ -12,7 +12,7 @@
 ;      先问一下，选「是」才连 %APPDATA%\ClawBoard 一起删，默认保留。
 
 #define MyAppName "ClawBoard"
-#define MyAppVersion "1.7.0"
+#define MyAppVersion "1.8.0"
 #define MyAppPublisher "ClawBoard"
 #define MyAppURL "https://github.com/pay-and-gain/ClawBoard"
 #define MyAppExeName "ClawBoard.exe"

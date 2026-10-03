@@ -37,24 +37,28 @@ class PhraseMixin:
         init = clip_read() or ''
 
         def done(v):
-            if v and v[1].strip():
-                self.push_phrase(v[0].strip(), v[1])
+            if v and v[2].strip():
+                self.push_phrase(v[0].strip(), v[2], (v[1] or '').strip())
         Dialog(self.root, '新增常用语',
-               [('名称（可留空）', '', False), ('内容', init, True)], on_ok=done).show(400, 300)
+               [('名称（可留空）', '', False), ('触发词（可留空）', '', False),
+                ('内容', init, True)], on_ok=done).show(400, 340)
 
     def save_as_phrase(self, text):
         def done(v):
-            if v and v[1].strip():
-                self.push_phrase(v[0].strip(), v[1])
+            if v and v[2].strip():
+                self.push_phrase(v[0].strip(), v[2], (v[1] or '').strip())
         Dialog(self.root, '存为常用语',
-               [('名称（可留空）', preview(text, 20), False), ('内容', text, True)],
-               on_ok=done).show(400, 300)
+               [('名称（可留空）', preview(text, 20), False), ('触发词（可留空）', '', False),
+                ('内容', text, True)], on_ok=done).show(400, 340)
 
-    def push_phrase(self, name, text):
-        self.cur_group()['items'].insert(0, {'id': uid(), 'name': name, 'text': text})
+    def push_phrase(self, name, text, trigger=''):
+        self.cur_group()['items'].insert(0, {'id': uid(), 'name': name, 'text': text,
+                                             'trigger': trigger})
         self.save(True)
         self.tab = 'phrase'
         self.render()
+        if hasattr(self, '_trigger_engine'):
+            self._refresh_triggers()
 
     def edit_phrase(self, cid):
         it = self.find(cid, 'phrase')
@@ -64,9 +68,14 @@ class PhraseMixin:
         def done(v):
             if v and v[0].strip():
                 it['text'] = v[0]
+                it['trigger'] = (v[1] or '').strip()
                 self.save(True)
                 self.render()
-        Dialog(self.root, '编辑内容', [('内容', it['text'], True)], on_ok=done).show(400, 240)
+                if hasattr(self, '_trigger_engine'):
+                    self._refresh_triggers()
+        Dialog(self.root, '编辑内容',
+               [('内容', it['text'], True), ('触发词（可留空）', it.get('trigger') or '', False)],
+               on_ok=done).show(400, 280)
 
     def rename_phrase(self, cid):
         it = self.find(cid, 'phrase')

@@ -284,6 +284,12 @@ def send_ctrl_v():
     send_key(VK_CONTROL, up=True, gap=0)
 
 
+def send_backspaces(n, gap=0.018):
+    """连发 n 次退格（触发词替换：删掉刚输入的触发词 + 分隔符）。"""
+    for _ in range(max(0, int(n))):
+        send_key(VK_BACK, gap=gap)
+
+
 # ---------------- WM_PASTE 直接投递（面板不用让位、不抢焦点） ----------------
 WM_PASTE = 0x0302
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -758,4 +764,137 @@ def set_acrylic(root, on=True, color=0xB0252831):
 def apply_window_effects(root, rounded=True, frosted=True, frosted_color=0xB0252831):
     """一次性应用窗口外观开关（圆角 + 毛玻璃）。返回 (圆角成功, 毛玻璃成功)。"""
     return (set_rounded(root, rounded), set_acrylic(root, frosted, frosted_color))
+
+
+# ---------------- 全局键盘钩子（触发词监听） ----------------
+import threading
+
+WH_KEYBOARD_LL = 13
+WM_KEYDOWN = 0x0100
+WM_KEYUP = 0x0101
+WM_SYSKEYDOWN = 0x0104
+WM_SYSKEYUP = 0x0105
+
+VK_BACK = 0x08
+VK_TAB = 0x09
+VK_RETURN = 0x0D
+VK_SPACE = 0x20
+VK_CAPITAL = 0x14
+
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [('vkCode', wintypes.DWORD), ('scanCode', wintypes.DWORD),
+                ('flags', wintypes.DWORD), ('time', wintypes.DWORD),
+                ('dwExtraInfo', ctypes.c_void_p)]
+
+
+HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM,
+                              wintypes.LPARAM)
+
+u32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE,
+                                  wintypes.DWORD]
+u32.SetWindowsHookExW.restype = ctypes.c_void_p
+u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM,
+                               wintypes.LPARAM]
+u32.CallNextHookEx.restype = ctypes.c_ssize_t
+u32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+u32.UnhookWindowsHookEx.restype = wintypes.BOOL
+u32.GetKeyState.argtypes = [ctypes.c_int]
+u32.GetKeyState.restype = ctypes.c_short
+
+
+# 美式键盘 OEM 键到字符（无 Shift 时）
+_OEM_BASE = {0xBC: ',', 0xBE: '.', 0xBD: '-', 0xBA: ';', 0xBF: '/',
+             0xDE: "'", 0xDC: '\\', 0xC0: '`', 0xDB: '[', 0xDD: ']', 0xBB: '='}
+# 有 Shift 时（数字键的符号 + OEM 键上档）
+_OEM_SHIFT = {0xBC: '<', 0x30: ')', 0x31: '!', 0x32: '@', 0x33: '#', 0x34: '$',
+              0x35: '%', 0x36: '^', 0x37: '&', 0x38: '*', 0x39: '(', 0xBE: '>',
+              0xBD: '_', 0xBA: ':', 0xBF: '?', 0xDE: '"', 0xDC: '|',
+              0xC0: '~', 0xDB: '{', 0xDD: '}', 0xBB: '+'}
+
+
+def vk_to_char(vk, shift, caps):
+    """vkCode → 字符（美式键盘简化映射）。返回 '' 表示无法识别。"""
+    if 0x30 <= vk <= 0x39:                  # 数字 0-9
+        return _OEM_SHIFT.get(vk) if shift else chr(vk)
+    if 0x41 <= vk <= 0x5A:                  # 字母 A-Z
+        upper = bool(shift) != bool(caps)   # Shift 与 CapsLock 异或决定大小写
+        c = chr(vk)
+        return c if upper else c.lower()
+    if vk == VK_SPACE:
+        return ' '
+    if vk == VK_TAB:
+        return '\t'
+    if vk == VK_RETURN:
+        return '\n'
+    if vk in _OEM_BASE:
+        return _OEM_SHIFT.get(vk) if shift else _OEM_BASE[vk]
+    return ''
+
+
+_hook = None
+_hook_cb = None
+_hook_stop = None
+_hook_thread = None
+
+
+def start_keyboard_hook(on_char, on_backspace):
+    """启动全局低级键盘钩子（WH_KEYBOARD_LL）。
+
+    on_char(ch)：普通字符键按下时回调（单字符 str）
+    on_backspace()：退格按下时回调
+
+    回调在钩子的消息循环线程被调用，不能在里面做耗时操作——把事件转交给
+    主线程（塞进 queue.Queue，主线程轮询消费）即可。返回是否设置成功。
+    """
+    global _hook, _hook_cb, _hook_stop, _hook_thread
+    if _hook:
+        return True
+
+    @HOOKPROC
+    def _cb(nCode, wParam, lParam):
+        if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
+            kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            vk = kb.vkCode
+            if vk == VK_BACK:
+                on_backspace()
+            else:
+                shift = bool(u32.GetKeyState(VK_SHIFT) & 0x8000)
+                caps = bool(u32.GetKeyState(VK_CAPITAL) & 0x0001)
+                ch = vk_to_char(vk, shift, caps)
+                if ch:
+                    on_char(ch)
+        return u32.CallNextHookEx(None, nCode, wParam, lParam)
+
+    _hook_cb = _cb
+    _hook = u32.SetWindowsHookExW(WH_KEYBOARD_LL, _cb, k32.GetModuleHandleW(None), 0)
+    if not _hook:
+        return False
+
+    _hook_stop = threading.Event()
+
+    def _loop():
+        msg = wintypes.MSG()
+        while not _hook_stop.is_set():
+            if u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                u32.TranslateMessage(ctypes.byref(msg))
+                u32.DispatchMessageW(ctypes.byref(msg))
+
+    _hook_thread = threading.Thread(target=_loop, daemon=True)
+    _hook_thread.start()
+    return True
+
+
+def stop_keyboard_hook():
+    """卸载键盘钩子、停止消息循环线程。"""
+    global _hook, _hook_cb, _hook_stop, _hook_thread
+    if _hook:
+        u32.UnhookWindowsHookEx(_hook)
+        _hook = None
+    if _hook_stop:
+        _hook_stop.set()
+        u32.PostQuitMessage(0)
+    _hook_cb = None
+    _hook_stop = None
+    _hook_thread = None
 

@@ -9,6 +9,7 @@ import json
 import os
 import time
 import threading
+import queue
 import tkinter as tk
 
 from clawboard import runtime
@@ -23,8 +24,10 @@ from clawboard.timefmt import now_ms, match_ignore, backup_data, migrate
 from clawboard.win32 import (
     u32, MOD_CONTROL, MOD_SHIFT, MOD_ALT, VK_V, VK_CONTROL,
     capture_source, window_title_of,
+    start_keyboard_hook, stop_keyboard_hook, send_backspaces, send_ctrl_v,
 )
-from clawboard.clipboard import clip_seq, clip_read, clip_is_private, scan_sensitive
+from clawboard.clipboard import clip_seq, clip_read, clip_is_private, scan_sensitive, clip_write
+from clawboard.trigger import TriggerEngine
 from clawboard.hotkey import HiddenWindow
 from clawboard.widgets import Dialog
 
@@ -304,6 +307,64 @@ class SystemMixin:
         if not self.hw.tray_add():
             self.note('托盘图标添加失败')
         self.apply_hotkey()
+        self.setup_trigger()
+
+    def setup_trigger(self):
+        """启动触发词监听（若设置开启）。全局键盘钩子在独立线程跑消息循环。"""
+        if not self.st.get('trigger_enabled'):
+            return
+        self._trigger_engine = TriggerEngine()
+        self._trigger_q = queue.Queue()
+        self._refresh_triggers()
+
+        def on_char(ch):
+            r = self._trigger_engine.feed(ch)
+            if r:
+                self._trigger_q.put(r)
+
+        def on_backspace():
+            self._trigger_engine.feed_backspace()
+
+        if start_keyboard_hook(on_char, on_backspace):
+            n = len(self._trigger_engine.triggers)
+            self.note('触发词监听已启动（%d 个触发词）' % n)
+            if n:
+                threading.Thread(target=self._trigger_worker, daemon=True).start()
+        else:
+            self.note('触发词监听启动失败')
+
+    def _trigger_worker(self):
+        """独立线程：消费触发事件，执行替换（退格 + 剪贴板 + Ctrl+V）。"""
+        while True:
+            trig, repl = self._trigger_q.get()
+            try:
+                time.sleep(0.05)                    # 等分隔符的 keydown/keyup 收尾
+                send_backspaces(len(trig) + 1)      # 删掉 触发词 + 分隔符
+                time.sleep(0.03)
+                clip_write(repl)
+                send_ctrl_v()
+            except Exception as e:
+                self.note('触发词替换失败：%s' % e)
+
+    def _refresh_triggers(self):
+        """从常用语收集触发词映射 {触发词: 内容}。"""
+        trigs = {}
+        for g in self.data.get('groups', []):
+            for it in g.get('items', []):
+                t = (it.get('trigger') or '').strip()
+                if t:
+                    trigs[t] = it.get('text') or ''
+        self._trigger_engine.set_triggers(trigs)
+
+    def apply_trigger_setting(self):
+        """触发词开关切换后调用：开 → 启动钩子，关 → 卸载钩子。"""
+        if self.st.get('trigger_enabled'):
+            self.setup_trigger()
+        else:
+            try:
+                stop_keyboard_hook()
+            except Exception:
+                pass
 
     def apply_hotkey(self):
         table = {'ctrl+shift+v': (MOD_CONTROL | MOD_SHIFT, VK_V),
@@ -413,6 +474,10 @@ class SystemMixin:
     def quit_app(self):
         # 记一条：事后才能区分「用户正常退出」和「进程被外部杀掉」（后者不会留下任何痕迹）
         self.note('用户触发退出（托盘 / Ctrl+Q / 设置里的退出按钮）')
+        try:
+            stop_keyboard_hook()
+        except Exception:
+            pass
         try:
             self.hw.unreg_hotkey()
             self.hw.tray_del()

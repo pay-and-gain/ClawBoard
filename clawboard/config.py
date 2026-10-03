@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.7.0'
+APP_VER = '1.8.0'
 
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
@@ -144,6 +144,7 @@ DEFAULT_SETTINGS.update(
     show_toast=True,     # 复制后弹出提示浮窗（行数/字符数 + 预览）
     toast_ms=1800,       # 提示浮窗停留毫秒数
     show_preview=True,   # 键盘浏览（↑↓）时在角落显示选中条目的完整内容
+    trigger_enabled=False,  # 触发词快速粘贴（全局键盘钩子，默认关，需手动开启）
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
