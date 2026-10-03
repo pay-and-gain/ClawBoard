@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClawBoard — 悬浮剪贴板 & 常用语面板</title>
+<style>
+  :root {
+    --bg: #1e2027; --panel: #252831; --card: #2c303b; --card-h: #39404f;
+    --fg: #e6e8ee; --fg2: #9aa0ad; --acc: #4f8cff; --line: #363b48;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "Microsoft YaHei UI", -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.75; font-size: 15px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px 80px; }
+  header {
+    position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);
+    background: rgba(30,32,39,.92); border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    max-width: 900px; margin: 0 auto; padding: 14px 24px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .logo { font-size: 19px; font-weight: 700; color: var(--fg); text-decoration: none; }
+  .logo span { color: var(--acc); }
+  .lang { display: flex; gap: 6px; }
+  .lang button {
+    background: var(--card); color: var(--fg2); border: 1px solid var(--line);
+    padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+    font-family: inherit; transition: .15s;
+  }
+  .lang button:hover { background: var(--card-h); color: var(--fg); }
+  .lang button.on { background: var(--acc); color: #fff; border-color: var(--acc); }
+  h1 { font-size: 30px; margin: 40px 0 10px; letter-spacing: .3px; }
+  .sub { color: var(--fg2); font-size: 16px; margin-bottom: 6px; }
+  h2 {
+    font-size: 21px; margin: 46px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h2::before { content: "▍"; color: var(--acc); margin-right: 8px; }
+  h3 { font-size: 16px; margin: 26px 0 8px; color: var(--fg); }
+  p { color: #cfd3dc; margin: 10px 0; }
+  ul { color: #cfd3dc; padding-left: 22px; }
+  li { margin: 6px 0; }
+  code {
+    background: var(--card); padding: 2px 6px; border-radius: 4px;
+    font-family: Consolas, "Courier New", monospace; font-size: 13px; color: #8fb8ff;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; color: #cfd3dc; }
+  .shots { display: flex; flex-wrap: wrap; gap: 14px; margin: 20px 0; }
+  .shots img {
+    border: 1px solid var(--line); border-radius: 10px; height: 300px;
+    background: var(--panel);
+  }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
+  th { background: var(--panel); color: var(--fg); font-weight: 600; }
+  td { color: #cfd3dc; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+  }
+  .card b { color: var(--acc); display: block; margin-bottom: 6px; font-size: 15px; }
+  .card span { color: var(--fg2); font-size: 13.5px; }
+  .links a {
+    display: inline-block; margin: 4px 10px 4px 0; padding: 8px 16px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    color: var(--acc); text-decoration: none; font-size: 14px; transition: .15s;
+  }
+  .links a:hover { background: var(--card-h); }
+  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--fg2); font-size: 13px; }
+  /* 语言切换：只隐藏「非当前语言」的元素，当前语言保持标签默认 display，
+     这样 block / inline / table-row 各归其位，不会把表格或列表搞塌 */
+  html[lang="zh-CN"] [data-lang="en"],
+  html[lang="en"] [data-lang="zh"] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <a class="logo" href="#"><span>⚡</span> ClawBoard</a>
+    <div class="lang">
+      <button id="btn-zh" class="on" onclick="setLang('zh-CN')">简体中文</button>
+      <button id="btn-en" onclick="setLang('en')">English</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <h1 data-lang="zh">悬浮剪贴板 &amp; 常用语面板</h1>
+  <h1 data-lang="en">Floating clipboard &amp; phrases panel</h1>
+
+  <p class="sub" data-lang="zh">Windows · 零第三方依赖 · Python 与纯 C 双版本</p>
+  <p class="sub" data-lang="en">Windows · Zero third-party dependencies · Python and pure C builds</p>
+
+  <p data-lang="zh">贴在屏幕一角的轻量面板，管两件事：<b>你复制过什么</b>、<b>你常要打什么</b>。支持搜索、文本变换、批量导出、快速粘贴，以及一整套面向隐私的剪贴板处理机制。</p>
+  <p data-lang="en">A lightweight panel docked in a corner of your screen that handles two things: <b>what you copied</b> and <b>what you type often</b>. With search, text transforms, batch export, quick paste, and a full set of privacy-oriented clipboard handling.</p>
+
+  <div class="shots">
+    <img src="images/main-window.png" alt="main window">
+    <img src="images/settings-general.png" alt="settings">
+    <img src="images/settings-advanced.png" alt="settings advanced">
+  </div>
+
+  <h2 data-lang="zh">功能</h2>
+  <h2 data-lang="en">Features</h2>
+
+  <div class="cards">
+    <div class="card" data-lang="zh"><b>剪贴板历史</b><span>自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情</span></div>
+    <div class="card" data-lang="en"><b>Clipboard history</b><span>Auto capture, dedupe, configurable cap, starring; hover for time, right-click for details</span></div>
+
+    <div class="card" data-lang="zh"><b>常用语</b><span>分组管理、拆词（一段文字批量切成多条）、增删改</span></div>
+    <div class="card" data-lang="en"><b>Phrases</b><span>Groups, word split (one block → many phrases), full CRUD</span></div>
+
+    <div class="card" data-lang="zh"><b>高级搜索</b><span><code>app:</code> <code>time:</code> <code>type:</code> <code>size:</code> <code>is:</code> <code>-</code>排除，多词 AND + 高亮</span></div>
+    <div class="card" data-lang="en"><b>Advanced search</b><span><code>app:</code> <code>time:</code> <code>type:</code> <code>size:</code> <code>is:</code> <code>-</code>exclude, multi-word AND + highlighting</span></div>
+
+    <div class="card" data-lang="zh"><b>27 项文本变换</b><span>编解码、大小写、行处理、MD5/SHA1/SHA256、JSON 格式化…</span></div>
+    <div class="card" data-lang="en"><b>27 text transforms</b><span>Encode/decode, case, line ops, MD5/SHA1/SHA256, JSON formatting…</span></div>
+
+    <div class="card" data-lang="zh"><b>批量导出</b><span>TXT / CSV（带 BOM）/ JSON / Markdown</span></div>
+    <div class="card" data-lang="en"><b>Batch export</b><span>TXT / CSV (with BOM) / JSON / Markdown</span></div>
+
+    <div class="card" data-lang="zh"><b>隐私保护</b><span>遵守「别记录我」标记、忽略名单、敏感内容打码</span></div>
+    <div class="card" data-lang="en"><b>Privacy</b><span>"Don't record me" flags, ignore lists, sensitive-content masking</span></div>
+  </div>
+
+  <h2 data-lang="zh">使用指南</h2>
+  <h2 data-lang="en">Usage guide</h2>
+
+  <h3 data-lang="zh">运行</h3>
+  <h3 data-lang="en">Run</h3>
+  <pre><code>python ClawBoard.py     <span data-lang="zh"># 需要 Python 3 + tkinter</span><span data-lang="en"># requires Python 3 + tkinter</span></code></pre>
+  <p data-lang="zh">或直接运行打包好的 <code>ClawBoard.exe</code>，数据文件生成在 exe 旁边。</p>
+  <p data-lang="en">Or run the packaged <code>ClawBoard.exe</code>; the data file is created next to it.</p>
+
+  <h3 data-lang="zh">快捷键</h3>
+  <h3 data-lang="en">Shortcuts</h3>
+  <table>
+    <tr><th data-lang="zh">按键</th><th data-lang="en">Key</th><th data-lang="zh">功能</th><th data-lang="en">Action</th></tr>
+    <tr><td><code>Ctrl+Shift+V</code></td><td data-lang="zh">唤起 / 隐藏面板</td><td data-lang="en">Show / hide the panel</td></tr>
+    <tr><td><code>Ctrl+1..9</code> / <code>Ctrl+0</code></td><td data-lang="zh">直接粘贴第 1~10 项</td><td data-lang="en">Quick-paste items 1–10</td></tr>
+    <tr><td><code>Ctrl+T</code> / <code>Ctrl+E</code></td><td data-lang="zh">文本变换 / 批量导出</td><td data-lang="en">Text transform / batch export</td></tr>
+    <tr><td><code>Ctrl+F</code></td><td data-lang="zh">聚焦搜索</td><td data-lang="en">Focus search</td></tr>
+    <tr><td><code>Ctrl+=</code> / <code>Ctrl+-</code></td><td data-lang="zh">界面等比缩放</td><td data-lang="en">Proportional UI scaling</td></tr>
+    <tr><td><code>↑</code> <code>↓</code> / <code>Enter</code></td><td data-lang="zh">移动 / 粘贴</td><td data-lang="en">Navigate / paste</td></tr>
+    <tr><td><code>Delete</code></td><td data-lang="zh">删除选中</td><td data-lang="en">Delete selected</td></tr>
+    <tr><td><code>Esc</code> / <code>Ctrl+Q</code></td><td data-lang="zh">隐藏 / 退出</td><td data-lang="en">Hide / quit</td></tr>
+  </table>
+
+  <h3 data-lang="zh">数据与安全</h3>
+  <h3 data-lang="en">Data &amp; safety</h3>
+  <ul data-lang="zh">
+    <li>数据存 <code>ClawBoard数据.json</code>，纯文本、可备份、可迁移</li>
+    <li>写文件采用「先写临时文件再原子替换」，不会写一半变成坏文件</li>
+    <li>版本升级前自动备份（保留最近 3 份）；读取时逐字段校验</li>
+    <li>Python 版与 C 版<b>共用同一份数据文件</b>，可互换使用</li>
+  </ul>
+  <ul data-lang="en">
+    <li>Data lives in <code>ClawBoard数据.json</code> — plain text, easy to back up and migrate</li>
+    <li>Writes go to a temp file and are atomically swapped in — no half-written file</li>
+    <li>Automatic backup before schema upgrades (keeps the last 3); per-field validation on read</li>
+    <li>The Python and C builds <b>share the same data file</b> and can be swapped freely</li>
+  </ul>
+
+  <h2 data-lang="zh">设计思路要点</h2>
+  <h2 data-lang="en">Design highlights</h2>
+
+  <ul data-lang="zh">
+    <li><b>先能跑 → 再跑得稳 → 最后才堆功能</b>：分三批做，第一批就能日常使用，后面每批都在可用的基础上加</li>
+    <li><b>为什么不用现成软件</b>：现成的要么功能太多（云同步/账号/收费），要么不能自定义常用语分组</li>
+    <li><b>为什么做两个版本</b>：Python 版验证复杂逻辑，C 版验证脱离解释器能压到多小 —— 12 MB/66 MB 对 205 KB/15 MB</li>
+    <li><b>1 万条不卡的关键</b>：虚拟列表，屏幕上只创建看得见的 9 个控件</li>
+    <li><b>三道数据保险</b>：原子写 + 升级前备份 + 逐字段校验</li>
+  </ul>
+  <ul data-lang="en">
+    <li><b>Make it run → make it stable → then pile on features</b>: three batches; the first is already usable daily</li>
+    <li><b>Why not an existing tool</b>: they're either overloaded (cloud sync / accounts / paywalls) or can't do custom phrase groups</li>
+    <li><b>Why two builds</b>: Python gets the complex logic working, C proves how small the same design gets — 12 MB/66 MB vs 205 KB/15 MB</li>
+    <li><b>Why 10k items don't lag</b>: a virtual list keeps only the ~9 visible widgets alive</li>
+    <li><b>Three data safeguards</b>: atomic writes + pre-upgrade backup + per-field validation</li>
+  </ul>
+
+  <p data-lang="zh">完整内容见文档：</p>
+  <p data-lang="en">Full details:</p>
+  <div class="links">
+    <a href="制作思路.md" data-lang="zh">📘 制作思路（中文）</a>
+    <a href="DESIGN.en.md" data-lang="en">📘 Design notes (English)</a>
+    <a href="架构设计.md" data-lang="zh">🏗️ 架构设计</a>
+    <a href="架构设计.md" data-lang="en">🏗️ Architecture</a>
+    <a href="../CHANGELOG.md">📝 CHANGELOG</a>
+    <a href="../LICENSE">📄 MIT License</a>
+  </div>
+
+  <footer>
+    <span data-lang="zh">ClawBoard · MIT 许可 · 用 Python 与 C 写成的 Windows 剪贴板工具</span>
+    <span data-lang="en">ClawBoard · MIT licensed · a Windows clipboard tool written in Python and C</span>
+  </footer>
+
+</div>
+
+<script>
+function setLang(lang) {
+  document.documentElement.lang = lang;
+  document.getElementById('btn-zh').classList.toggle('on', lang === 'zh-CN');
+  document.getElementById('btn-en').classList.toggle('on', lang === 'en');
+  try { localStorage.setItem('clawboard-doc-lang', lang); } catch (e) {}
+}
+// 默认中文；若之前选过英文则沿用
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem('clawboard-doc-lang'); } catch (e) {}
+  if (saved === 'en') setLang('en');
+})();
+</script>
+
+</body>
+</html>
