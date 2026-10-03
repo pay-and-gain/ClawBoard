@@ -431,6 +431,32 @@ def can_paste_message(hwnd_top):
     return _focus_class_name(focus) in EDIT_CLASSES
 
 
+u32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+u32.GetWindowRect.restype = wintypes.BOOL
+
+
+def window_rect(hwnd):
+    """窗口在屏幕上的矩形 (left, top, right, bottom)，物理坐标。"""
+    hwnd = int(hwnd or 0)
+    if not hwnd:
+        return None
+    r = wintypes.RECT()
+    try:
+        if u32.GetWindowRect(hwnd, ctypes.byref(r)):
+            return (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        pass
+    return None
+
+
+def rects_overlap(a, b):
+    """两个矩形是否相交（含边界）。a/b 都是 (left, top, right, bottom)。"""
+    ax, ay, ar, ab = a
+    bx, by, br, bb = b
+    return not (ar <= bx or br <= ax or ab <= by or bb <= ay)
+
+
+
 def force_foreground(hwnd, timeout=0.35):
     """把目标窗口抢回前台，并且**等它真的拿到焦点**才返回。
     Ditto ExternalWindowTracker.cpp:187 的 AttachThreadInput 技巧：Windows 默认禁止

@@ -67,6 +67,20 @@ check('Tk 窗口(非 Edit 控件)判定走抢焦点路径',
       win32.can_paste_message(root.winfo_id()) is False,
       '类名=%s' % win32._focus_class_name(win32.target_focus_hwnd(root.winfo_id())))
 
+# ---------- 2c. 矩形相交判定（决定抢焦点时要不要关置顶） ----------
+check('rects_overlap 相交 = True',
+      win32.rects_overlap((0, 0, 100, 100), (50, 50, 150, 150)) is True)
+check('rects_overlap 相离 = False',
+      win32.rects_overlap((0, 0, 100, 100), (200, 200, 300, 300)) is False)
+check('rects_overlap 边界相切 = False（不重叠）',
+      win32.rects_overlap((0, 0, 100, 100), (100, 0, 200, 100)) is False)
+check('rects_overlap 完全包含 = True',
+      win32.rects_overlap((0, 0, 200, 200), (50, 50, 100, 100)) is True)
+check('window_rect(0) 安全返回 None', win32.window_rect(0) is None)
+check('window_rect(真实窗口) 返回四元组',
+      isinstance(win32.window_rect(root.winfo_id()), tuple)
+      and len(win32.window_rect(root.winfo_id())) == 4)
+
 # ---------- 3. VirtualList.flash ----------
 from clawboard.vlist import VirtualList
 from clawboard.theme import T

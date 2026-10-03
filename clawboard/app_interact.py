@@ -22,7 +22,8 @@ from clawboard.classify import human_size, preview, to_plain
 from clawboard.timefmt import full_time, now_ms, rel_time
 from clawboard.clipboard import clip_read, clip_write
 from clawboard.win32 import (force_foreground, send_ctrl_v,
-                             paste_message, can_paste_message)
+                             paste_message, can_paste_message,
+                             window_rect, rects_overlap)
 from clawboard.widgets import Dialog, SplitDialog, CopyToast, ContentPreview
 from clawboard.dialogs import SettingsWindow, TransformWindow, ExportDialog
 
@@ -282,12 +283,28 @@ class InteractionMixin(PhraseMixin):
                 threading.Thread(target=self._paste_message_worker,
                                  args=(hwnd,), daemon=True).start()
             else:
-                # 浏览器 / Electron / UWP 等自绘控件：只能抢焦点 + Ctrl+V。
-                # 面板不 withdraw（不闪），只临时关置顶让目标窗口露出来；
+                # 浏览器 / Electron / UWP 等自绘控件：只能抢焦点 + Ctrl/V。
+                # 只有面板确实盖住目标窗口时才临时关置顶（否则面板连置顶都不变）；
                 # 粘完由 _paste_worker 恢复置顶。
-                self.root.attributes('-topmost', False)
-                threading.Thread(target=self._paste_worker, args=(hwnd,), daemon=True).start()
+                need_yield = self._panel_overlaps(hwnd)
+                if need_yield:
+                    self.root.attributes('-topmost', False)
+                threading.Thread(target=self._paste_worker,
+                                 args=(hwnd, need_yield), daemon=True).start()
         return True
+
+    def _panel_overlaps(self, hwnd):
+        """面板窗口是否盖住目标窗口。不重叠就不关置顶——面板纹丝不动。"""
+        try:
+            tr = window_rect(hwnd)
+            if not tr:
+                return True            # 拿不到目标矩形就保守让位
+            self.root.update_idletasks()
+            x, y = self.root.winfo_rootx(), self.root.winfo_rooty()
+            w, h = self.root.winfo_width(), self.root.winfo_height()
+            return rects_overlap((x, y, x + w, y + h), tr)
+        except Exception:
+            return True
 
     def _paste_message_worker(self, hwnd):
         """WM_PASTE 投递线程：不抢焦点，面板全程不动。"""
@@ -297,7 +314,7 @@ class InteractionMixin(PhraseMixin):
         if not self.hidden:
             self.root.attributes('-topmost', True)
 
-    def _paste_worker(self, hwnd):
+    def _paste_worker(self, hwnd, restore_topmost=False):
         """把焦点还给原窗口，再模拟 Ctrl+V。
         时序照 Ditto：① AttachThreadInput 绕过 Windows 的前台锁定；② **等**目标窗口真的
         拿到焦点再发键（Ditto WaitForActiveWnd），不再用固定 sleep —— 那个值在慢机器上
@@ -314,8 +331,9 @@ class InteractionMixin(PhraseMixin):
             ok = False
         time.sleep(0.12)
         self._paste_fail = not ok
-        # 面板没 withdraw，粘完恢复置顶即可（主线程里操作）
-        self.root.after(0, self._restore_topmost)
+        # 面板没 withdraw；若之前为让位关过置顶，粘完恢复（主线程里操作）
+        if restore_topmost:
+            self.root.after(0, self._restore_topmost)
 
     def paste_plain_sel(self):
         items = self.vlist.items
