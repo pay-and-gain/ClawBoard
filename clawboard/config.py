@@ -10,22 +10,58 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '1.6.0'
+APP_VER = '1.6.1'
 
-# frozen 时数据文件必须落在 exe 旁边（onefile 的临时目录退出即销毁）；
-# 脚本运行时 BASE_DIR 是本包目录的上一级（即项目根，与 ClawBoard.py 同目录）。
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
-    BASE_DIR = os.path.dirname(sys.executable)
+    _EXE_DIR = os.path.dirname(sys.executable)
 else:
-    BASE_DIR = os.path.dirname(_PKG_DIR)
+    # 脚本运行时「exe 目录」= 本包目录的上一级（项目根，与 ClawBoard.py 同目录）
+    _EXE_DIR = os.path.dirname(_PKG_DIR)
+
+
+def _writable(d):
+    """目录是否真的可写。Program Files 对普通用户只读，必须探测而不是猜。"""
+    try:
+        p = os.path.join(d, '.__wtest')
+        with open(p, 'w') as f:
+            f.write('1')
+        os.remove(p)
+        return True
+    except Exception:
+        return False
+
+
+def _pick_data_dir():
+    """数据目录：便携优先，写不进去才回退到 %APPDATA%。
+
+    - 脚本运行：项目根（开发态，肯定可写）
+    - frozen 且 exe 同目录可写（放桌面 / U 盘 / D 盘）：仍走便携模式，数据跟 exe 走
+    - frozen 且 exe 同目录不可写（装到 Program Files）：回退 %APPDATA%\\ClawBoard
+      否则保存会静默失败 —— 用户以为记着历史，其实一条都没落盘。
+    """
+    if not getattr(sys, 'frozen', False):
+        return _EXE_DIR
+    if _writable(_EXE_DIR):
+        return _EXE_DIR
+    appdata = os.environ.get('APPDATA') or os.path.expanduser('~')
+    d = os.path.join(appdata, 'ClawBoard')
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return d
+
+
+BASE_DIR = _pick_data_dir()
 DATA_FILE = os.path.join(BASE_DIR, 'ClawBoard数据.json')
-ICON_FILE = os.path.join(BASE_DIR, 'ClawBoard.ico')
 CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
+# 图标是随程序分发的资源，永远在 exe 旁边，不跟着数据目录跑
+ICON_FILE = os.path.join(_EXE_DIR, 'ClawBoard.ico')
 
 # 保证 query.py / transform.py 与数据文件同目录可用（frozen 模式下同样如此）。
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+if _EXE_DIR not in sys.path:
+    sys.path.insert(0, _EXE_DIR)
 
 FONT = ('Microsoft YaHei UI', 9)
 FONT_B = ('Microsoft YaHei UI', 9, 'bold')

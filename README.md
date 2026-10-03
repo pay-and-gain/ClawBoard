@@ -19,8 +19,8 @@
 
 | 方式 | 文件 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `ClawBoard-1.6.0-setup.exe` | 双击安装，自动创建开始菜单与桌面快捷方式，带卸载项 |
-| **绿色版** | `ClawBoard-1.6.0-portable.zip` | 解压即用，不写注册表、不留残留 |
+| **安装包**（推荐） | `ClawBoard-1.6.1-setup.exe` | 双击安装，自动创建开始菜单与桌面快捷方式，带卸载项 |
+| **绿色版** | `ClawBoard-1.6.1-portable.zip` | 解压即用，不写注册表、不留残留 |
 | **源码** | `Source code (zip/tar.gz)` | GitHub 在 Release 页自动提供；也可 `git clone` |
 
 👉 全部文件在 [**Releases 页面**](../../releases/latest)。
@@ -39,10 +39,10 @@
 ## 🚀 快速开始
 
 ### 方式一：装安装包
-下载 `ClawBoard-1.6.0-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
+下载 `ClawBoard-1.6.1-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
 
 ### 方式二：绿色版
-下载 `ClawBoard-1.6.0-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
+下载 `ClawBoard-1.6.1-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
 
 ### 方式三：从源码运行
 ```bash

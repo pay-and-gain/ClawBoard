@@ -40,7 +40,10 @@ check('带点的普通词不是链接', K('facade.txt') != 'url', K('facade.txt'
 check('含空格的像链接的不是链接', K('https://a.com and more') != 'url')
 
 # ---------- 2. 路径 ----------
-here = os.path.abspath('ClawBoard.py')
+# 注意：必须锚定项目根，不能用 abspath('ClawBoard.py') —— 那依赖 CWD，
+# 从 tests/ 目录跑时会指向 tests\ClawBoard.py（不存在）→ 判成 text 而非 path。
+here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    'ClawBoard.py')
 check('存在的绝对路径 → path', K(here) == 'path', K(here))
 check('路径带行号也能认', K(here + ':42') == 'path', K(here + ':42'))
 check('路径文件名被提取', C.classify(here)[1].get('basename') == 'ClawBoard.py')
