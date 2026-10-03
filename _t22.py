@@ -9,6 +9,7 @@
 """
 import io
 import os
+import tempfile
 
 import ClawBoard as C
 import tkinter as tk
@@ -155,7 +156,7 @@ check('短提示不截断', app.title_lb.cget('text') == '⚡ 已复制',
       repr(app.title_lb.cget('text')))
 
 out = '\n'.join(LOG)
-with io.open('C:/Users/pay and gain/AppData/Local/Temp/_claw_t22.out', 'w', encoding='utf-8') as f:
+with io.open(os.path.join(tempfile.gettempdir(), '_claw_t22.out'), 'w', encoding='utf-8') as f:
     f.write(out + '\n\n')
     f.write('全部通过\n' if OK else '有失败项\n')
     for w in (280, 300, 320, 349, 380, 420, 500, 640):

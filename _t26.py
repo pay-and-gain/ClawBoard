@@ -12,6 +12,7 @@ except Exception:
     pass
 import io
 import os
+import tempfile
 
 import ClawBoard as C
 from clawboard import config, runtime
@@ -109,7 +110,7 @@ check('非法档位 0.33 被拒绝', config.UI_SCALE == before, str(config.UI_SC
 app.set_ui_scale(2.0)
 check('非法档位 2.0 被拒绝', config.UI_SCALE == before, str(config.UI_SCALE))
 
-with io.open('C:/Users/pay and gain/AppData/Local/Temp/_t26.out', 'w',
+with io.open(os.path.join(tempfile.gettempdir(), '_t26.out'), 'w',
              encoding='utf-8') as f:
     f.write('\n'.join(LOG) + '\n\n' + ('全部通过\n' if OK else '有失败项\n'))
 os._exit(0)

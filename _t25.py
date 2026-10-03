@@ -12,6 +12,7 @@
 """
 import io
 import os
+import tempfile
 
 import ClawBoard as C
 import tkinter as tk
@@ -150,7 +151,7 @@ check('AppState 含 _rz_dir/_hover_dir（不再分支隐式初始化）',
       hasattr(app, '_rz_dir') and hasattr(app, '_hover_dir'),
       '%s/%s' % (getattr(app, '_rz_dir', '<缺>'), getattr(app, '_hover_dir', '<缺>')))
 
-with io.open('C:/Users/pay and gain/AppData/Local/Temp/_t25.out', 'w',
+with io.open(os.path.join(tempfile.gettempdir(), '_t25.out'), 'w',
              encoding='utf-8') as f:
     f.write('\n'.join(LOG) + '\n\n' + ('全部通过\n' if OK else '有失败项\n'))
 os._exit(0)

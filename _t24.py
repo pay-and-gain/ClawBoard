@@ -13,6 +13,7 @@ B. `ingest()` 里 `rec` 只在"新条目"分支被赋值。重复复制时走到
 """
 import io
 import os
+import tempfile
 
 import ClawBoard as C
 import tkinter as tk
@@ -165,7 +166,7 @@ after = created_of('hello world')
 check('★ 重复复制不改写 created_at', before == after, '%s → %s' % (before, after))
 
 out = '\n'.join(LOG)
-with io.open('C:/Users/pay and gain/AppData/Local/Temp/_t24.out', 'w',
+with io.open(os.path.join(tempfile.gettempdir(), '_t24.out'), 'w',
              encoding='utf-8') as f:
     f.write(out + '\n\n' + ('全部通过\n' if OK else '有失败项\n'))
 os._exit(0)

@@ -1,4 +1,4 @@
-# 构建与依赖（隔离安装，可随时重建）
+# ---- 构建与依赖（可随时重建）----
 .venv/
 build/
 dist/
@@ -6,17 +6,34 @@ __pycache__/
 *.pyc
 .pytools/
 
-# 运行期产物
-crash.log
-导出_*
-ClawBoardC/ClawBoardC_selftest.txt
+# ---- 打包产物 ----
+ClawBoard.exe
+ClawBoardC/ClawBoardC.exe
+ClawBoardC/*.obj
+ClawBoardC/.vs/
+ClawBoardC/*.vcxproj.user
+
+# ---- 运行期数据 / 日志（含剪贴板隐私，绝不入库）----
 ClawBoard数据.json
 ClawBoard数据.json.bak
 ClawBoard数据.json.tmp
+crash.log
+debug.log
 *.log
+导出_*
 
-# 临时自测产物
-# 注意：_t22.py 是正式的布局回归测试，刻意保留跟踪，不要并进下面的通配
+# ---- 个人 / 课程材料（含身份信息，绝不开源）----
+ClawBoard制作思路.docx
+_make_docx.py
+.workbuddy/
+
+# ---- 内部工具与一次性脚本 ----
+_archive/
+_shot.py
+_shot_narrow.py
+_ui_shot.py
+
+# ---- 临时产物 ----
 _t*.out
 _t1*.py
 _t2[0-1].py
@@ -26,3 +43,4 @@ _p*.txt
 _p*.py
 shot_*.png
 ui_*.png
+ClawBoardC/ClawBoardC_selftest.txt
