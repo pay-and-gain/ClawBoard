@@ -7,7 +7,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from clawboard.image import dib_to_png
+from clawboard.image import dib_to_png, png_to_dib
 
 OK = True
 LOG = []
@@ -63,6 +63,11 @@ try:
 except Exception as e:
     check('PhotoImage 加载 PNG 成功', False, str(e))
 root.destroy()
+
+# 4. PNG → DIB 反向（粘贴图片用）：往返一致
+dib2, w2, h2 = png_to_dib(png)
+check('PNG → DIB 尺寸正确', (w2, h2) == (40, 30))
+check('DIB → PNG → DIB 往返一致', dib2 == dib)
 
 with io.open(os.path.join(tempfile.gettempdir(), '_t33.out'), 'w',
              encoding='utf-8') as f:

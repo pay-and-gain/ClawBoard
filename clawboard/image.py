@@ -69,6 +69,77 @@ def dib_to_png(dib):
     return png, wpx, hpx
 
 
+def png_to_dib(png):
+    """PNG 字节 → (dib 字节, 宽, 高)。支持 8 位 RGBA/RGB（含全部 5 种 filter）。"""
+    if png[:8] != b'\x89PNG\r\n\x1a\n':
+        raise ValueError('不是合法 PNG')
+    pos = 8
+    w = h = bitdepth = colortype = 0
+    idat = b''
+    while pos < len(png):
+        length = struct.unpack_from('>I', png, pos)[0]
+        typ = png[pos + 4:pos + 8]
+        data = png[pos + 8:pos + 8 + length]
+        if typ == b'IHDR':
+            w = struct.unpack_from('>I', data, 0)[0]
+            h = struct.unpack_from('>I', data, 4)[0]
+            bitdepth = data[8]
+            colortype = data[9]
+        elif typ == b'IDAT':
+            idat += data
+        elif typ == b'IEND':
+            break
+        pos += 12 + length
+    if bitdepth != 8 or colortype not in (2, 6):   # RGB / RGBA
+        raise ValueError('不支持的 PNG 格式（只支持 8 位 RGB/RGBA）')
+    bpp = 3 if colortype == 2 else 4
+    stride = w * bpp
+    raw = zlib.decompress(idat)
+
+    # 还原 filter
+    rows = []
+    i = 0
+    prev = bytearray(stride)
+    for _y in range(h):
+        ft = raw[i]
+        i += 1
+        row = bytearray(raw[i:i + stride])
+        i += stride
+        if ft == 1:                       # Sub
+            for x in range(bpp, stride):
+                row[x] = (row[x] + row[x - bpp]) & 0xFF
+        elif ft == 2:                     # Up
+            for x in range(stride):
+                row[x] = (row[x] + prev[x]) & 0xFF
+        elif ft == 3:                     # Average
+            for x in range(stride):
+                a = row[x - bpp] if x >= bpp else 0
+                row[x] = (row[x] + ((a + prev[x]) >> 1)) & 0xFF
+        elif ft == 4:                     # Paeth
+            for x in range(stride):
+                a = row[x - bpp] if x >= bpp else 0
+                b = prev[x]
+                c = prev[x - bpp] if x >= bpp else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                row[x] = (row[x] + pr) & 0xFF
+        rows.append(row)
+        prev = row
+
+    # RGB(A) → 32 位 BGRA，自底向上
+    header = struct.pack('<IiiHHIIiiII', 40, w, h, 1, 32, 0, w * h * 4,
+                         0, 0, 0, 0)
+    px = bytearray()
+    for y in range(h - 1, -1, -1):
+        row = rows[y]
+        for x in range(0, stride, bpp):
+            r, g, b = row[x], row[x + 1], row[x + 2]
+            a = row[x + 3] if bpp == 4 else 255
+            px += bytes((b, g, r, a))
+    return bytes(header) + bytes(px), w, h
+
+
 def clipboard_has_image():
     """剪贴板当前是否有图片（CF_DIB）。"""
     try:

@@ -13,6 +13,7 @@ InteractionMixin：on_click_item / on_menu_item / on_hover_item / toggle_fav / s
 """
 import time
 import os
+import io
 import threading
 import tkinter as tk
 
@@ -22,6 +23,7 @@ from clawboard.runtime import uid
 from clawboard.classify import human_size, preview, to_plain
 from clawboard.timefmt import full_time, now_ms, rel_time
 from clawboard.clipboard import clip_read, clip_write
+from clawboard.image import png_to_dib, write_clipboard_dib
 from clawboard.win32 import (force_foreground, send_ctrl_v,
                              paste_message, can_paste_message,
                              window_rect, rects_overlap)
@@ -289,6 +291,12 @@ class InteractionMixin(PhraseMixin):
 
     def paste(self, text, force=False, cid=None):
         """粘贴出去：只刷新 last_used_at，绝不改写 created_at"""
+        # 图片条目走图片粘贴（写 DIB 而非文本）
+        if cid:
+            pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
+            item = next((x for x in pool if x['id'] == cid), None)
+            if item and item.get('content_type') == 'image':
+                return self.paste_image(item, force)
         text = self.trim_for_paste(text)
         if cid:
             pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
@@ -320,6 +328,37 @@ class InteractionMixin(PhraseMixin):
                     self.root.attributes('-topmost', False)
                 threading.Thread(target=self._paste_worker,
                                  args=(hwnd, need_yield), daemon=True).start()
+        return True
+
+    def paste_image(self, item, force=False):
+        """粘贴图片：读 PNG → DIB → 写剪贴板 → 粘贴到目标窗口。"""
+        img_name = item.get('image_path')
+        if not img_name:
+            return False
+        full = os.path.join(BASE_DIR, 'images', img_name)
+        if not os.path.exists(full):
+            self.tip('图片文件已丢失')
+            return False
+        try:
+            png = io.open(full, 'rb').read()
+            dib, w, h = png_to_dib(png)
+        except Exception as e:
+            self.tip('图片读取失败：%s' % e)
+            return False
+        if not write_clipboard_dib(dib):
+            self.tip('剪贴板被占用，写入失败')
+            return False
+        item['last_used_at'] = now_ms()
+        item['use_count'] = int(item.get('use_count') or 0) + 1
+        self.save(True)
+        if (self.st['autopaste'] or force) and not self.hidden:
+            hwnd = self.prev_hwnd
+            self.vlist.flash(item['id'])
+            need_yield = self._panel_overlaps(hwnd)
+            if need_yield:
+                self.root.attributes('-topmost', False)
+            threading.Thread(target=self._paste_worker,
+                             args=(hwnd, need_yield), daemon=True).start()
         return True
 
     def _panel_overlaps(self, hwnd):

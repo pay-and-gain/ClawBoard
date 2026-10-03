@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '2.1.0'
+APP_VER = '2.2.0'
 
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
