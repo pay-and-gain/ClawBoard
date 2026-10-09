@@ -83,7 +83,7 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 <p align="center">
   <img src="docs/images/theme-compare.png" alt="Light / dark theme comparison" width="300">
-  <img src="docs/images/folded-edge.png" alt="Collapsed title-bar state" width="150">
+  <img src="docs/images/folded-edge.png" alt="Expanded panel vs. double-click collapse to the edge" width="320">
   <img src="docs/images/scale-compare.png" alt="Proportional UI scaling at 50% / 100% / 150%" width="330">
 </p>
 

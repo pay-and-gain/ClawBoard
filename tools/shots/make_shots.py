@@ -146,6 +146,27 @@ def rounded_mask(size, rad):
     return m
 
 
+def left_rounded_mask(size, rad):
+    """只圆左上 / 左下两角，右两角保持直角（用于「贴着屏幕右边缘」的面板）。"""
+    w, h = size
+    m = Image.new('L', size, 0)
+    d = ImageDraw.Draw(m)
+    d.rounded_rectangle([0, 0, w - 1, h - 1], radius=rad, fill=255)
+    if w > rad and h > 2 * rad:
+        d.rectangle([w - rad - 1, 0, w, rad], fill=255)          # 右上角补成直角
+        d.rectangle([w - rad - 1, h - rad - 1, w, h], fill=255)  # 右下角补成直角
+    return m
+
+
+def _border_left_round(d, w, h, r, color, width=1):
+    """描边：左两角圆、右两角直、右侧为屏边。"""
+    d.line([(r, 0), (w - 1, 0)], fill=color, width=width)
+    d.line([(r, h - 1), (w - 1, h - 1)], fill=color, width=width)
+    d.line([(0, r), (0, h - 1 - r)], fill=color, width=width)
+    d.arc([0, 0, 2 * r, 2 * r], 90, 180, fill=color, width=width)
+    d.arc([0, h - 1 - 2 * r, 2 * r, h - 1], 180, 270, fill=color, width=width)
+
+
 def decorate(raw, scale=S, pad=14, radius=11, bg=BG, border=BORDER,
              shadow=SHADOW_RGBA):
     """单窗口装饰：放大 → 圆角 → 投影 → 描边 → 浅灰底，返回 RGBA 图。"""
@@ -180,8 +201,8 @@ def _font(px):
 
 
 def compose(tiles, captions=None, gap=26, pad=22, bg=BG, cap_px=15,
-            valign='top', scale=S):
-    """把若干已装饰的窗口图拼到一张浅灰底画布上，可选图注，返回 RGBA 图。"""
+            valign='top', scale=S, sep=None):
+    """把若干图拼到一张浅灰底画布上；可选每图图注与图间符号（如 →）。"""
     n = len(tiles)
     gap *= scale
     pad *= scale
@@ -192,22 +213,66 @@ def compose(tiles, captions=None, gap=26, pad=22, bg=BG, cap_px=15,
     W = sum(tw) + gap * (n - 1) + pad * 2
     H = max(th) + cap_h + pad * 2
     cv = Image.new('RGBA', (W, H), bg + (255,))
+    xs = []
     x = pad
     for i, t in enumerate(tiles):
-        if valign == 'bottom':
-            y = pad + (max(th) - t.height)
-        else:
-            y = pad
+        y = pad + (max(th) - t.height) if valign == 'bottom' else pad
         cv.alpha_composite(t, (x, y))
+        xs.append(x)
         if captions:
             d = ImageDraw.Draw(cv)
             f = _font(cap_px)
-            cx = x + tw[i] // 2
             twid = d.textlength(captions[i], font=f)
-            ty = pad + max(th) + 8 * scale
-            d.text((cx - twid / 2, ty), captions[i], font=f, fill=CAP_COLOR + (255,))
+            d.text((x + tw[i] // 2 - twid / 2, pad + max(th) + 8 * scale),
+                   captions[i], font=f, fill=CAP_COLOR + (255,))
         x += tw[i] + gap
+    if sep and n > 1:
+        d = ImageDraw.Draw(cv)
+        f = _font(int(cap_px * 1.6))
+        twid = d.textlength(sep, font=f)
+        for i in range(n - 1):                      # 每两图之间的空隙里画符号
+            cx = (xs[i] + tw[i] + xs[i + 1]) // 2
+            cy = pad + max(th) // 2 - cap_px
+            d.text((cx - twid / 2, cy), sep, font=f, fill=CAP_COLOR + (255,))
     return cv
+
+
+def dock_tile(panel_raw, *, panel_y=None, work_h=600, left_gap=110, radius=12,
+              taskbar_h=30, desktop=(222, 228, 238), edge=(139, 150, 172),
+              border=(198, 204, 216), taskbar=(203, 210, 223)):
+    """把面板按「贴着屏幕右边缘」的姿态放进一个带任务栏的圆角「屏幕」里。
+
+    屏幕 = 工作区（面板紧贴右边缘）+ 底部任务栏；最右侧一条屏幕边缘线。
+    """
+    panel = panel_raw.convert('RGBA')
+    pw, ph = panel.size
+    H = work_h + taskbar_h
+    py = (work_h - ph) if panel_y is None else panel_y
+    W = left_gap + pw
+    tile = Image.new('RGBA', (W, H), desktop + (255,))
+    # 面板投影
+    sh = Image.new('RGBA', tile.size, (0, 0, 0, 0))
+    sh.paste(Image.new('RGBA', (pw, ph), (18, 22, 32, 66)), (left_gap, py))
+    sh = sh.filter(ImageFilter.GaussianBlur(8))
+    tile = Image.alpha_composite(tile, sh)
+    # 面板（左两角圆、贴右边）
+    p = panel.copy()
+    p.putalpha(left_rounded_mask((pw, ph), radius))
+    tile.alpha_composite(p, (left_gap, py))
+    # 任务栏：屏内下缘的一条带 + 几个示意「图标」
+    d = ImageDraw.Draw(tile)
+    d.rectangle([0, work_h, W, H - 1], fill=taskbar + (255,))
+    d.line([(0, work_h), (W, work_h)], fill=(186, 194, 208, 255))
+    for i in range(3):
+        x0 = 12 + i * 22
+        d.rounded_rectangle([x0, work_h + 7, x0 + 14, work_h + taskbar_h - 8],
+                            radius=3, fill=(176, 186, 202, 255))
+    # 屏幕右边缘线
+    d.rectangle([W - 3, 0, W - 1, H - 1], fill=edge + (255,))
+    # 整体裁成「左圆右直」，并描边
+    tile.putalpha(left_rounded_mask(tile.size, radius))
+    _border_left_round(ImageDraw.Draw(tile), W, H, radius, border + (255,), 1)
+    return tile
 
 
 def save(img, name):
@@ -523,18 +588,39 @@ def shot_command_palette(root, app):
 
 
 def shot_folded_edge(root, app):
-    print('[folded-edge] 折叠贴边态')
-    if not app.collapsed:
-        app.toggle_collapse()
-    root.update()
-    # 固定在屏幕上一处，抓成一条标题栏
-    root.geometry('210x%d+300+300' % C.scaled(C.BAR_H))
-    root.update()
-    time.sleep(0.15)
-    save(decorate(snap(root, app)), 'folded-edge.png')
+    print('[folded-edge] 折叠贴边态（合成：展开 → 双击折叠贴边）')
+    SCREEN_H = 600                 # 两张「屏幕」同高，便于左右对照
+    COL_W = 300                    # 折叠条加宽到标题「ClawBoard」完整可见（默认 210 会截断）
+    # ---- 1) 展开态：面板贴在屏幕右边缘 ----
     if app.collapsed:
         app.toggle_collapse()
+    root.geometry(WIN)
     root.update()
+    app.tab = 'clip'
+    app.search.set('')
+    app.sel_clip = None
+    app.render()
+    root.update()
+    expanded = snap(root, app)
+    # ---- 2) 折叠态：收成一条小条，吸附到屏幕右下角 ----
+    app.toggle_collapse()
+    root.update()
+    bar_h = C.scaled(C.BAR_H)
+    root.geometry('%dx%d+300+300' % (COL_W, bar_h))
+    root.update()
+    time.sleep(0.15)
+    collapsed = snap(root, app)
+    if app.collapsed:              # 还原展开态
+        app.toggle_collapse()
+    root.update()
+    # ---- 3) 合成：左展开 / 右折叠，各带「屏幕右边缘 + 任务栏」语境 ----
+    left = dock_tile(expanded, work_h=SCREEN_H)
+    right = dock_tile(collapsed, work_h=SCREEN_H,
+                      panel_y=SCREEN_H - bar_h - 26)   # 贴右下角（任务栏之上）
+    out = compose([left, right], sep='→',
+                  captions=['① 展开 · 面板贴右边缘', '② 双击折叠 · 收成小条贴右下角'],
+                  gap=56, valign='top')
+    save(out, 'folded-edge.png')
 
 
 def shot_scale_compare(root, app):

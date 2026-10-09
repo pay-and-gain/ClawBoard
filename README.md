@@ -83,7 +83,7 @@
 
 <p align="center">
   <img src="docs/images/theme-compare.png" alt="亮色 / 暗色主题对比" width="300">
-  <img src="docs/images/folded-edge.png" alt="折叠贴边态" width="150">
+  <img src="docs/images/folded-edge.png" alt="展开面板与双击折叠贴边对比" width="320">
   <img src="docs/images/scale-compare.png" alt="界面等比缩放 50% / 100% / 150%" width="330">
 </p>
 
