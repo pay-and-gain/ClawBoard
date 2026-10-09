@@ -33,7 +33,7 @@
 就这么多。剩下的一切都是锦上添花。
 
 <p align="center">
-  <img src="images/main-window.png" alt="ClawBoard 主界面" width="260">
+  <img src="images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
 </p>
 
 ---

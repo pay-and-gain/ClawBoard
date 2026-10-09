@@ -383,7 +383,11 @@ class UiMixin:
                         'created_at': it.get('created_at'),
                         'est': it.get('is_estimated'),
                         'app': it.get('source_app') or 'unknown',
-                        'image_path': it.get('image_path')})
+                        'image_path': it.get('image_path'),
+                        # 图片条目要带上尺寸：角落大图预览的标题「W×H」直接读这两个字段，
+                        # 漏了它们会让预览头显示成「None×None」。
+                        'image_w': it.get('image_w'),
+                        'image_h': it.get('image_h')})
         return out, sel, kw
 
     def render(self):

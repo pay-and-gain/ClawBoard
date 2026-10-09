@@ -4,7 +4,7 @@
 
 > A floating clipboard history & phrases panel for Windows — zero third-party dependencies, with both a Python build (tkinter + ctypes) and a pure C build (Win32).
 
-A lightweight clipboard history + snippets panel that sits in a corner of your screen: search, text transforms, batch export, quick paste, plus a full set of privacy-oriented clipboard handling.
+A lightweight clipboard history panel that sits in a corner of your screen: copy text and images and they all land here — searchable, transformable, pastable, with privacy under your control.
 
 <p align="center">
   <a href="../../stargazers"><img src="https://img.shields.io/github/stars/pay-and-gain/ClawBoard?style=social" alt="stars"></a>
@@ -13,13 +13,12 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 > 💛 **If this tool helps you, give it a Star** — every star keeps the updates coming. Found it useful? Share it with your friends and colleagues.
 
 <p align="center">
-  <img src="docs/images/main-window.png" alt="ClawBoard main window" width="260">
+  <img src="docs/images/main-window.png" alt="ClawBoard main window: clipboard history list" width="300">
 </p>
 
-<p align="center">
-  <img src="docs/images/settings-general.png" alt="Settings - general" width="290">
-  <img src="docs/images/settings-advanced.png" alt="Settings - advanced" width="290">
-</p>
+- **Clipboard history** — auto capture, dedupe, configurable cap, starring; hover for time, right-click for details
+- **Quick paste** — `Ctrl+1..9` / `Ctrl+0` pastes items 1–10 directly
+- **Privacy** — honors Windows' "don't record me" flags, app/title ignore lists, sensitive-content detection and masking
 
 👉 New here? Read the [**Getting Started guide**](docs/getting-started.en.md) — up and running in 30 seconds, fluent in 5 minutes.
 
@@ -27,7 +26,7 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-2.2.4-setup.exe` | Double-click to install; adds Start-menu and desktop shortcuts plus an uninstaller |
+| **Installer** (recommended) | `ClawBoard-2.2.4-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
 | **Portable** | `ClawBoard-2.2.4-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
@@ -35,19 +34,70 @@ A lightweight clipboard history + snippets panel that sits in a corner of your s
 
 ## ✨ Features
 
-- **Clipboard history** — auto capture, dedupe, configurable cap, starring; hover for time, right-click for details
-- **Phrases** — group management, word split (turn one block of text into many phrases), full CRUD
-- **Advanced search** — `app:` source / `time:` / `type:` / `size:` / `is:` / `tag:` / `-` exclude, multi-word AND + highlighting
+### 🔍 Advanced search · Pinyin · Auto-tagging
+
+<p align="center">
+  <img src="docs/images/search-highlight.png" alt="Advanced search: ClawBoard type:url, with the matched term highlighted" width="440">
+</p>
+
+- **Advanced search** — `app:` source / `time:` / `type:` / `size:` / `is:` / `tag:` / `-` exclude, multi-word AND + hit highlighting
 - **Pinyin search** — search `zhanghao` or `zh` to hit Chinese entries, even when you can't recall the characters
-- **Auto-tagging** — auto-detect email / phone / number / date / URL / code / JSON, filter with `tag:`
+- **Auto-tagging** — auto-detect email / phone / number / date / URL / code / JSON; filter with `tag:`
+
+### 💬 Phrases & triggers
+
+<p align="center">
+  <img src="docs/images/phrases.png" alt="Phrases panel with the trigger-snippet dialog" width="460">
+</p>
+
+- **Phrases** — group management, word split (turn one block of text into many phrases), full CRUD
 - **Trigger snippets** — set a short trigger (`dz` → address) and expand it in any app as you type
-- **Command palette** — `Ctrl+Shift+P` to open, type to fuzzy-filter and run
-- **Image clipboard** — screenshots / copied images are captured, previewed in the corner, and **pasted back** (record / preview / paste, fully symmetric with text); copied image *files* are recorded as their path
-- **27 text transforms** — encode/decode, case, line ops, hashes (MD5/SHA1/SHA256), JSON formatting…
+
+### 🖼️ Image clipboard
+
+<p align="center">
+  <img src="docs/images/image-clipboard.png" alt="Image clipboard entry with the corner preview" width="560">
+</p>
+
+- **Image clipboard** — screenshots / copied images are captured, and the full-size preview pops up in the corner on select
+- Record / preview / **paste**, fully symmetric with text; copying an image *file* records its **path** (CF_HDROP)
+
+### 🧰 27 text transforms · Batch export
+
+<p align="center">
+  <img src="docs/images/transform.png" alt="Transform window: recommended transforms with source / result" width="520">
+</p>
+
+- **27 text transforms** — encode/decode, case, line ops, hashes (MD5 / SHA1 / SHA256), JSON formatting… with smart recommendations
 - **Batch export** — TXT / CSV (with BOM) / JSON / Markdown
-- **Quick paste** — `Ctrl+1..9` / `Ctrl+0` pastes items 1–10 directly
-- **Privacy** — honors Windows' "don't record me" flags, app/title ignore lists, sensitive-content detection and masking
-- **Nice to use** — hide on screen edge, double-click to collapse to the corner, drag any edge/corner to resize, proportional UI scaling (50%–150%), custom background, light/dark themes
+
+### ⌨️ Command palette
+
+<p align="center">
+  <img src="docs/images/command-palette.png" alt="Command palette: fuzzy-filter commands" width="300">
+</p>
+
+- **Open with `Ctrl+Shift+P`** — type to fuzzy-filter commands and press Enter to run
+
+### 🎨 Look & feel
+
+<p align="center">
+  <img src="docs/images/theme-compare.png" alt="Light / dark theme comparison" width="300">
+  <img src="docs/images/folded-edge.png" alt="Collapsed title-bar state" width="150">
+  <img src="docs/images/scale-compare.png" alt="Proportional UI scaling at 50% / 100% / 150%" width="330">
+</p>
+
+- **Light / dark themes**, **double-click to collapse to the edge**, **proportional UI scaling 50%–150%** (`Ctrl+=` / `Ctrl+-`)
+- Plus a custom background color, hide-on-edge, and drag any edge/corner to resize
+
+### ⚙️ Settings at a glance
+
+<p align="center">
+  <img src="docs/images/settings-general.png" alt="Settings - general" width="300">
+  <img src="docs/images/settings-advanced.png" alt="Settings - advanced" width="300">
+</p>
+
+- A single scrollable panel for listening, masking, theme, scaling, ignore lists, length filters and autostart
 
 ## 🚀 Quick start
 
@@ -154,10 +204,24 @@ python tests/_t35.py             # file-path capture via CF_HDROP (8)
 
 **336** regression tests in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
 
+## 🗺️ Roadmap
+
+The last five releases iterated along three directions — ① quick wins → ② strategy → ③ optional — each kept separately on [Releases](../../releases):
+
+| Version | Direction | Content |
+|---|---|---|
+| v2.1.0 | ③ optional | Auto-tagging |
+| v2.0.0 | ② strategy | Image clipboard |
+| v1.9.0 | ② strategy | Pinyin search |
+| v1.8.0 | ① quick win | Trigger snippets |
+| v1.7.0 | ① quick win | Command palette |
+
+Earlier versions (UI refresh, paste experience, installer fixes…) are in the [CHANGELOG](CHANGELOG.md).
+
 ## 🎯 Design trade-offs
 
 - **Zero third-party deps**: tkinter for UI, ctypes straight to Win32 for system features — no network, no dependency-version traps, copy-and-run
-- **Text-first, images too**: text is the core, but images are equally supported — record, preview and **paste** (since v2.2.0; zero-dependency hand-written PNG codec with DIB↔PNG conversion both ways). Copying an image *file* in Explorer records its **path**, not the pixels
+- **Text-first, images too**: text is the core, but images are equally supported — record, preview and **paste** (since v2.2.0; zero-dependency hand-written PNG codec with DIB↔PNG conversion both ways)
 - **JSON instead of SQLite**: single file, easy to back up, hand-editable; safety comes from versioned migration + atomic writes
 - **Two implementations**: Python validates the complex logic, C proves how small it gets without an interpreter
 

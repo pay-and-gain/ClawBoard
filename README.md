@@ -4,7 +4,7 @@
 
 > Windows 悬浮剪贴板 & 常用语面板 —— 零第三方依赖，Python（tkinter + ctypes）与纯 C（Win32）双版本。
 
-挂在屏幕一角的轻量剪贴板历史 + 常用语面板：搜索、文本变换、批量导出、快速粘贴，以及一整套面向隐私的剪贴板处理机制。
+挂在屏幕一角的轻量剪贴板历史：随手复制的文字、图片都在这里，搜得到、变得了、贴得快，隐私还握在自己手里。
 
 <p align="center">
   <a href="../../stargazers"><img src="https://img.shields.io/github/stars/pay-and-gain/ClawBoard?style=social" alt="stars"></a>
@@ -13,13 +13,12 @@
 > 💛 **如果这个工具帮到了你，点个 Star 支持一下吧** —— 你的每一个 Star 都是持续更新的动力。觉得好用也欢迎分享给同事和朋友。
 
 <p align="center">
-  <img src="docs/images/main-window.png" alt="ClawBoard 主界面" width="260">
+  <img src="docs/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
 </p>
 
-<p align="center">
-  <img src="docs/images/settings-general.png" alt="设置 - 基础" width="290">
-  <img src="docs/images/settings-advanced.png" alt="设置 - 进阶" width="290">
-</p>
+- **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
+- **快速粘贴** —— `Ctrl+1..9` / `Ctrl+0` 直接粘贴第 1~10 项
+- **隐私保护** —— 遵守 Windows「别记录我」标记、程序 / 标题忽略名单、敏感内容识别与打码
 
 👉 第一次用？看 [**新手教程**](docs/getting-started.md) —— 30 秒上手，5 分钟摸透全部核心功能。
 
@@ -27,27 +26,78 @@
 
 | 方式 | 文件 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `ClawBoard-2.2.4-setup.exe` | 双击安装，自动创建开始菜单与桌面快捷方式，带卸载项 |
+| **安装包**（推荐） | `ClawBoard-2.2.4-setup.exe` | 双击安装，自动建开始菜单 / 桌面快捷方式，带卸载项 |
 | **绿色版** | `ClawBoard-2.2.4-portable.zip` | 解压即用，不写注册表、不留残留 |
-| **源码** | `Source code (zip/tar.gz)` | GitHub 在 Release 页自动提供；也可 `git clone` |
+| **源码** | `Source code (zip/tar.gz)` | Release 页由 GitHub 自动提供；也可 `git clone` |
 
 👉 全部文件在 [**Releases 页面**](../../releases/latest)。
 
 ## ✨ 特性
 
-- **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
+### 🔍 高级搜索 · 拼音 · 自动标签
+
+<p align="center">
+  <img src="docs/images/search-highlight.png" alt="高级搜索：ClawBoard type:url，命中词高亮" width="440">
+</p>
+
+- **高级搜索** —— `app:` 来源 / `time:` 时间 / `type:` 类型 / `size:` 大小 / `is:` 状态 / `tag:` 标签 / `-` 排除，多词 AND + 命中高亮
+- **拼音搜索** —— 搜 `zhanghao` 或 `zh` 也能命中「账号」，记不清字照样找得到
+- **内容自动标签** —— 自动识别邮箱 / 手机号 / 数字 / 日期 / 链接 / 代码 / JSON，`tag:` 一键筛选
+
+### 💬 常用语与触发词
+
+<p align="center">
+  <img src="docs/images/phrases.png" alt="常用语面板与触发词设置" width="460">
+</p>
+
 - **常用语** —— 分组管理、拆词（一段文字批量切成多条）、增删改
-- **高级搜索** —— `app:` 来源 / `time:` 时间 / `type:` 类型 / `size:` 大小 / `is:` 状态 / `tag:` 标签 / `-` 排除，多词 AND + 高亮
-- **拼音搜索** —— 搜 `zhanghao` 或 `zh` 命中「账号」，记不清字也能搜到
-- **内容自动标签** —— 自动识别邮箱/手机号/数字/日期/链接/代码/JSON 等，`tag:` 一键筛选
-- **触发词快速粘贴** —— 给常用语设触发词（`dz`→地址），任何程序输入即替换
-- **命令面板** —— `Ctrl+Shift+P` 呼出，输入命令名模糊过滤执行
-- **图片剪贴板** —— 截图/复制图片自动记录、角落大图预览
-- **27 项文本变换** —— 编解码、大小写、行处理、哈希（MD5/SHA1/SHA256）、JSON 格式化…
+- **触发词快速粘贴** —— 给常用语设触发词（`dz` → 地址），任何程序输入即替换
+
+### 🖼️ 图片剪贴板
+
+<p align="center">
+  <img src="docs/images/image-clipboard.png" alt="图片剪贴板：白色条目 + 角落大图预览" width="560">
+</p>
+
+- **图片剪贴板** —— 截图 / 复制图片自动记录，选中即在角落弹出大图预览
+- 记录 / 预览 / **粘贴** 与文本完全对称；复制图片*文件*时记录的是**路径**（CF_HDROP）
+
+### 🧰 27 项文本变换 · 批量导出
+
+<p align="center">
+  <img src="docs/images/transform.png" alt="文本变换窗口：推荐变换 + 原文 / 结果对照" width="520">
+</p>
+
+- **27 项文本变换** —— 编解码、大小写、行处理、哈希（MD5 / SHA1 / SHA256）、JSON 格式化…按内容智能推荐
 - **批量导出** —— TXT / CSV（带 BOM）/ JSON / Markdown
-- **快速粘贴** —— `Ctrl+1..9` / `Ctrl+0` 直接粘贴第 1~10 项
-- **隐私保护** —— 遵守 Windows「别记录我」标记、程序/标题忽略名单、敏感内容识别与打码
-- **好用** —— 靠边隐藏、双击折叠贴右下角、四边四角随意拉伸、界面等比缩放（50%~150%）、自定义背景色、亮/暗主题
+
+### ⌨️ 命令面板
+
+<p align="center">
+  <img src="docs/images/command-palette.png" alt="命令面板：模糊过滤命令" width="300">
+</p>
+
+- **`Ctrl+Shift+P` 呼出** —— 输入命令名模糊过滤，回车即执行
+
+### 🎨 外观个性
+
+<p align="center">
+  <img src="docs/images/theme-compare.png" alt="亮色 / 暗色主题对比" width="300">
+  <img src="docs/images/folded-edge.png" alt="折叠贴边态" width="150">
+  <img src="docs/images/scale-compare.png" alt="界面等比缩放 50% / 100% / 150%" width="330">
+</p>
+
+- **亮 / 暗主题**、**双击折叠贴边**、**界面等比缩放 50%~150%**（`Ctrl+=` / `Ctrl+-`）
+- 还能自定义背景色、靠边自动隐藏、四边四角随意拉伸
+
+### ⚙️ 设置一目了然
+
+<p align="center">
+  <img src="docs/images/settings-general.png" alt="设置 - 基础" width="300">
+  <img src="docs/images/settings-advanced.png" alt="设置 - 进阶" width="300">
+</p>
+
+- 基础 / 进阶分栏滚动：监听、打码、主题、缩放、忽略名单、长度过滤、开机自启一屏可调
 
 ## 🚀 快速开始
 
@@ -75,8 +125,7 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 
 ### C 版（可选）
 [`ClawBoardC/`](ClawBoardC/) 是纯 Win32 + GDI 自绘的 C 实现（约 2500 行，产物 205 KB，内存约 15 MB），
-用 `packaging/启动ClawBoard.bat` 同类方式编译（需 MSVC，见 `ClawBoardC/build.bat`）。
-两版**共用同一份数据文件**，可互换使用。
+用 `ClawBoardC/build.bat` 编译（需 MSVC）。两版**共用同一份数据文件**，可互换使用。
 
 ## ⌨️ 快捷键
 

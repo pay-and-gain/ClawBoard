@@ -21,7 +21,9 @@ crash.log
 debug.log
 *.log
 导出_*
-images/
+# 运行期图片缓存仅在数据目录（仓库根）下；docs/images/ 是仓库截图，必须入库，
+# 所以这里用根锚定 `/images/` 而不是 `images/`（后者会误伤 docs/images/）。
+/images/
 
 # ---- 个人 / 课程材料（含身份信息，绝不开源）----
 ClawBoard制作思路.docx

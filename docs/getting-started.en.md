@@ -33,7 +33,7 @@ If you only remember three things, remember these three steps:
 That's it. Everything else is a bonus.
 
 <p align="center">
-  <img src="images/main-window.png" alt="ClawBoard main window" width="260">
+  <img src="images/main-window.png" alt="ClawBoard main window: clipboard history list" width="300">
 </p>
 
 ---
