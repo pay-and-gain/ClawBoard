@@ -174,7 +174,7 @@ query.py                search syntax parser
 transform.py            27 text transforms
 ClawBoardC/             C implementation
 packaging/              build config (PyInstaller spec, icon, launcher, installer script)
-tests/                  regression tests (336 cases)
+tests/                  regression tests (16 test files)
 └─ testdata/            test data generator
 docs/                   design docs + screenshots
 ```
@@ -184,25 +184,25 @@ Dependency direction (no circular imports): `config` (leaf) → domain → syste
 ## 🧪 Tests
 
 ```bash
-python tests/test_core.py        # search syntax (27)
-python tests/test_refactor.py    # refactor unit tests (12)
-python tests/_t14.py             # content classification (34)
-python tests/_t22.py             # toolbar layout (26)
-python tests/_t24.py             # collapse / duplicate capture (24)
-python tests/_t25.py             # edge resize (25)
-python tests/_t26.py             # UI scaling (25)
-python tests/_t27.py             # data directory selection (24)
-python tests/_t28.py             # paste without full-window flash (19)
-python tests/_t29.py             # transform ranking + frequency sort (29)
-python tests/_t30.py             # command palette (21)
-python tests/_t31.py             # trigger engine (13)
-python tests/_t32.py             # pinyin search + polyphonic phrases (18)
-python tests/_t33.py             # image DIB↔PNG round-trip (15)
-python tests/_t34.py             # auto-tagging (16)
-python tests/_t35.py             # file-path capture via CF_HDROP (8)
+python tests/test_core.py        # search syntax + time slots
+python tests/test_refactor.py    # architecture refactor regression
+python tests/_t14.py             # content classification + card styles
+python tests/_t22.py             # toolbar layout
+python tests/_t24.py             # collapse / duplicate capture
+python tests/_t25.py             # edge resize
+python tests/_t26.py             # UI scaling
+python tests/_t27.py             # data directory selection
+python tests/_t28.py             # paste without full-window flash
+python tests/_t29.py             # transform ranking + frequency sort
+python tests/_t30.py             # command palette
+python tests/_t31.py             # trigger engine
+python tests/_t32.py             # pinyin search + polyphonic phrases
+python tests/_t33.py             # image DIB↔PNG round-trip
+python tests/_t34.py             # auto-tagging
+python tests/_t35.py             # file-path capture via CF_HDROP
 ```
 
-**336** regression tests in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
+**16 test files, 340+ assertions** in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
 
 ## 🗺️ Roadmap
 
