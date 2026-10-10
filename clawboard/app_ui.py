@@ -17,6 +17,7 @@ from clawboard.tag import TAG_LABELS
 from clawboard.clipboard import mask_text
 from clawboard.widgets import Dialog
 from clawboard.vlist import VirtualList
+from clawboard import onboard
 
 import query as Q          # F3 查询解析器（独立模块，可单测）
 
@@ -74,6 +75,12 @@ class UiMixin:
         self.vlist = VirtualList(self.body, self.on_click_item,
                                  self.on_menu_item, self.on_hover_item)
         self.vlist.pack(fill='both', expand=True, padx=(6, 0), pady=4)
+        # 空数据引导卡片：只创建不摆放（place），显示与否由 render() 决定。
+        # 用 place 覆盖在 vlist 之上，而不是 pack 进队列 —— 这样不参与 pack 的
+        # 空间分配，列表本身（含滚动/选中/多选）的逻辑一行都不用改。
+        self.onboard = onboard.OnboardCard(
+            self.body, on_load=self.load_samples, on_repo=self.open_repo,
+            hotkey=self.st.get('hotkey', onboard.DEFAULT_HOTKEY))
 
         self.tool = tk.Frame(self.body, bg=T['panel'], height=scaled(TOOL_H))
         self.tool.pack(fill='x')
@@ -410,4 +417,57 @@ class UiMixin:
             pass
         if self.search_err:
             self.tip('语法：' + self.search_err)
+        # 常用语 Tab 空着时给针对性提示，而不是复述剪贴板那套"复制点什么"
+        self.vlist.set_empty_text('还没有常用语，点 ＋ 新建' if self.tab == 'phrase' else None)
         self.vlist.set_data(items, sel, kw)
+        # 空数据引导：只在剪贴板 Tab、无搜索词、整库为空时显示；列表一旦有内容即自动隐藏。
+        # 判定完全基于数据，所以"用户删光数据"后引导会自然回来。
+        self._sync_onboard(onboard.should_show(self.tab, self.search.get(), self.data))
+
+    # ---------- 空数据引导 ----------
+    def _sync_onboard(self, show):
+        """按需把引导卡片覆盖到列表区域 / 收起。
+
+        卡片建在 build_ui 里、但从不参与 pack；这里用 place(in_=vlist) 精确铺满列表区，
+        展开/折叠、重建 UI（换主题/缩放）都能自然跟随，不必单独记账。
+        """
+        ob = getattr(self, 'onboard', None)
+        if ob is None:
+            return
+        try:
+            if show:
+                if not ob.winfo_ismapped():
+                    ob.place(in_=self.vlist, relx=0, rely=0, relwidth=1, relheight=1)
+                    ob.lift()
+                ob.update_hotkey(self.st.get('hotkey', onboard.DEFAULT_HOTKEY))
+            elif ob.winfo_ismapped():
+                ob.place_forget()
+        except tk.TclError:
+            pass
+
+    def load_samples(self):
+        """把示例记录灌进剪贴板历史 —— 只在用户点「载入示例」时才调用。
+
+        为什么不做成"空数据时自动写入"：那会在用户毫不知情的情况下改掉真实存档，
+        新用户会疑惑"我明明没复制过这些"。示例必须是显式选择的结果，也正因如此，
+        这一处是本功能里唯一会写数据的地方。
+        """
+        items = onboard.sample_items()
+        for it in items:
+            self.data['clip'].append(it)
+        # 让 _seq 跟上示例里的最大 seq，否则之后 ingest 可能分配出重复 seq
+        self._seq = max([self._seq] +
+                        [int(x.get('seq') or 0) for x in self.data['clip']])
+        self.sel_clip = items[0]['id'] if items else None
+        self.tab = 'clip'
+        self.save(True)
+        self.render()
+        self.tip('已载入 %d 条示例，试试 ↑↓ 选择、回车粘贴' % len(items))
+
+    def open_repo(self):
+        """打开项目主页（标准库 webbrowser；失败只提示、不抛出）。"""
+        import webbrowser
+        try:
+            webbrowser.open(onboard.REPO_URL)
+        except Exception as e:
+            self.note('打开仓库链接失败：%s' % e)

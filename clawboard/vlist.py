@@ -35,16 +35,25 @@ class VirtualList(tk.Frame):
         self.canvas.configure(yscrollcommand=self.sb.set)
         self._acc = 0.0        # 滚轮增量累积：触控板/高精度滚轮的 delta 常小于 120
         self.show_num = False  # 按住 Ctrl 时在行首显示 1..9/0
+        self.empty_msg = None  # 自定义空列表提示（None=用默认）；各 Tab 文案不同
         self._empty = None     # 空列表时那句提示文字（canvas text item）
         self.canvas.bind('<MouseWheel>', self._wheel)
         self.canvas.bind('<Configure>', lambda e: self.update_view())
+
+    def set_empty_text(self, msg):
+        """设置空列表提示文案（None 恢复默认）。
+
+        剪贴板 Tab 默认提示"复制点什么"，但常用语 Tab 空着时这句话是错的 ——
+        所以由编排层按 Tab 传入合适文案，列表控件本身不关心业务语义。
+        """
+        self.empty_msg = msg
 
     def _show_empty(self):
         """列表为空时给一句话，别留一大片空白让人以为程序坏了"""
         w = max(60, self.canvas.winfo_width())
         h = max(60, self.canvas.winfo_height())
         msg = ('没有匹配「%s」的条目' % self.kw if self.kw
-               else '这里还没有内容\n复制点什么，它就会出现在这里')
+               else (self.empty_msg or '这里还没有内容\n复制点什么，它就会出现在这里'))
         try:
             if self._empty is None:
                 self._empty = self.canvas.create_text(
