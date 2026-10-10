@@ -73,6 +73,8 @@ SHADOW_RGBA = (18, 21, 30, 40)
 FONT_PATH = r'C:\Windows\Fonts\msyh.ttc'
 CAP_COLOR = (78, 84, 98)
 WIN = '420x600+120+120'                 # 单窗口截图的窗口尺寸/位置
+# 每张图底部统一的品牌引导条（求 Star）
+BRAND_TEXT = '★ github.com/pay-and-gain/ClawBoard · 觉得好用请点个 Star'
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +277,24 @@ def dock_tile(panel_raw, *, panel_y=None, work_h=600, left_gap=110, radius=12,
     return tile
 
 
+def add_brand(img):
+    """在图片最底部加一条统一的品牌引导条（求 Star）。字号随图宽自适应。"""
+    w, h = img.size
+    fs = max(12, min(18, int(w / 33)))
+    bar = fs + 27
+    cv = Image.new('RGBA', (w, h + bar), BG + (255,))
+    cv.alpha_composite(img.convert('RGBA'), (0, 0))
+    d = ImageDraw.Draw(cv)
+    d.line([(0, h), (w - 1, h)], fill=BORDER + (255,))
+    f = _font(fs)
+    tw = d.textlength(BRAND_TEXT, font=f)
+    d.text(((w - tw) / 2, h + (bar - fs * 1.32) / 2), BRAND_TEXT, font=f,
+           fill=CAP_COLOR + (255,))
+    return cv
+
+
 def save(img, name):
+    img = add_brand(img)
     path = os.path.join(OUT_DIR, name)
     if os.path.exists(path):
         os.remove(path)
@@ -321,8 +340,14 @@ def _demo(text, app, ctype=None, fav=0, mins=10, lines=None, img=None):
 
 
 def demo_clip(app):
-    """11 条脱敏演示记录：覆盖链接 / 邮箱 / JSON / 代码 / 手机号 / 日期等类型。"""
+    """脱敏演示记录：覆盖链接 / 邮箱 / JSON / 代码 / 手机号 / 日期等类型。
+
+    首条为「求 Star」引导条目 —— 让截图自身会说话（用户明确要求）。
+    """
     return [
+        _demo('如果 ClawBoard 帮到了你，点个 Star 支持一下吧：'
+              'github.com/pay-and-gain/ClawBoard',
+              'msedge', ctype='url', fav=1, mins=1),
         _demo('https://github.com/pay-and-gain/ClawBoard', 'msedge',
               ctype='url', fav=1, mins=3),
         _demo('user@example.com', 'outlook', mins=9),
@@ -357,8 +382,9 @@ def make_demo_png(path):
     d.rectangle([40, 40, w - 40, h - 40], outline=(255, 255, 255), width=3)
     d.ellipse([90, 120, 240, 270], fill=(255, 214, 102))
     d.polygon([(330, 300), (470, 300), (400, 150)], fill=(255, 255, 255))
-    d.text((60, 320), 'ClawBoard  -  demo image', font=_font(30),
-           fill=(255, 255, 255))
+    d.text((60, 296), 'ClawBoard', font=_font(36), fill=(255, 255, 255))
+    d.text((62, 348), 'github.com/pay-and-gain/ClawBoard', font=_font(19),
+           fill=(236, 242, 252))
     im.save(path, 'PNG')
 
 
