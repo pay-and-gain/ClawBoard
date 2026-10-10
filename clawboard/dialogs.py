@@ -54,6 +54,9 @@ class SettingsWindow:
         self.row_switch(body, '毛玻璃背景（Acrylic，观感依赖桌面壁纸）', 'frosted',
                         after=self.app.apply_effects)
         self.row_switch(body, '复制后弹出提示（行数/字符数）', 'show_toast')
+        # P1-2 音效：盲操（不看屏幕）时的听觉确认，默认关、两个开关互相独立
+        self.row_switch(body, '复制音（剪贴板记下新内容时轻响一声）', 'sound_copy')
+        self.row_switch(body, '粘贴音（成功粘贴后轻响一声）', 'sound_paste')
         self.row_switch(body, '键盘浏览时角落显示完整内容', 'show_preview')
         self.row_switch(body, '触发词快速粘贴（在常用语里设触发词，如 dz→地址）',
                         'trigger_enabled', after=self.app.apply_trigger_setting)

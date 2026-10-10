@@ -1,0 +1,106 @@
+
+== A. 设置与向后兼容 ==
+OK    DEFAULT_SETTINGS 有 sound_copy
+OK    DEFAULT_SETTINGS 有 sound_paste
+OK    sound_copy 默认恰为 False（非假值）
+OK    sound_paste 默认恰为 False（非假值）
+OK    两者类型为 bool
+OK    SettingsDict 注解含 sound_copy
+OK    SettingsDict 注解含 sound_paste
+OK    validate 补默认 sound_copy=False
+OK    validate 补默认 sound_paste=False
+OK    validate 保留显式 True
+OK    非 bool 真值回退默认（1 → False，防误响）
+OK    load_data(v3, 无新字段) 不抛异常
+OK    load_data(v3, 无新字段) → sound_copy False
+OK    load_data(v3, 无新字段) → sound_paste False
+OK    load_data(v1 迁移) 不抛异常
+OK    load_data(v1 迁移) → sound_copy False
+OK    load_data(v1 迁移) → sound_paste False
+OK    load_data 保留 true
+OK    迁移备份落在临时目录（真实目录无新增 .bak）
+
+== B. 开关控制 + C. 静默失败（模块层） ==
+OK    play_copy 播放的正是 COPY_WAV
+OK    play_paste 播放的正是 PASTE_WAV
+OK    flags = SND_MEMORY|SND_ASYNC（异步）  flags=[5, 5]
+OK    PlaySound 抛异常不向调用方传播
+OK    winsound=None 时静默（调用不崩）
+OK    无 winsound 时模块仍可 import
+OK    无 winsound 时调用不崩
+OK    空/畸形数据不崩
+OK    空/None 数据不触发底层播放  实际 0
+OK    音效模块代码未调用同步 Beep（AST，且 _Rec.Beep 会抛）
+
+== D. 音频真实性（解码 + 频率 + 节奏 + 淡入淡出） ==
+OK    COPY 是合法 RIFF/WAVE
+OK    COPY 单声道  nch=1
+OK    COPY 16-bit 采样  sampwidth=2
+OK    COPY 帧率合理(8k~48k)  sr=22050
+OK    COPY 时长 ≤150ms  60.0ms
+OK    COPY 首样本≈0（淡入，无爆音）  first=0
+OK    COPY 末样本≈0（淡出，无爆音）  last=29
+OK    PASTE 是合法 RIFF/WAVE
+OK    PASTE 单声道  nch=1
+OK    PASTE 16-bit 采样  sampwidth=2
+OK    PASTE 帧率合理(8k~48k)  sr=22050
+OK    PASTE 时长 ≤150ms  140.0ms
+OK    PASTE 首样本≈0（淡入，无爆音）  first=0
+OK    PASTE 末样本≈0（淡出，无爆音）  last=-45
+OK    COPY 与 PASTE 字节不同
+OK    COPY 为单音段（单声）  段数=1
+OK    PASTE 为双音段（两声，节奏可辨）  段数=2
+OK    两音段数不同（节奏确实不同），非同一音
+OK    COPY 实测频率≈1175Hz(±12%%)  实测 1167Hz
+OK    PASTE 第一声≈587Hz(±12%%)  实测 582Hz
+OK    PASTE 第二声≈784Hz(±12%%)  实测 778Hz
+OK    PASTE 先低后高（两声可辨方向）  582 -> 778
+OK    真实播放路径不抛异常（冒烟）
+
+== E. 触发时机（复制一次 / 粘贴覆盖面） ==
+OK    复制音：序列号未变，连续 5 次轮询 0 响  实际 0
+OK    复制音：记下新内容时响 1 次  实际 1
+OK    复制音：同号重复轮询不再响（总仍为 1）  实际 1
+OK    复制音：内容变化后再响 1 次（累计 2）  实际 2
+OK    复制音：空白内容不响  实际 0
+OK    复制音：命中忽略规则不响  实际 0
+OK    复制音：长度过滤挡下不响  实际 0
+OK    复制音：manual=True 不响  实际 0
+OK    证据：架空 ingest 后 poll_clip 不发声（挂点在 ingest）  实际 0
+OK    复制音：开关关闭不响  实际 0
+OK    两开关不串：只开 copy 时粘贴不响  实际 0
+OK    粘贴音：paste() 响 1 次  实际 1
+OK    paste() 仍正常返回 True
+OK    两开关不串：只开 paste 时复制不响  实际 0
+OK    粘贴音：只写剪贴板不粘贴时不响  实际 0
+OK    粘贴音：paste_plain 覆盖  实际 1
+OK    粘贴音：quick_paste 覆盖  实际 1
+OK    粘贴音：paste_image 覆盖  实际 1
+OK    paste_image 返回 True
+OK    粘贴音：paste_image 仅写剪贴板时不响  实际 0
+
+== H. 图片复制音（修复轮） ==
+OK    图片 early-return：无 DIB 不响  实际 0
+OK    图片 early-return：转换失败不响  实际 0
+OK    图片 early-return：建目录失败不响  实际 0
+OK    图片 early-return：写文件失败不响  实际 0
+OK    图片：开关关时入库不响  实际 0
+OK    图片：确实入库了 1 条（开关只控声音）  before=5 after=6
+OK    图片：开关开时恰响 1 次  实际 1
+OK    图片端到端：轮询到图片恰响 1 次  实际 1
+OK    图片端到端：未重复响（同号再轮询仍 1）
+OK    图片端到端：走 _ingest_image，不经文本 ingest（互斥）  ingest 调用 0 次
+OK    CF_HDROP 文件路径：仅响 1 次  实际 1
+OK    CF_HDROP：经文本 ingest 恰 1 次（未走图片分支）  ingest 调用 1 次
+OK    F. 粘贴路径不阻塞（200 次 < 0.5s）  0.0264s
+OK    F. 200 次各响一次  实际 200
+OK    F. 模块层 1000 次播放调用立即返回（< 0.1s）  0.0001s
+
+== G. 数据不污染 + 回归前置 ==
+OK    真实数据 sha256 未变  before=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079 after=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079
+OK    真实数据 hash == 期望值  got=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079
+OK    真实目录无新增 .bak  before=['ClawBoard数据.json', 'ClawBoard数据.json.bak'] after=['ClawBoard数据.json', 'ClawBoard数据.json.bak']
+OK    项目根未生成 images/ 残留（图片测试写临时目录）  before=False after=False
+OK    临时数据文件未被产品 save() 改写（NO_SAVE 生效）  A后=1c3efe4a8a7ff0176a3e203ad171384f6af66f9352065414111e2e0c262ee44a 结束=1c3efe4a8a7ff0176a3e203ad171384f6af66f9352065414111e2e0c262ee44a
+
+全部通过

@@ -17,6 +17,7 @@ import io
 import threading
 import tkinter as tk
 
+from clawboard import sound
 from clawboard.config import FONT, BASE_DIR
 from clawboard.theme import T
 from clawboard.runtime import uid
@@ -341,6 +342,12 @@ class InteractionMixin(PhraseMixin):
                     self.root.attributes('-topmost', False)
                 threading.Thread(target=self._paste_worker,
                                  args=(hwnd, need_yield), daemon=True).start()
+            # 粘贴音：走到这里 = 剪贴板已写好 + 粘贴已投递（真正去贴），故播放。
+            # 只把内容放进剪贴板、并不真的去贴（autopaste 关且未 force、或面板已隐藏）
+            # 不在此分支内，因此不会响 —— 那种情况是"复制"而非"粘贴"。
+            # 是否响由独立开关 sound_paste 控制；播放异步、立即返回，绝不阻塞。
+            if self.st.get('sound_paste'):
+                sound.play_paste()
         return True
 
     def paste_image(self, item, force=False):
@@ -372,6 +379,9 @@ class InteractionMixin(PhraseMixin):
                 self.root.attributes('-topmost', False)
             threading.Thread(target=self._paste_worker,
                              args=(hwnd, need_yield), daemon=True).start()
+            # 图片粘贴同样给听觉确认（覆盖范围与文本粘贴一致）
+            if self.st.get('sound_paste'):
+                sound.play_paste()
         return True
 
     def _panel_overlaps(self, hwnd):

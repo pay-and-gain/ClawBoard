@@ -13,6 +13,7 @@ import queue
 import tkinter as tk
 
 from clawboard import runtime
+from clawboard import sound
 from clawboard.config import (
     APP_NAME, APP_VER, DATA_FILE, CRASH_LOG, DEFAULT_SETTINGS,
     FONT, MAX_TEXT, SCHEMA_VERSION, rotate_log_if_needed, BASE_DIR,
@@ -280,9 +281,17 @@ class DataMixin:
         self.save(True)
         if self.tab == 'clip':
             self.render()
-        # 复制提示浮窗（手动添加如拆词/变换不弹）
-        if not manual and self.st.get('show_toast', True):
-            self.show_copy_toast(txt)
+        # 复制反馈：视觉 toast 与听觉音效是**两个独立开关**，互不影响。
+        #
+        # 这里（而非 poll_clip）挂音效是关键：poll_clip 每 400ms 轮询一次，
+        # 若挂在那里会在"空剪贴板"上反复响；ingest 只在下述条件全满足时才走到这行 ——
+        # 序列号真的变了、非空文本、长度过滤与忽略规则都放行 —— 即"确实记录了一条内容"。
+        # manual=True（拆词/变换存新条目）是用户对面板的操作、不是一次剪贴，故两者都不触发。
+        if not manual:
+            if self.st.get('show_toast', True):
+                self.show_copy_toast(txt)
+            if self.st.get('sound_copy'):
+                sound.play_copy()
 
     def _late_source(self, rid):
         """后台补抓来源：竞态下第一次可能抓到自己或抓空，50ms 后再试一次"""
@@ -491,6 +500,12 @@ class SystemMixin:
         if self.tab == 'clip':
             self.render()
         self.tip('已记录图片 %d×%d' % (w, h))
+        # 复制音：图片也是一条"记下的新内容"，与文本路径保持一致（同样受 sound_copy 开关控制）。
+        # 这里没有 manual/去重概念 —— 图片只由轮询触发、每次都是全新条目（不比文本那样查重），
+        # 且 poll_clip 里「图片」与「文本/文件路径」是互斥分支，绝不会既走这里又走 ingest，
+        # 所以按开关播放即可，不会漏也不会重复响。
+        if self.st.get('sound_copy'):
+            sound.play_copy()
 
     def poll_clip(self):
         if not self.st['listen']:
