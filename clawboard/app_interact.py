@@ -22,7 +22,8 @@ from clawboard.theme import T
 from clawboard.runtime import uid
 from clawboard.classify import human_size, preview, to_plain
 from clawboard.timefmt import full_time, now_ms, rel_time
-from clawboard.clipboard import clip_read, clip_write
+from clawboard.clipboard import (clip_read, clip_write,
+                                 clip_write_files, looks_like_file_list)
 from clawboard.image import png_to_dib, write_clipboard_dib
 from clawboard.win32 import (force_foreground, send_ctrl_v,
                              paste_message, can_paste_message,
@@ -168,7 +169,7 @@ class InteractionMixin(PhraseMixin):
         m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
                     activebackground=T['card_h'], activeforeground=T['fg'],
                     font=FONT, relief='flat')
-        m.add_command(label='复制', command=lambda: clip_write(self.trim_for_paste(text)))
+        m.add_command(label='复制', command=lambda: self.write_clip(self.trim_for_paste(text)))
         m.add_command(label='粘贴到上一窗口', command=lambda: self.paste(text, True, it['id']))
         m.add_command(label='粘贴为纯文本', command=lambda: self.paste_plain(it))
         m.add_separator()
@@ -289,6 +290,18 @@ class InteractionMixin(PhraseMixin):
             return text or ''
         return (text or '').strip()
 
+    def write_clip(self, text):
+        """写入剪贴板。
+
+        如果这段文本其实是「资源管理器复制来的文件路径列表」（我们正是这么记录的），
+        就改写成 CF_HDROP —— 粘到聊天窗口是发文件、粘到资源管理器是复制文件，
+        而不是粘出一串路径文字。判定从严，见 clipboard.looks_like_file_list。
+        数据格式没有任何改动：老版本（含共用数据文件的 C 版）读到的仍只是普通文本。
+        """
+        if looks_like_file_list(text):
+            return clip_write_files(text.splitlines())
+        return clip_write(text)
+
     def paste(self, text, force=False, cid=None):
         """粘贴出去：只刷新 last_used_at，绝不改写 created_at"""
         # 图片条目走图片粘贴（写 DIB 而非文本）
@@ -306,7 +319,7 @@ class InteractionMixin(PhraseMixin):
                     x['use_count'] = int(x.get('use_count') or 0) + 1
                     break
             self.save(True)
-        if not clip_write(text):
+        if not self.write_clip(text):
             self.tip('剪贴板被占用，写入失败')
             return False
         if (self.st['autopaste'] or force) and not self.hidden:

@@ -5,7 +5,9 @@ clip_seq/read/write 只操作 CF_UNICODETEXT；clip_is_private 遵守 Windows �
 「别记录我」标记；scan_sensitive/mask_text 负责敏感词识别与打码。
 """
 import ctypes
+import os
 import re
+import struct
 
 from clawboard import runtime
 from clawboard.win32 import (
@@ -80,6 +82,82 @@ def clip_read_files():
         return []
     finally:
         u32.CloseClipboard()
+
+
+# ---- 反向：把路径列表写回剪贴板（CF_HDROP），让粘出去的是「真正的文件」 ----
+_DROPFILES_SIZE = 20        # pFiles(4) + pt.x(4) + pt.y(4) + fNC(4) + fWide(4)
+
+
+def build_hdrop(paths):
+    """构造 CF_HDROP 内存块：DROPFILES 头 + 宽字符路径序列（逐条 \\0，列表尾再一个 \\0）。"""
+    head = ctypes.create_string_buffer(_DROPFILES_SIZE)
+    ctypes.memset(head, 0, _DROPFILES_SIZE)
+    struct.pack_into('<I', head, 0, _DROPFILES_SIZE)   # pFiles：路径数据相对头部的偏移
+    struct.pack_into('<I', head, 16, 1)                # fWide=1：后面是 UTF-16 宽字符
+    body = b''
+    for p in paths:
+        body += p.encode('utf-16-le') + b'\x00\x00'
+    body += b'\x00\x00'                                # 整个列表以双 NUL 结束
+    return head.raw + body
+
+
+def clip_write_files(paths):
+    """把一组文件路径写进剪贴板（CF_HDROP）。
+
+    与 clip_write 的区别：资源管理器复制文件时**只放 CF_HDROP、不放文本**，
+    所以这里也保持一致只写 CF_HDROP —— 粘贴到聊天窗口是「发送文件」、粘贴到资源管理器
+    是「复制文件」，而不是粘出一串路径文字。
+    """
+    paths = [p for p in (paths or []) if p]
+    if not paths:
+        return False
+    raw = build_hdrop(paths)
+    if not u32.OpenClipboard(None):
+        return False
+    try:
+        u32.EmptyClipboard()
+        h = k32.GlobalAlloc(GMEM_MOVEABLE, len(raw))
+        if not h:
+            return False
+        p = k32.GlobalLock(h)
+        if not p:
+            return False
+        ctypes.memmove(p, raw, len(raw))
+        k32.GlobalUnlock(h)
+        if not u32.SetClipboardData(CF_HDROP, h):
+            return False
+    finally:
+        u32.CloseClipboard()
+    runtime.LAST_SEQ = clip_seq()
+    return True
+
+
+_MAX_FILE_LINES = 50        # 超过这么多行就不按文件列表判断，省掉无谓的磁盘探测
+
+
+def looks_like_file_list(text):
+    """文本是否是一串「真实存在的本地路径」（每行一条）。
+
+    资源管理器复制文件时，我们记录下来的正是这种多行路径文本（见 app_services.poll_clip）。
+    粘贴时用它把「路径文字」还原成「真正的文件」—— 好处是**数据格式完全不用动**：
+    老版本（包括共用一个数据文件的 C 版）读到的仍然只是普通文本，互不影响。
+
+    判定刻意从严：行数有上限、每行必须是绝对路径、且必须真实存在。
+    普通多行文本（日志、代码、清单）几乎不可能整段满足，所以不会误判。
+    """
+    if not text:
+        return False
+    lines = [ln.strip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln]
+    if not lines or len(lines) > _MAX_FILE_LINES:
+        return False
+    for ln in lines:
+        is_drive = len(ln) > 2 and ln[1] == ':' and ln[0].isalpha()   # C:\...
+        if not is_drive and not ln.startswith('\\\\'):                # \\server\share
+            return False
+        if not os.path.exists(ln):
+            return False
+    return True
 
 
 def clip_write(text):
