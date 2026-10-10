@@ -74,6 +74,8 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         self.apply_effects()
         self.save(True)      # 把修正后的位置立刻写回，避免下次启动又去纠正一遍
         self.setup_system()
+        # P1-3：启动静默检查一次更新（带频率闸；NO_SAVE 自测模式自动跳过，见 setup_update_check）
+        self.setup_update_check()
         self.render()
         self.root.after(120, self.render)
         self.poll_clip()

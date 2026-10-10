@@ -14,6 +14,7 @@ import tkinter as tk
 
 from clawboard import runtime
 from clawboard import sound
+from clawboard import update
 from clawboard.config import (
     APP_NAME, APP_VER, DATA_FILE, CRASH_LOG, DEFAULT_SETTINGS,
     FONT, MAX_TEXT, SCHEMA_VERSION, rotate_log_if_needed, BASE_DIR,
@@ -326,6 +327,56 @@ class SystemMixin:
             self.note('托盘图标添加失败')
         self.apply_hotkey()
         self.setup_trigger()
+
+    # ---------- P1-3 自动更新 ----------
+    def setup_update_check(self):
+        """启动时静默检查一次更新（带 1 小时频率闸）。
+
+        为什么 NO_SAVE 模式直接返回：自测/压测/截图模式（runtime.NO_SAVE=True）既不该写盘、
+        也不该联网 —— 与本项目"绝不污染真实数据"同一约定，且避免批量跑回归时反复打
+        GitHub 未认证配额、把测试拖慢拖不稳定。
+        """
+        if runtime.NO_SAVE:
+            return
+        try:
+            if not update.should_check(self.st, now_ms()):
+                return
+        except Exception:
+            return
+        self.start_update_check(manual=False)
+
+    def start_update_check(self, manual=False, on_result=None):
+        """发起一次后台检查更新。
+
+        manual=True 时忽略频率闸（设置页「检查更新」按钮用）。无论手动/自动，拿到结果后
+        都写回 update_checked_at —— 既供频率闸下次判断，也让设置页"常驻显示"复用同一次结果。
+        结果经 update.check_async 回到**主线程**再处理（写 settings / 弹 tip / 调 UI）。
+        """
+        def done(ver):
+            try:
+                self.st['update_checked_at'] = now_ms()
+                self.save(True)
+            except Exception:
+                pass
+            update.LATEST = ver
+            new = bool(ver) and update.is_newer(ver, APP_VER)
+            update.LATEST_NEW = new
+            if new:
+                self.tip('发现新版本 %s，可在「设置」里前往下载' % ver)
+            try:
+                self.refresh_update_marker()
+            except Exception:
+                pass
+            if on_result:
+                try:
+                    on_result(ver, new)
+                except Exception:
+                    pass
+
+        try:
+            update.check_async(self.root, done)
+        except Exception as e:
+            self.note('更新检查启动失败：%s' % e)
 
     def setup_trigger(self):
         """启动触发词监听（若设置开启）。全局键盘钩子在独立线程跑消息循环。"""

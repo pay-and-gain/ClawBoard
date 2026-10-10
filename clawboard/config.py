@@ -149,6 +149,9 @@ DEFAULT_SETTINGS.update(
     #（不想被声音打扰的用户保持静音；需要的人各取所需）。
     sound_copy=False,    # 复制音：剪贴板确实记下一条新内容时播放
     sound_paste=False,   # 粘贴音：粘贴动作成功执行后播放
+    # P1-3 自动更新：只提示 + 跳下载页（不静默下载/不换自身）。字段可选、向后兼容。
+    update_check=True,   # 启动时静默检查一次更新（默认开；带 1 小时频率闸）
+    update_checked_at=0,  # 上次检查的毫秒时间戳（0=从未查过），用于频率闸
 )
 # 开机自启不存配置文件，直接读注册表真实状态，避免"设置里开着其实没开"
 
@@ -205,6 +208,8 @@ class SettingsDict(TypedDict, total=False):
     bg_color: str
     sound_copy: bool
     sound_paste: bool
+    update_check: bool
+    update_checked_at: int
 
 
 class AppDataDict(TypedDict, total=False):

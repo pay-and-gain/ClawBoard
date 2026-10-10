@@ -18,6 +18,7 @@ from clawboard.clipboard import mask_text
 from clawboard.widgets import Dialog
 from clawboard.vlist import VirtualList
 from clawboard import onboard
+from clawboard import update
 
 import query as Q          # F3 查询解析器（独立模块，可单测）
 
@@ -114,6 +115,8 @@ class UiMixin:
                 ('🔧', '文本变换（Ctrl+T）', '文本变换', self.open_transform),
                 ('⚙', '设置', '设置', self.open_settings)):
             self._tool_btns.append((txt, self.mk_tool_btn(txt, tip2, cmd, menu2)))
+        # 留一个 ⚙ 的句柄：发现新版本时可给它染色做提示（只改 fg，不动尺寸 → 不影响布局）
+        self.setting_btn = next((b for t, b in self._tool_btns if t == '⚙'), None)
         # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
         self.more_btn = tk.Label(self.tool, text='⋯', bg=T['card'], fg=T['fg2'],
                                  font=FONT_B, width=3, cursor='hand2')
@@ -464,10 +467,35 @@ class UiMixin:
         self.render()
         self.tip('已载入 %d 条示例，试试 ↑↓ 选择、回车粘贴' % len(items))
 
-    def open_repo(self):
-        """打开项目主页（标准库 webbrowser；失败只提示、不抛出）。"""
+    def open_url(self, url):
+        """用系统默认浏览器打开一个链接（标准库 webbrowser；失败只提示、不抛出）。"""
         import webbrowser
         try:
-            webbrowser.open(onboard.REPO_URL)
+            webbrowser.open(url)
         except Exception as e:
-            self.note('打开仓库链接失败：%s' % e)
+            self.note('打开链接失败：%s' % e)
+
+    def open_repo(self):
+        """打开项目主页。"""
+        self.open_url(onboard.REPO_URL)
+
+    def open_releases(self):
+        """打开最新 Release 下载页（P1-3「去下载」入口）。复用 open_url 同一套逻辑。"""
+        self.open_url(onboard.RELEASES_URL)
+
+    def refresh_update_marker(self):
+        """发现新版本时给工具条 ⚙ 按钮染色（只改 fg，尺寸不变 → 不影响 _layout_tool）。
+
+        为什么不加"点"或改文案：⚙ 按钮 width=3，多塞字符可能溢出/撑宽，进而打乱
+        窄面板下的按钮收起阈值；改文字颜色零布局代价。悬停 tip 用现有设置提示即可。
+        """
+        b = getattr(self, 'setting_btn', None)
+        if b is None:
+            return
+        try:
+            if update.LATEST_NEW and update.LATEST:
+                b.configure(fg=T['acc'])
+            else:
+                b.configure(fg=T['fg'])
+        except tk.TclError:
+            pass

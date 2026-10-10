@@ -1,0 +1,156 @@
+
+== A. parse_ver / is_newer（含脏输入与对称性） ==
+OK    APP_VER 是 2.4.0  2.4.0
+OK    parse_ver('v2.4.0') == (2, 4, 0)
+OK    parse_ver('2.4.0') == (2, 4, 0)
+OK    parse_ver('  2.4.0  ') == (2, 4, 0)
+OK    parse_ver('\tv2.4.0\n') == (2, 4, 0)
+OK    parse_ver('v2.4') == (2, 4)
+OK    parse_ver('2.4.0.1') == (2, 4, 0, 1)
+OK    parse_ver('release-2.4.0') == (2, 4, 0)
+OK    parse_ver('v02.004.0') == (2, 4, 0)
+OK    parse_ver('2') == (2,)
+OK    parse_ver('') == None
+OK    parse_ver('   ') == None
+OK    parse_ver('abc') == None
+OK    parse_ver('v') == None
+OK    parse_ver('vX.Y') == None
+OK    parse_ver(None) == None
+OK    parse_ver(123) == None
+OK    parse_ver(2.4) == None
+OK    parse_ver(b'2.4.0') == None
+OK    parse_ver([2, 4, 0]) == None
+OK    parse_ver({'v': 1}) == None
+OK    is_newer('2.4.1', '2.4.0') is True
+OK    is_newer('2.4.0', '2.4.0') is False
+OK    is_newer('2.10.0', '2.9.9') is True
+OK    is_newer('2.9.9', '2.10.0') is False
+OK    is_newer('2.4.0.1', '2.4.0') is True
+OK    is_newer('2.4.0', '2.4.0.1') is False
+OK    is_newer('2.4', '2.4.0') is False
+OK    is_newer('2.4.0', '2.4') is False
+OK    is_newer('v2.4.0', '2.4.0') is False
+OK    is_newer('2.4', 'v2.4.0') is False
+OK    is_newer('2.3.9', '2.4.0') is False
+OK    is_newer('2.4.0', '2.3.9') is True
+OK    is_newer('2.4.0', '2.5.0') is False
+OK    is_newer('10.0.0', '9.9.9') is True
+OK    is_newer('3.0.0', '2.99.99') is True
+OK    is_newer('', '2.4.0') is False
+OK    is_newer(None, '2.4.0') is False
+OK    is_newer('2.4.0', '') is False
+OK    is_newer('2.4.0', None) is False
+OK    is_newer('abc', 'def') is False
+OK    对称性：不存在 a>b 且 b>a  violations=[]
+OK    三分性：a>b / a<b / a≡b 三者恰好其一（含补齐等价语义）  violations=[]
+OK    等价写法互不"更新"（差异不触发提示）  violations=[]
+
+== B. fetch_latest（全静默 + UA/超时/Request 断言） ==
+OK    正常响应解析出 tag_name  got='v9.9.9'
+OK    传入了真正的 Request 对象（不是裸 URL 串）
+OK    请求命中 LATEST_API  'https://api.github.com/repos/pay-and-gain/ClawBoard/releases/latest'
+OK    设置 User-Agent 头（GitHub 无 UA 会 403）  headers={'User-agent': 'ClawBoard-Updater', 'Accept': 'application/vnd.github+json'}
+OK    User-Agent 值非空  ua='ClawBoard-Updater'
+OK    Accept 头存在（GitHub 建议）  headers={'User-agent': 'ClawBoard-Updater', 'Accept': 'application/vnd.github+json'}
+OK    默认 timeout=5 被传给 urlopen  got=5
+OK    响应被 close()（资源清理）
+OK    fetch_latest(timeout=1) 透传 timeout=1  got=1
+OK    tag_name 前后空白被 strip  got='v5.0.0'
+OK    URLError → None 且不抛
+OK    socket.timeout → None 且不抛
+OK    任意异常 → None 且不抛
+OK    HTTP 404 → None
+OK    HTTP 500 → None
+OK    HTTP 403（无 UA 的典型返回）→ None
+OK    status=None → None
+OK    非法 JSON → None
+OK    JSON 顶层是 list → None
+OK    JSON 顶层是 str → None
+OK    缺 tag_name → None
+OK    tag_name 为空白 → None
+OK    tag_name 为空串 → None
+OK    tag_name 非 str（数字）→ None
+OK    tag_name 非 str（null）→ None
+OK    read() 抛错 → None 且不抛
+OK    close() 抛错不影响返回值（finally 内已兜住）
+OK    无 urllib（_url=None）→ None 且不抛
+OK    LATEST 默认 None
+OK    LATEST_NEW 默认 False
+OK    CHECK_INTERVAL_MS == 3600000  3600000
+OK    LATEST_API 指向 github releases/latest api  https://api.github.com/repos/pay-and-gain/ClawBoard/releases/latest
+OK    update.py 仅用标准库（json/re/threading/urllib）  imports=['import json', 'import re', 'import threading', 'import urllib.request as _url']
+
+== C. should_check ==
+OK    开关 False → False
+OK    从未查过(0) → True
+OK    缺失键 → 默认开且从未查 → True
+OK    <1 小时 → False
+OK    59:59 → False
+OK    恰好 1 小时 → True
+OK    >1 小时 → True
+OK    自定义 interval 生效
+OK    update_checked_at 为脏字符串 → 当作 0 → True
+OK    update_checked_at 为 None → 0 → True
+OK    now_ms 脏 → 走 except → True
+OK    时钟回拨(now<last) → 不崩且不触发(False)  got=False
+OK    时钟回拨极端值 → 不崩
+
+== D. check_async / Tk 线程模型 ==
+     · 子线程直接调 root.after 的结果：RuntimeError: main thread is not in main loop
+OK    （复核）工程师所述"子线程调 root.after 会抛 RuntimeError"在本机复现  实际=RuntimeError: main thread is not in main loop
+     · => 结论：该坑**属实**，主线程 after+短轮询的设计是必要的
+OK    check_async 立即返回（慢 0.4s fetch 下 <0.1s）  0.0003s
+OK    返回 daemon 线程对象
+OK    回调收到结果  got='v9.9.9'
+OK    回调在主线程执行  cb_tid=41140 main=41140
+OK    fetch 返回 None → 回调收到 None  got={'v': None}
+OK    root.after 抛错时 check_async 静默容错（不抛）
+
+== E. 启动走闸 / 手动不走闸 + 时间戳回写 ==
+OK    构造 App 全程 NO_SAVE：重定向的临时数据文件未被创建  exists=False
+OK    NO_SAVE：启动检查 0 次调用  实际 0
+OK    NO_SAVE 下 setup_update_check 连 should_check 都不调  +0
+OK    闸：1 小时内启动 → 不发起检查  实际 0
+OK    闸：启动路径确实查询了 should_check  calls=1
+OK    闸：超 1 小时启动 → 发起 1 次检查  实际 1
+OK    闸：开关关闭 → 不检查  实际 0
+OK    手动：不受频率闸限制（仍发起检查）  实际 1
+OK    手动：根本不调用 should_check  should_calls=0
+OK    手动检查后回写 update_checked_at>0  ts=1791660414015
+OK    启动检查后回写 update_checked_at>0  ts=1791660414058
+
+== F. GUI 行为 ==
+OK    空数据 / 正常数据下渲染不报错  None
+OK    发现新版：缓存 LATEST=v9.9.9  'v9.9.9'
+OK    发现新版：LATEST_NEW=True
+OK    发现新版：tip 被调用且含"发现新版本"  tips=['发现新版本 v9.9.9，可在「设置」里前往下载']
+OK    发现新版：⚙ 染成强调色  fg='#4f8cff' acc='#4f8cff'
+OK    ⚙ 染色不改文案（仍为 ⚙）  text='⚙'
+OK    无新版：LATEST_NEW=False
+OK    无新版：⚙ 恢复常规色  fg='#e6e8ee' fg_exp='#e6e8ee'
+OK    无新版：无"发现新版本"tip  tips=[]
+OK    远程更旧(v2.3.0)：不提示、LATEST_NEW=False
+OK    设置页含更新状态/按钮/下载入口
+OK    设置页态1：正在检查…  text='正在检查…'
+OK    设置页态2：发现新版本 v9.9.9  text='发现新版本 v9.9.9'
+OK    设置页态2：露出「去下载」
+OK    设置页态3：已是最新版本  text='已是最新版本'
+OK    设置页态3：收起「去下载」
+OK    设置页手动检查后：就地显示 v9.9.9  text='发现新版本 v9.9.9'
+OK    设置页手动检查后：缓存已更新
+OK    open_releases → 打开 RELEASES_URL  opened=['https://github.com/pay-and-gain/ClawBoard/releases/latest']
+OK    「去下载」绑定到 open_releases（直接调用已验证）
+     · 点击「去下载」标签结果：触发成功
+OK    open_repo 仍打开 REPO_URL（泛化未回归）  opened=['https://github.com/pay-and-gain/ClawBoard']
+OK    隔离临时数据文件可被清理（落盘严格限制在临时目录内）
+
+== G. 数据不污染 + 零联网 ==
+OK    真实数据 sha256 未变  before=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079 after=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079
+OK    真实数据 sha256 == 期望常量  got=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079
+OK    真实目录无新增 .bak / 旁文件  before=['ClawBoard数据.json', 'ClawBoard数据.json.bak'] after=['ClawBoard数据.json', 'ClawBoard数据.json.bak']
+OK    隔离临时数据文件已在收尾清除（未污染真实文件）  exists=False
+OK    全程 0 次对外(非本地回环)真实网络连接  nonlocal=0 attempts=0
+
+== 结果 ==
+
+全部通过

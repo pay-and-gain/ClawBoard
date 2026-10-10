@@ -30,6 +30,8 @@ from clawboard.classify import byte_size, classify, detect_content_type
 
 REPO_URL = 'https://github.com/pay-and-gain/ClawBoard'
 REPO_LABEL = 'github.com/pay-and-gain/ClawBoard'
+# 用户可见的下载入口：latest release 页（P1-3 检查更新后"去下载"跳这里）。
+RELEASES_URL = 'https://github.com/pay-and-gain/ClawBoard/releases/latest'
 DEFAULT_HOTKEY = 'ctrl+shift+v'
 
 # 示例条目标题行：覆盖多种类型（链接 / 代码 / JSON / 颜色 / 普通文本 / 多行），

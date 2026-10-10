@@ -18,6 +18,7 @@ from clawboard.timefmt import full_time, now_ms
 from clawboard.clipboard import clip_write
 from clawboard.win32 import get_autostart, set_autostart
 from clawboard.widgets import ScrollFrame, ThinBar, dark_top, center_on, safe_release
+from clawboard import update
 
 
 class SettingsWindow:
@@ -72,6 +73,7 @@ class SettingsWindow:
                       '例：keepass, *bitwarden*, 微信')
         self.row_text(body, '忽略标题匹配的窗口（正则，分号分隔）', 'ignore_titles',
                       '例：密码; Password; ^私密')
+        self.row_update(body)
         # ---- 底部按钮区（先 pack 到最底部；固定尺寸控件必须先占位，否则被 expand 挤扁）----
         btns = tk.Frame(self.win, bg=T['bg'])
         btns.pack(side='bottom', fill='x', padx=14, pady=(8, 10))
@@ -268,6 +270,84 @@ class SettingsWindow:
                     pass
         lb.bind('<Button-1>', toggle)
         paint()
+
+    # ---------- P1-3 更新区块 ----------
+    def row_update(self, master):
+        """更新区块：当前版本 + 启动检查开关 + 手动「检查更新」+ 就地反馈 + 去下载。
+
+        为什么要常驻在设置页：启动时那一次 tip 是瞬时的（2.5s 后标题栏复原），
+        用户当时没看到就找不回了。这里把结果**常驻**显示，随时能找回入口。
+        反馈就地显示，绝不用模态对话框打断（用户拍板要求）。
+        """
+        r0 = tk.Frame(master, bg=T['bg'])
+        r0.pack(fill='x', pady=(8, 3))
+        tk.Label(r0, text='当前版本', bg=T['bg'], fg=T['fg'], font=FONT_B,
+                 anchor='w').pack(side='left')
+        tk.Label(r0, text='v%s' % APP_VER, bg=T['bg'], fg=T['fg2'],
+                 font=FONT).pack(side='right')
+
+        self.row_switch(master, '启动时检查更新（每小时最多一次）', 'update_check')
+
+        r = tk.Frame(master, bg=T['bg'])
+        r.pack(fill='x', pady=3)
+        self._upd_status = tk.Label(r, text='', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                                    anchor='w', justify='left')
+        self._upd_status.pack(side='left', fill='x', expand=True)
+        # 检查按钮（先 pack 到最右 → 它永远在最右），发现新版时才在它左侧露出「去下载」
+        self._upd_btn = tk.Label(r, text=' 检查更新 ', bg=T['card'], fg=T['fg'],
+                                 font=FONT_SM, cursor='hand2', padx=6, pady=2)
+        self._upd_btn.pack(side='right')
+        self._upd_btn.bind('<Button-1>', lambda e: self.do_update_check())
+        self._upd_dl = tk.Label(r, text=' 去下载 ', bg=T['acc'], fg='#fff',
+                                font=FONT_SM, cursor='hand2', padx=6, pady=2)
+        self._upd_dl.bind('<Button-1>', lambda e: self.app.open_releases())
+        self._upd_checking = False
+        self.paint_update()
+
+    def paint_update(self):
+        """按当前状态刷新就地反馈（正在检查 / 已是最新 / 发现新版 + 去下载）。"""
+        w = getattr(self, '_upd_status', None)
+        if w is None:
+            return
+        try:
+            if not w.winfo_exists():
+                return
+            if self._upd_checking:
+                w.configure(text='正在检查…', fg=T['fg2'])
+            elif update.LATEST_NEW and update.LATEST:
+                w.configure(text='发现新版本 %s' % update.LATEST, fg=T['acc'])
+            elif update.LATEST:
+                w.configure(text='已是最新版本', fg=T['fg2'])
+            else:
+                w.configure(text='未检查', fg=T['fg2'])
+            if update.LATEST_NEW and update.LATEST:
+                if not self._upd_dl.winfo_ismapped():
+                    self._upd_dl.pack(side='right', padx=(0, 6))
+            else:
+                self._upd_dl.pack_forget()
+        except tk.TclError:
+            pass
+
+    def do_update_check(self):
+        """手动检查更新：后台查，结果回主线程后在本区块就地反馈。"""
+        if getattr(self, '_upd_checking', False):
+            return
+        self._upd_checking = True
+        self.paint_update()
+
+        def done(ver, new):
+            self._upd_checking = False
+            try:
+                if self.win.winfo_exists():
+                    self.paint_update()
+            except tk.TclError:
+                pass
+
+        try:
+            self.app.start_update_check(manual=True, on_result=done)
+        except Exception:
+            self._upd_checking = False
+            self.paint_update()
 
     def row_theme(self, master):
         r = tk.Frame(master, bg=T['bg'])
