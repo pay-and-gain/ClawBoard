@@ -16,6 +16,7 @@
   <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
 </p>
 
+- **首次启动引导** —— 新用户空数据时给出上手卡片：3 步上手 + 快捷键 + 一键「载入示例数据」
 - **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
 - **快速粘贴** —— `Ctrl+1..9` / `Ctrl+0` 直接粘贴第 1~10 项
 - **隐私保护** —— 遵守 Windows「别记录我」标记、程序 / 标题忽略名单、敏感内容识别与打码
@@ -26,8 +27,8 @@
 
 | 方式 | 文件 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `ClawBoard-2.3.0-setup.exe` | 双击安装，自动建开始菜单 / 桌面快捷方式，带卸载项 |
-| **绿色版** | `ClawBoard-2.3.0-portable.zip` | 解压即用，不写注册表、不留残留 |
+| **安装包**（推荐） | `ClawBoard-2.4.0-setup.exe` | 双击安装，自动建开始菜单 / 桌面快捷方式，带卸载项 |
+| **绿色版** | `ClawBoard-2.4.0-portable.zip` | 解压即用，不写注册表、不留残留 |
 | **源码** | `Source code (zip/tar.gz)` | Release 页由 GitHub 自动提供；也可 `git clone` |
 
 👉 全部文件在 [**Releases 页面**](../../releases/latest)。
@@ -102,10 +103,10 @@
 ## 🚀 快速开始
 
 ### 方式一：装安装包
-下载 `ClawBoard-2.3.0-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
+下载 `ClawBoard-2.4.0-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
 
 ### 方式二：绿色版
-下载 `ClawBoard-2.3.0-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
+下载 `ClawBoard-2.4.0-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
 
 ### 方式三：从源码运行
 ```bash

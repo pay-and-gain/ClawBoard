@@ -23,6 +23,7 @@ a = Analysis(
         'clawboard.theme', 'clawboard.classify', 'clawboard.timefmt',
         'clawboard.win32', 'clawboard.clipboard', 'clawboard.hotkey',
         'clawboard.widgets', 'clawboard.vlist', 'clawboard.dialogs',
+        'clawboard.onboard',
         'clawboard.app', 'clawboard.app_services', 'clawboard.app_ui',
         'clawboard.app_geometry', 'clawboard.app_interact',
     ],

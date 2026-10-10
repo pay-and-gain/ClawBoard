@@ -22,7 +22,8 @@
 import time
 import tkinter as tk
 
-from clawboard.config import (APP_NAME, FONT, FONT_B, FONT_SM, FONT_TITLE, scaled)
+from clawboard.config import (APP_NAME, APP_VER, FONT, FONT_B, FONT_SM,
+                              FONT_TITLE, scaled)
 from clawboard.theme import T
 from clawboard.runtime import uid
 from clawboard.classify import byte_size, classify, detect_content_type
@@ -33,10 +34,11 @@ DEFAULT_HOTKEY = 'ctrl+shift+v'
 
 # 示例条目标题行：覆盖多种类型（链接 / 代码 / JSON / 颜色 / 普通文本 / 多行），
 # 让新用户一眼看到「这面板能认出不同内容」。字段合法且可正常删除、粘贴。
+# JSON 里的版本号取自 APP_VER，避免示例文案随发版而过期（曾硬编码过固定版本号）。
 _SAMPLE_ROWS = (
     ('https://github.com/pay-and-gain/ClawBoard', 'chrome.exe'),
     ('def greet(name):\n    return "Hello, " + name', 'code.exe'),
-    ('{"tool": "ClawBoard", "version": "2.3.0"}', 'code.exe'),
+    ('{"tool": "ClawBoard", "version": "%s"}' % APP_VER, 'code.exe'),
     ('#4f8cff', 'photoshop.exe'),
     ('这是一条示例：你复制过的文字会自动出现在这里', 'notepad.exe'),
     ('你好，世界\n这是多行示例，用来演示「+N 行」角标', 'wechat.exe'),
