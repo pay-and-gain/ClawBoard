@@ -13,7 +13,7 @@
 > 💛 **如果这个工具帮到了你，点个 Star 支持一下吧** —— 你的每一个 Star 都是持续更新的动力。觉得好用也欢迎分享给同事和朋友。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
 </p>
 
 - **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
@@ -37,7 +37,7 @@
 ### 🔍 高级搜索 · 拼音 · 自动标签
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/search-highlight.png" alt="高级搜索：ClawBoard type:url，命中词高亮" width="440">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/search-highlight.png" alt="高级搜索：ClawBoard type:url，命中词高亮" width="440">
 </p>
 
 - **高级搜索** —— `app:` 来源 / `time:` 时间 / `type:` 类型 / `size:` 大小 / `is:` 状态 / `tag:` 标签 / `-` 排除，多词 AND + 命中高亮
@@ -47,7 +47,7 @@
 ### 💬 常用语与触发词
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/phrases.png" alt="常用语面板与触发词设置" width="460">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/phrases.png" alt="常用语面板与触发词设置" width="460">
 </p>
 
 - **常用语** —— 分组管理、拆词（一段文字批量切成多条）、增删改
@@ -56,7 +56,7 @@
 ### 🖼️ 图片剪贴板
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/image-clipboard.png" alt="图片剪贴板：白色条目 + 角落大图预览" width="560">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/image-clipboard.png" alt="图片剪贴板：白色条目 + 角落大图预览" width="560">
 </p>
 
 - **图片剪贴板** —— 截图 / 复制图片自动记录，选中即在角落弹出大图预览
@@ -65,7 +65,7 @@
 ### 🧰 27 项文本变换 · 批量导出
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/transform.png" alt="文本变换窗口：推荐变换 + 原文 / 结果对照" width="520">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/transform.png" alt="文本变换窗口：推荐变换 + 原文 / 结果对照" width="520">
 </p>
 
 - **27 项文本变换** —— 编解码、大小写、行处理、哈希（MD5 / SHA1 / SHA256）、JSON 格式化…按内容智能推荐
@@ -74,7 +74,7 @@
 ### ⌨️ 命令面板
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/command-palette.png" alt="命令面板：模糊过滤命令" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/command-palette.png" alt="命令面板：模糊过滤命令" width="300">
 </p>
 
 - **`Ctrl+Shift+P` 呼出** —— 输入命令名模糊过滤，回车即执行
@@ -82,9 +82,9 @@
 ### 🎨 外观个性
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/theme-compare.png" alt="亮色 / 暗色主题对比" width="300">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/folded-edge.png" alt="展开面板与双击折叠贴边对比" width="320">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/scale-compare.png" alt="界面等比缩放 50% / 100% / 150%" width="330">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/theme-compare.png" alt="亮色 / 暗色主题对比" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/folded-edge.png" alt="展开面板与双击折叠贴边对比" width="320">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/scale-compare.png" alt="界面等比缩放 50% / 100% / 150%" width="330">
 </p>
 
 - **亮 / 暗主题**、**双击折叠贴边**、**界面等比缩放 50%~150%**（`Ctrl+=` / `Ctrl+-`）
@@ -93,8 +93,8 @@
 ### ⚙️ 设置一目了然
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/settings-general.png" alt="设置 - 基础" width="300">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/settings-advanced.png" alt="设置 - 进阶" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-general.png" alt="设置 - 基础" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png" alt="设置 - 进阶" width="300">
 </p>
 
 - 基础 / 进阶分栏滚动：监听、打码、主题、缩放、忽略名单、长度过滤、开机自启一屏可调

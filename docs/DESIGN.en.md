@@ -73,7 +73,7 @@ Or run the packaged `ClawBoard.exe`. The C build lives in [`ClawBoardC/`](../Cla
 | Quit | `Ctrl+Q`, or "Exit" in settings |
 
 ### Settings
-Two screens (see [general settings](https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/settings-general.png) / [advanced settings](https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/settings-advanced.png)):
+Two screens (see [general settings](https://pay-and-gain.github.io/ClawBoard/images/settings-general.png) / [advanced settings](https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png)):
 
 - **Listen to clipboard** — master switch
 - **Auto-paste on single click** — turn off to copy without pasting

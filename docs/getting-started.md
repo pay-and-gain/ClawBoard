@@ -33,7 +33,7 @@
 就这么多。剩下的一切都是锦上添花。
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/pay-and-gain/ClawBoard@main/docs/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
 </p>
 
 ---
