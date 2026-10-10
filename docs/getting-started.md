@@ -45,7 +45,7 @@
 <details open>
 <summary><b>方式一 · 安装包（推荐）</b></summary>
 
-1. 到 [Releases 页面](../../releases/latest) 下载 `ClawBoard-2.2.4-setup.exe`。
+1. 到 [Releases 页面](../../releases/latest) 下载 `ClawBoard-2.3.0-setup.exe`。
 2. 双击，一路「下一步」。
 3. 安装完成会自动创建开始菜单和桌面快捷方式，并附带卸载项。
 
@@ -57,7 +57,7 @@
 <details>
 <summary><b>方式二 · 绿色版（解压即用）</b></summary>
 
-1. 下载 `ClawBoard-2.2.4-portable.zip`。
+1. 下载 `ClawBoard-2.3.0-portable.zip`。
 2. 解压到任意目录（U 盘、桌面、D 盘都行）。
 3. 双击 `ClawBoard.exe`。
 

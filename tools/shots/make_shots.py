@@ -351,7 +351,7 @@ def demo_clip(app):
         _demo('https://github.com/pay-and-gain/ClawBoard', 'msedge',
               ctype='url', fav=1, mins=3),
         _demo('user@example.com', 'outlook', mins=9),
-        _demo('{"app": "ClawBoard", "version": "2.2.4", "deps": []}', 'Code',
+        _demo('{"app": "ClawBoard", "version": "2.3.0", "deps": []}', 'Code',
               ctype='json', mins=17),
         _demo('13800138000', 'chrome', mins=24),
         _demo('北京市朝阳区示例路 88 号 A 座 12 层', 'notepad', mins=36),

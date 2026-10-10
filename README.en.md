@@ -26,8 +26,8 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-2.2.4-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
-| **Portable** | `ClawBoard-2.2.4-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Installer** (recommended) | `ClawBoard-2.3.0-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-2.3.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
 👉 Everything lives on the [**Releases page**](../../releases/latest).
@@ -102,10 +102,10 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 ## 🚀 Quick start
 
 ### Option 1 — Installer
-Download `ClawBoard-2.2.4-setup.exe` and follow the prompts (Windows 10 / 11).
+Download `ClawBoard-2.3.0-setup.exe` and follow the prompts (Windows 10 / 11).
 
 ### Option 2 — Portable
-Download `ClawBoard-2.2.4-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+Download `ClawBoard-2.3.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 
 ### Option 3 — From source
 ```bash
