@@ -1,0 +1,202 @@
+
+== A1. 实时复制文本 → 记录 1 条（内容/来源/时间戳/复制音） ==
+OK    返回 'text'  got='text'
+OK    记录 1 条  n=1
+OK    内容正确
+OK    来源正确（stub capture_source）  src='clipstub.exe'
+OK    created_at 为真实时间戳（非估算）
+OK    实时文本路径仍播复制音 1 次（quiet 未误伤）  n=1
+OK    实时文本路径仍弹 toast 1 次  n=1
+
+== A2. 实时复制文件（CF_HDROP，无文本）→ 记录路径文本 ==
+OK    返回 'text'  got='text'
+OK    记录 1 条
+OK    多条路径用换行连接  got='C:\\tmp\\a.txt\nC:\\tmp\\b.txt'
+
+== A3. 实时复制图片 → 记录图片条目（含落盘/复制音） ==
+OK    返回 'image'  got='image'
+OK    记录 1 条图片
+OK    图片文件已落盘
+OK    图片路径仍播复制音 1 次  n=1
+OK    图片路径仍弹已记录提示 1 次  tips=['已记录图片 12×7']
+
+== A4. 实时「别记录我」(smart_private 开) → 跳过并 tip ==
+OK    返回 'private'  got='private'
+OK    未入库
+OK    非静默时有 tip  tips=['这条带了「不要记录」标记，已跳过']
+
+== A5. 实时 smart_private 关 → 私密标记被忽略，照常入库 ==
+OK    smart_private=False → 返回 'text' 并入库  r='text' n=1
+
+== A6. 实时 skip_sensitive 命中 → 不入库 + tip ==
+OK    返回 'sensitive'  got='sensitive'
+OK    未入库
+OK    有提示  tips=['检测到手机号，按设置不入库']
+
+== A7. 实时超长文本 → 按 MAX_TEXT 截断 ==
+OK    入库 1 条
+OK    已截断到 MAX_TEXT 并加后缀  len=200011
+OK    截断后前段内容保留
+
+== A8. listen=False → poll_clip 不记录、不抛 ==
+OK    listen=False 时 poll_clip 不抛  exc=None
+OK    listen=False 时不记录
+OK    listen=False 时同步基线 LAST_SEQ  LAST_SEQ=120 seq=120
+
+== A9. 实时轮询集成：seq 变化才记录、不变不记录 ==
+OK    seq 未变 → 不记  n=0
+OK    seq 变 → 记 1 条  n=1
+OK    同 seq 再 poll 不重复
+
+== B1. 库为空 → 不补读，且 is_empty_data 仍 True（保住首启引导） ==
+OK    返回 False  got=False
+OK    clip 仍为空
+OK    onboard.is_empty_data 仍 True
+
+== B2. 库非空 + 与最新一条不同 → 恰好补 1 条 ==
+OK    返回 True  got=True
+OK    恰好补 1 条  n=2
+OK    补的在首位且内容正确
+OK    补记成功 tip 文案正确  tips=['已补记程序未运行时复制的内容；想完全避免漏记：设置 → 开机自启']
+
+== B3. 库非空 + 与最新一条相同 → 不补（去重） ==
+OK    返回 False
+OK    条数不变
+OK    去重时不 tip  tips=[]
+
+== B4. 剪贴板为空 → 不补 ==
+OK    返回 False
+OK    条数不变
+OK    空剪贴板不 tip
+
+== B5. listen=False → 不补 ==
+OK    返回 False
+OK    条数不变
+
+== B6. 图片补记去重（相同/不同/最新非图片） ==
+OK    图片与最新一条相同 → 不补  r=False
+OK    图片不同 → 补 1 张  r=True n=2
+OK    补的图片已落盘
+OK    最新一条不是图片 → 补  r=True
+
+== B7. 私密 / skip_sensitive → 不补 ==
+OK    smart_private → 不补  r=False
+OK    skip_sensitive → 不补  r=False
+
+== B8. 重复调用不重复补 ==
+OK    首次 True / 后续 False  r=True,False,False
+OK    只补一条
+
+== B9. 补记不播复制音（文本 + 图片路径，探针 0 次） ==
+OK    文本+图片补记均不播复制音  n=0
+OK    补记不弹 copy toast  toasts=[]
+
+== B10. 文件路径补记 → 记录路径文本（_t42 未覆盖） ==
+OK    文件路径补记成功  r=True
+
+== B11. 触发点②：监听由关变开 → 补一次 ==
+OK    toggle 后 listen=False
+OK    重开监听补记了关闭期间的内容
+OK    重开后 listen=True
+
+== B12. 库为空但"常用语"非空 → 会补记（is_empty_data 只看整库） ==
+OK    is_empty_data=False（组非空）
+OK    补记发生  r=True
+
+== B13. catchup 只比"最新一条"，但 ingest 的全库去重兜底 → 不产生重复行 ==
+OK    不产生重复行（ingest 全库去重兜底）  clip=['A', 'B']
+OK    原 A 被置顶并计数+1  clip=['A', 'B']
+OK    （信息项）此情形 catchup 仍返回 True（内容已在库中，仅刷新置顶）  r=True
+
+== C1. quiet=True 仍应用 min_len：不补且不误报"已补记" ==
+OK    _handle 返回 'skip'（非 'text'）  got='skip'
+OK    catchup 返回 False（不误报已补记）  got=False
+OK    未入库
+OK    静默：补记被过滤时不 tip  tips=[]
+OK    静默：不播复制音
+
+== C2. quiet=True 仍应用 max_len：超长不补 ==
+OK    超 max_len → 不补  r=False
+
+== C3. quiet=True 仍应用忽略名单（quiet 只静默默认反馈，不跳过规则） ==
+OK    命中忽略名单 → 'skip'  got='skip'
+OK    未入库
+OK    静默：未 tip  tips=[]
+
+== C4. manual=True 既有语义未破坏：大 min_len 仍入库、不播音 ==
+OK    manual=True 跳过长度过滤 → 入库  ok=True n=2
+OK    manual=True 不播复制音
+OK    manual=True 不弹 toast
+
+== C5. ingest() 返回值区分"被过滤/被忽略"与"成功入库" ==
+OK    被长度过滤 → False  got=False
+OK    被忽略名单拦下 → False  got=False
+OK    成功入库 → True  got=True
+OK    重复刷新也返回 True  got=True
+
+== C6. catchup 返回值与"真的入库"一致（image/text=True，其余 False） ==
+OK    text → True
+OK    empty → False
+OK    dup → False
+OK    private → False
+OK    sensitive → False
+
+== D1. 忽略名单(默认含 keepass/1password…)在补记路径：实证是否漏记 ==
+OK    忽略名单在补记路径【未能】拦下 → 确实漏记（复现工程师说法）  r=True leaked=1 src='explorer.exe'
+OK    补记条目记录的来源=补记那一刻的前台窗口(explorer.exe)，非原应用  source_app='explorer.exe'
+
+== D2. 对照：同一内容在实时路径（前台=keepass）会被正确拦下 ==
+OK    实时路径命中忽略名单 → 不入库  status='skip'
+
+== D3. 对照：密码管理器官方「别记录我」标记在补记路径【有效】 ==
+OK    带官方标记 → 补记路径正确跳过（smart_private 有效）  r=False
+
+== D4. 影响面：单次补记触发最多漏记 1 条（Windows 剪贴板只留最后一条） ==
+OK    第 1 次触发：漏记恰好 1 条  rA=True n1=1
+OK    第 2 次触发（内容不同）：再漏记 1 条  rB=True n2=2
+
+== P. 性能修复：email 预筛/上界 行为断言 + 其余正则线性复核 ==
+OK    email 上界单一来源 config.EMAIL_SCAN_MAXLEN=10000（两处共用）  sens=10000 tag=10000 cfg=10000
+OK    email 预筛字符均为 @（两处）
+OK    仅 email 设了预筛/上界（其余项无 cap）
+OK    无 @ 长文本：email 正则(敏感) 调用 0 次  n=0
+OK    无 @ 长文本：email 正则(标签) 调用 0 次  n=0
+OK    scan_sensitive(60000 无@) 已修复为毫秒级  t=0.003s
+OK    detect_tags(60000 无@) 已修复为毫秒级  t=0.003s
+OK    含 @ 且短：email 正则(敏感) 被调用  n=1
+OK    含 @ 且短：email 正则(标签) 被调用  n=1
+OK    正常邮箱仍被识别为敏感  hits=['邮箱']
+OK    正常邮箱仍被识别为标签  tags=['email']
+OK    含 @ 且超上界：email 正则(敏感) 被跳过  n=0
+OK    含 @ 且超上界：email 正则(标签) 被跳过  n=0
+OK    （已声明取舍）超长文本里的邮箱不再被识别  hs=[] ht=[]
+OK    超长文本仍检出 手机号  hits=['手机号']
+OK    超长文本仍检出 身份证  hits=['身份证', '银行卡']
+OK    超长文本仍检出 银行卡  hits=['银行卡']
+OK    超长文本仍检出 Token  hits=['Token']
+OK    超长文本仍检出 密码  hits=['密码']
+OK    超长文本 detect_tags 仍打 phone 标签
+OK    超长文本 detect_tags 仍打 token 标签
+OK    构造边界长度正确  l10=10000 l11=10001
+OK    len=10000 含@ → 正则被调用且检出  n=1 hits=['邮箱']
+OK    len=10001 含@ → 正则跳过、不崩溃  n=0
+OK    敏感正则 身份证 线性(<0.05s@60000)  t=0.0004s
+OK    敏感正则 银行卡 线性(<0.05s@60000)  t=0.0004s
+OK    敏感正则 手机号 线性(<0.05s@60000)  t=0.0004s
+OK    敏感正则 Token 线性(<0.05s@60000)  t=0.0003s
+OK    敏感正则 密码 线性(<0.05s@60000)  t=0.0010s
+OK    标签正则 url 线性(<0.05s@60000)  t=0.0003s
+OK    标签正则 date 线性(<0.05s@60000)  t=0.0008s
+OK    detect_tags(纯数字 60000) 线性  t=0.0031s
+OK    实时路径 60K 无@ 端到端毫秒级  r='text' t=0.007s
+OK    补记路径 200K 无@ 端到端毫秒级  r=True t=0.018s
+OK    正常长度含邮箱 → 判定为敏感  hits=['邮箱']
+OK    mask_sensitive 仍能打码邮箱  masked='联系人 a@b***om 请回信'
+OK    正常长度含邮箱 + skip_sensitive → 仍不入库  st='sensitive'
+
+== E. 数据不污染 ==
+OK    真实数据 sha256 未变  before=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079 after=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079
+OK    真实目录无新增 .bak / 无新文件  before=['ClawBoard数据.json', 'ClawBoard数据.json.bak'] after=['ClawBoard数据.json', 'ClawBoard数据.json.bak']
+OK    临时数据文件未被写入（NO_SAVE 生效）
+
+全部通过
