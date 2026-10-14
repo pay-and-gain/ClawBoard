@@ -341,6 +341,7 @@ class InteractionMixin(PhraseMixin):
                 if need_yield:
                     self.root.attributes('-topmost', False)
                     self._topmost_applied = False   # 同步实际值，粘完交给 sync_topmost 恢复
+                    self._topmost_yield = True      # 让位进行中：期间 poll_bg 不得把它改回置顶
                 threading.Thread(target=self._paste_worker,
                                  args=(hwnd, need_yield), daemon=True).start()
             # 粘贴音：走到这里 = 剪贴板已写好 + 粘贴已投递（真正去贴），故播放。
@@ -379,6 +380,7 @@ class InteractionMixin(PhraseMixin):
             if need_yield:
                 self.root.attributes('-topmost', False)
                 self._topmost_applied = False       # 同步实际值，粘完交给 sync_topmost 恢复
+                self._topmost_yield = True          # 让位进行中：期间 poll_bg 不得把它改回置顶
             threading.Thread(target=self._paste_worker,
                              args=(hwnd, need_yield), daemon=True).start()
             # 图片粘贴同样给听觉确认（覆盖范围与文本粘贴一致）
@@ -404,6 +406,7 @@ class InteractionMixin(PhraseMixin):
         paste_message(hwnd)
 
     def _restore_topmost(self):
+        self._topmost_yield = False        # 让位结束：撤销标志，再按状态机重新决定
         if not self.hidden:
             # 走统一状态机：尊重用户意图 + 全屏抑制，而不是无脑置顶
             self.sync_topmost()

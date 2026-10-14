@@ -262,4 +262,5 @@ class AppState:
     _topmost_user: bool = True             # 用户期望的置顶意图（全屏抑制不改它）
     _user_pulled: bool = False             # 用户是否「主动呼出」了面板（热键/托盘/重置位置）；隐藏时清除
     _fg_fullscreen: bool = False           # 前台窗口当前是否全屏（poll_bg 每轮刷新）
+    _topmost_yield: bool = False           # 粘贴「让位」进行中：临时关置顶，粘完由 _restore_topmost 清除
     _topmost_applied: Optional[bool] = None  # 上次真正写进 -topmost 的值（去重，避免每 120ms 空设）

@@ -489,6 +489,15 @@ u32.GetMonitorInfoW.restype = wintypes.BOOL
 # 坑③同类：HWND 在 64 位是 64 位句柄，不声明 argtypes 会被 ctypes 按 c_int 截断。
 u32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 u32.GetClassNameW.restype = ctypes.c_int
+# 窗口状态 / 样式：用于「有标题栏的最大化窗口不算全屏」这条排除。
+# GetWindowLongW 的 HWND 同样必须声明 argtypes（64 位句柄截断坑），返回值用 LONG。
+u32.IsZoomed.argtypes = [wintypes.HWND]
+u32.IsZoomed.restype = wintypes.BOOL
+u32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+u32.GetWindowLongW.restype = wintypes.LONG
+
+GWL_STYLE = -16
+WS_CAPTION = 0x00C00000          # WS_BORDER | WS_DLGFRAME
 
 # 桌面 / Shell 窗口本来就铺满整屏，但绝不是「全屏程序」，必须排除；否则桌面上
 # 会永远被判成全屏。Shell_TrayWnd/Shell_SecondaryTrayWnd 是任务栏（本就不满屏），一并排除。
@@ -538,15 +547,38 @@ def rect_covers(win_rect, mon_rect, tol=2):
             wr >= mr - tol and wb >= mb - tol)
 
 
+def is_zoomed(hwnd):
+    """窗口是否处于「最大化」（WS_MAXIMIZE）。取不到当 False。"""
+    try:
+        return bool(u32.IsZoomed(wintypes.HWND(int(hwnd or 0))))
+    except Exception:
+        return False
+
+
+def has_caption(hwnd):
+    """窗口是否有标题栏（WS_CAPTION 位）。取不到当 False。"""
+    try:
+        style = u32.GetWindowLongW(wintypes.HWND(int(hwnd or 0)), GWL_STYLE)
+    except Exception:
+        return False
+    return bool(style & WS_CAPTION)
+
+
 def is_fullscreen_window(hwnd, self_hwnd=0):
     """窗口是否「全屏」覆盖了它所在显示器的整个画面。
 
     用于「全屏程序前台时面板不再置顶」。排除三类：句柄 0 / 面板自己 / 桌面与 Shell。
+    另排除「有标题栏的最大化窗口」—— 那不是全屏程序（见下）。
 
     坐标系：进程启动时已声明 per-monitor DPI 感知（init_dpi_awareness →
     SetProcessDpiAwareness(2)），因此 GetWindowRect 与 GetMonitorInfoW 返回的都是
     **物理像素**，可直接比较，不需要再乘 / 除任何缩放系数（这正是本机双屏 + 主屏
     125% 下不引入 1/缩放 偏差的关键）。
+
+    为什么要「IsZoomed 且有标题栏」这条额外排除：当用户**开启任务栏自动隐藏**时，
+    普通最大化窗口的 `rcWork == rcMonitor`，它的矩形会**等于整个显示器** —— 几何上
+    与真全屏无法区分，只能靠窗口状态来分。三类真全屏都不会命中该排除：独占全屏与
+    F11 式全屏 IsZoomed=False；无边框窗口化全屏即便 IsZoomed 也没有 WS_CAPTION。
     """
     hwnd = int(hwnd or 0)
     if not hwnd:
@@ -555,7 +587,11 @@ def is_fullscreen_window(hwnd, self_hwnd=0):
         return False
     if class_name_of(hwnd).lower() in _DESKTOP_CLASSES:
         return False
-    return rect_covers(window_rect(hwnd), monitor_rect_of(hwnd), 2)
+    if not rect_covers(window_rect(hwnd), monitor_rect_of(hwnd), 2):
+        return False
+    if is_zoomed(hwnd) and has_caption(hwnd):
+        return False
+    return True
 
 
 

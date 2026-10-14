@@ -310,15 +310,15 @@ class GeometryMixin:
     def sync_topmost(self):
         """按「用户意图 + 全屏抑制」统一决定实际的 -topmost，只在变化时才写。
 
-        实际置顶 = 用户意图(_topmost_user) 且 未被全屏抑制。
-        全屏抑制条件：前台是全屏程序 **且** 面板不是用户主动呼出来的 ——
-        这时面板应被游戏覆盖（保持可见，只是不再置顶）。
+        实际置顶 = 用户意图(_topmost_user) 且 未被抑制。
+        抑制有两种：① 前台是全屏程序**且**面板不是用户主动呼出来的（这时面板应被
+        游戏覆盖，保持可见、只是不再置顶）；② 粘贴「让位」进行中（_topmost_yield）。
 
         只改 `root.attributes('-topmost')`，**绝不改 `_topmost_user`**：否则用户
         手动取消置顶后，一进一出全屏就会被强行改回置顶（用户会认为是 bug）。
         """
         want = bool(self._topmost_user)
-        if self._fg_fullscreen and not self._user_pulled:
+        if self._topmost_yield or (self._fg_fullscreen and not self._user_pulled):
             want = False
         if want != self._topmost_applied:
             try:

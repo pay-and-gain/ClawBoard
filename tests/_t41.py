@@ -104,14 +104,17 @@ check('None 输入 → False', rect_covers(None, (0, 0, 1, 1)) is False
 # B. is_fullscreen_window（stub 掉 Win32 取数，纯逻辑）
 # ============================================================
 section('B. is_fullscreen_window（含多屏 / 排除项）')
-_owr, _omr, _ocn = W.window_rect, W.monitor_rect_of, W.class_name_of
+_owr, _omr, _ocn, _oiz, _ohc = (W.window_rect, W.monitor_rect_of, W.class_name_of,
+                                W.is_zoomed, W.has_caption)
 
 
-def sim(win_rect, mon_rect, cls='chrome_widgetwin_1'):
-    """把 is_fullscreen_window 依赖的三个取数函数替换成固定值。"""
+def sim(win_rect, mon_rect, cls='chrome_widgetwin_1', zoomed=False, caption=False):
+    """把 is_fullscreen_window 依赖的取数函数全部替换成固定值。"""
     W.window_rect = lambda h: win_rect
     W.monitor_rect_of = lambda h: mon_rect
     W.class_name_of = lambda h: cls
+    W.is_zoomed = lambda h: zoomed
+    W.has_caption = lambda h: caption
     return W.is_fullscreen_window(0x1234, 0)
 
 
@@ -137,10 +140,26 @@ for cls in ('progman', 'workerw', 'shell_traywnd', 'Progman', 'WorkerW'):
     check('桌面/Shell 类 %s → False' % cls,
           sim((0, 0, 2560, 1440), (0, 0, 2560, 1440), cls) is False)
 
+# 回归 1：排除「有标题栏的最大化窗口」（任务栏自动隐藏时它与真全屏几何不可分）
+check('最大化普通窗口（IsZoomed + 有标题栏）→ 非全屏',
+      sim((0, 0, 2560, 1440), (0, 0, 2560, 1440), zoomed=True, caption=True) is False)
+check('无边框窗口化全屏（IsZoomed + 无标题栏）→ 全屏',
+      sim((0, 0, 2560, 1440), (0, 0, 2560, 1440), zoomed=True, caption=False) is True)
+check('独占 / F11 全屏（非 IsZoomed，有标题栏）→ 全屏',
+      sim((0, 0, 2560, 1440), (0, 0, 2560, 1440), zoomed=False, caption=True) is True)
+check('非 IsZoomed 覆盖整屏 → 全屏',
+      sim((0, 0, 2560, 1440), (0, 0, 2560, 1440), zoomed=False, caption=False) is True)
+check('任务栏自动隐藏 + 最大化窗口覆盖整屏（rcWork==rcMonitor）→ 非全屏',
+      sim((2560, 157, 5120, 1757), (2560, 157, 5120, 1757),
+          zoomed=True, caption=True) is False)
+
 # 还原
 W.window_rect, W.monitor_rect_of, W.class_name_of = _owr, _omr, _ocn
+W.is_zoomed, W.has_caption = _oiz, _ohc
 check('真实 monitor_rect_of 可调用不抛', monitor_rect_of(0) is None)
 check('真实 class_name_of 不抛', isinstance(class_name_of(0), str))
+check('真实 is_zoomed / has_caption 不抛',
+      W.is_zoomed(0) in (True, False) and W.has_caption(0) in (True, False))
 
 # ============================================================
 # C. 置顶状态机（GUI，stub 全屏检测，不真进全屏）
@@ -228,6 +247,41 @@ check('全屏循环中用户意图恒为 True', app._topmost_user is True)
 check('全屏循环实际值：on→False / off→True',
       entered == [(True, False), (False, True), (True, False), (False, True)],
       'got=%r' % (entered,))
+
+# 回归 2：粘贴「让位」不被 poll_bg（每 120ms 的 sync_topmost）在 120ms 内撤销
+app._topmost_user = True
+app._user_pulled = False
+app.hidden = False                         # 让位发生在面板可见时（与真实粘贴一致）
+try:
+    app.root.deiconify()
+except Exception:
+    pass
+set_fs(False)
+app.root.attributes('-topmost', False)
+app._topmost_applied = False
+app._topmost_yield = True                  # 模拟让位开始
+for _ in range(5):                         # 等价于 poll_bg 连续多轮
+    app.sync_topmost()
+check('让位期间连续 sync_topmost → 保持不置顶', topmost() is False)
+app._restore_topmost()
+check('让位结束（非全屏）→ 恢复置顶',
+      topmost() is True and app._topmost_yield is False)
+
+# 让位期间若正全屏 → 仍不置顶（让位与全屏抑制叠加）
+app._fg_fullscreen = True
+FS['on'] = True
+app.root.attributes('-topmost', False)
+app._topmost_applied = False
+app._topmost_yield = True
+for _ in range(3):
+    app.sync_topmost()
+check('让位 + 全屏 → 仍不置顶', topmost() is False)
+app._restore_topmost()
+check('让位结束 + 全屏 → 仍不置顶（全屏抑制接管）', topmost() is False)
+app._fg_fullscreen = False
+FS['on'] = False
+app.sync_topmost()
+check('退出全屏后恢复置顶', topmost() is True)
 
 # 还原 stub + 销毁 GUI
 S.is_fullscreen_window = getattr(S, 'is_fullscreen_window')
