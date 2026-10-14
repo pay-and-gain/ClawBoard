@@ -126,7 +126,21 @@ FILES_BEFORE = sidecars()
 # ============================================================
 section('A. parse_ver / is_newer（含脏输入与对称性）')
 
-check('APP_VER 是 2.6.0', APP_VER == '2.6.0', APP_VER)
+# 版本闸改成「版本无关」写法：不再硬编码版本号 —— 否则每次发版都要改测试，
+# 等于让测试字面量束缚产品。改为断言 APP_VER 与打包脚本 installer.iss 的
+# MyAppVersion 一致：这才是真正会漏改、且历史上真漏过的地方（AGENTS.md 第 2 节的五处同步）。
+_ISS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    'packaging', 'installer.iss')
+_iss_v = ''
+try:
+    for _ln in open(_ISS, encoding='utf-8', errors='ignore'):
+        if _ln.strip().startswith('#define MyAppVersion'):
+            _iss_v = _ln.split('"')[1]
+            break
+except Exception:
+    pass
+check('APP_VER 与 installer.iss 的 MyAppVersion 一致（版本单一来源）',
+      _iss_v == APP_VER, '%s vs %s' % (APP_VER, _iss_v or '?'))
 
 _parse_cases = [
     ('v2.4.0', (2, 4, 0)),

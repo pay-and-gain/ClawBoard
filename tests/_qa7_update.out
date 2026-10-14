@@ -1,6 +1,6 @@
 
 == A. parse_ver / is_newer（含脏输入与对称性） ==
-OK    APP_VER 是 2.6.0  2.6.0
+OK    APP_VER 与 installer.iss 的 MyAppVersion 一致（版本单一来源）  2.6.0 vs 2.6.0
 OK    parse_ver('v2.4.0') == (2, 4, 0)
 OK    parse_ver('2.4.0') == (2, 4, 0)
 OK    parse_ver('  2.4.0  ') == (2, 4, 0)
@@ -102,7 +102,7 @@ OK    （复核）工程师所述"子线程调 root.after 会抛 RuntimeError"�
 OK    check_async 立即返回（慢 0.4s fetch 下 <0.1s）  0.0003s
 OK    返回 daemon 线程对象
 OK    回调收到结果  got='v9.9.9'
-OK    回调在主线程执行  cb_tid=54420 main=54420
+OK    回调在主线程执行  cb_tid=72756 main=72756
 OK    fetch 返回 None → 回调收到 None  got={'v': None}
 OK    root.after 抛错时 check_async 静默容错（不抛）
 
@@ -116,8 +116,8 @@ OK    闸：超 1 小时启动 → 发起 1 次检查  实际 1
 OK    闸：开关关闭 → 不检查  实际 0
 OK    手动：不受频率闸限制（仍发起检查）  实际 1
 OK    手动：根本不调用 should_check  should_calls=0
-OK    手动检查后回写 update_checked_at>0  ts=1791981349631
-OK    启动检查后回写 update_checked_at>0  ts=1791981349688
+OK    手动检查后回写 update_checked_at>0  ts=1791981701254
+OK    启动检查后回写 update_checked_at>0  ts=1791981701310
 
 == F. GUI 行为 ==
 OK    空数据 / 正常数据下渲染不报错  None
