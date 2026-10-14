@@ -24,6 +24,7 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 - **Sound feedback** — independent copy / paste cues (off by default), so blind pastes can still be confirmed by ear
 - **Update notice** — a silent check at startup; when a new version exists, one-click "Download" in Settings. Notifies only, never nags
 - **Won't cover fullscreen games** — drops always-on-top while a fullscreen app is focused, so it's hidden behind the game; summoning the panel still works
+- **Multi-monitor freedom** — drag the panel freely between displays and dock it across them; edge-hiding and "Reset position" follow the display the panel is **actually on** (fixed in v2.6.1)
 
 👉 New here? Read the [**Getting Started guide**](docs/getting-started.en.md) — up and running in 30 seconds, fluent in 5 minutes.
 
@@ -31,8 +32,8 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-2.6.0-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
-| **Portable** | `ClawBoard-2.6.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Installer** (recommended) | `ClawBoard-2.6.1-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-2.6.1-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
 👉 Everything lives on the [**Releases page**](../../releases/latest).
@@ -108,10 +109,10 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 ## 🚀 Quick start
 
 ### Option 1 — Installer
-Download `ClawBoard-2.6.0-setup.exe` and follow the prompts (Windows 10 / 11).
+Download `ClawBoard-2.6.1-setup.exe` and follow the prompts (Windows 10 / 11).
 
 ### Option 2 — Portable
-Download `ClawBoard-2.6.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+Download `ClawBoard-2.6.1-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 
 ### Option 3 — From source
 ```bash
