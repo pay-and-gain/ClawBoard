@@ -70,7 +70,7 @@ class SettingsWindow:
         self.row_switch(body, '遵守「别记录我」标记（密码管理器用）', 'smart_private')
         self.row_switch(body, '清空历史时保留收藏项', 'keep_on_clear')
         self.row_text(body, '忽略这些程序（逗号分隔，支持 * ?）', 'ignore_apps',
-                      '例：keepass, *bitwarden*, 微信')
+                      '例：keepass, *bitwarden*, 微信。⚠ 对「开机时补记」的剪贴板内容无效（补记无从得知来源应用），请依赖密码管理器自身的「不记录」标记')
         self.row_text(body, '忽略标题匹配的窗口（正则，分号分隔）', 'ignore_titles',
                       '例：密码; Password; ^私密')
         self.row_update(body)
@@ -458,7 +458,7 @@ class SettingsWindow:
                  anchor='w').pack(fill='x')
         if hint:
             tk.Label(r, text=hint, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
-                     anchor='w').pack(fill='x')
+                     anchor='w', justify='left', wraplength=340).pack(fill='x')
         v = tk.StringVar(value=str(self.app.st.get(key) or ''))
         e = tk.Entry(r, textvariable=v, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
                      relief='flat', font=FONT_SM, bd=0, highlightthickness=1,

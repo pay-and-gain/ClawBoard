@@ -16,7 +16,9 @@ K. tip 文案：未开开机自启时追加建议、已开时不追加
 L. 补记**应用** min_len / max_len 长度过滤（补记是自动行为，必须尊重用户的过滤设置）
 M. manual 路径（拆词/变换存新条目）行为未变：仍跳过长度过滤、不播复制音；
    常规 ingest（quiet=False）仍播复制音（quiet 未误伤常规路径）
-N. 数据不污染：真实 ClawBoard数据.json sha256 前后一致、无新增 .bak
+N. 长文本正则预筛：无 '@' 时**根本不调用** email 正则（行为断言）；含 '@' 的超长文本被
+   上界跳过；60K/200K 耗时 < 1s（优化前 60K≈6.6s / 200K≈130s）
+O. 数据不污染：真实 ClawBoard数据.json sha256 前后一致、无新增 .bak
 
 为什么全程 stub 剪贴板：本机剪贴板会被外部进程锁定（OpenClipboard → ERROR_ACCESS_DENIED，
 _t35/_t37 已知环境问题），直接读真剪贴板会不稳定；补记逻辑只依赖「读到的内容」，用 stub
@@ -33,6 +35,7 @@ import inspect
 import os
 import sys
 import tempfile
+import time
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2)   # 与产品一致的 DPI 感知
@@ -59,6 +62,9 @@ RT.NO_SAVE = True
 
 from clawboard import onboard                 # noqa: E402
 from clawboard.onboard import is_empty_data   # noqa: E402
+import clawboard.clipboard as CB              # noqa: E402
+import clawboard.tag as TG                    # noqa: E402
+from clawboard.config import EMAIL_SCAN_MAXLEN  # noqa: E402
 
 OK = True
 LOG = []
@@ -444,9 +450,92 @@ check('常规 ingest 仍播复制音（quiet 未误伤常规路径）', _played3
       '实际 %d' % _played3['n'])
 
 # ============================================================
-# N. 数据不污染
+# N. 长文本正则预筛（行为断言 + 耗时上界）
 # ============================================================
-section('N. 数据不污染')
+section('N. 长文本正则预筛')
+
+
+class _Probe:
+    """替身正则：只记录被调用次数、永不匹配 —— 用来断言"预筛是否真的挡住了调用"。"""
+
+    def __init__(self):
+        self.calls = 0
+        self.pattern = 'PROBE'          # 兼容 dict(...) / .pattern 读取
+
+    def search(self, s):
+        self.calls += 1
+        return None
+
+
+def _timed(fn, *a):
+    t0 = time.perf_counter()
+    fn(*a)
+    return time.perf_counter() - t0
+
+
+# --- scan_sensitive：无 '@' 时不得调用 email 正则；有 '@' 才调用 ---
+_orig_sens = list(CB.SENS_PATTERNS)
+_p1 = _Probe()
+CB.SENS_PATTERNS = [(n, (_p1 if n == '邮箱' else p)) for n, p in _orig_sens]
+try:
+    CB.scan_sensitive('a' * 2000)               # 无 @
+    c_no_at = _p1.calls
+    CB.scan_sensitive('a' * 2000 + '@')         # 有 @（且长度在上界内）
+    c_at = _p1.calls
+finally:
+    CB.SENS_PATTERNS = _orig_sens
+check('scan_sensitive：无 @ 不调用 email 正则', c_no_at == 0, 'calls=%d' % c_no_at)
+check('scan_sensitive：有 @ 才调用 email 正则', c_at >= 1, 'calls=%d' % c_at)
+
+# --- scan_sensitive：含 '@' 但超长 → 上界跳过，不调用 email 正则 ---
+_p2 = _Probe()
+CB.SENS_PATTERNS = [(n, (_p2 if n == '邮箱' else p)) for n, p in _orig_sens]
+try:
+    CB.scan_sensitive('@' + 'a' * (EMAIL_SCAN_MAXLEN + 10))
+    c_over = _p2.calls
+    CB.scan_sensitive('@' + 'a' * (EMAIL_SCAN_MAXLEN - 10))   # 上界内 → 调用
+    c_under = _p2.calls
+finally:
+    CB.SENS_PATTERNS = _orig_sens
+check('scan_sensitive：含 @ 但超上界 → 跳过 email 正则', c_over == 0, 'calls=%d' % c_over)
+check('scan_sensitive：上界内仍调用 email 正则', c_under >= 1, 'calls=%d' % c_under)
+
+# --- detect_tags：同款预筛 ---
+_orig_tag = list(TG._TAG_PATTERNS)
+_p3 = _Probe()
+TG._TAG_PATTERNS = [(n, (_p3 if n == 'email' else p)) for n, p in _orig_tag]
+try:
+    TG.detect_tags('a' * 2000)                  # 无 @
+    d_no_at = _p3.calls
+    TG.detect_tags('a' * 2000 + '@')            # 有 @
+    d_at = _p3.calls
+finally:
+    TG._TAG_PATTERNS = _orig_tag
+check('detect_tags：无 @ 不调用 email 正则', d_no_at == 0, 'calls=%d' % d_no_at)
+check('detect_tags：有 @ 才调用 email 正则', d_at >= 1, 'calls=%d' % d_at)
+
+# --- 行为未破坏：正常邮箱仍能被识别 ---
+check('scan_sensitive 仍命中正常邮箱',
+      '邮箱' in CB.scan_sensitive('联系 alice@example.com 谢谢'))
+check('detect_tags 仍命中正常邮箱',
+      'email' in TG.detect_tags('联系 alice@example.com 谢谢'))
+
+# --- 耗时上界（宽松兜底断言；优化前 60K≈6.6s、200K≈130s）---
+_b1 = 'a' * 60000
+_b2 = 'a' * 200000
+_t1s = _timed(CB.scan_sensitive, _b1)
+_t1t = _timed(TG.detect_tags, _b1)
+_t2s = _timed(CB.scan_sensitive, _b2)
+_t2t = _timed(TG.detect_tags, _b2)
+check('scan_sensitive(60K) < 1s', _t1s < 1.0, 't=%.3fs' % _t1s)
+check('detect_tags(60K) < 1s', _t1t < 1.0, 't=%.3fs' % _t1t)
+check('scan_sensitive(200K) < 1s', _t2s < 1.0, 't=%.3fs' % _t2s)
+check('detect_tags(200K) < 1s', _t2t < 1.0, 't=%.3fs' % _t2t)
+
+# ============================================================
+# O. 数据不污染
+# ============================================================
+section('O. 数据不污染')
 check('真实数据 sha256 未变',
       HASH_BEFORE == file_hash(REAL_DATA) ==
       '5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079',

@@ -81,6 +81,12 @@ MIN_W, MIN_H = 280, 340   # 面板最小尺寸。再小的话：标题栏 30 + �
                           # 留给列表的宽度会被徽章/序号列吃掉，正文只剩几十像素 —— 看起来像"没有内容"
 MAX_TEXT = 200000    # 单条文本入库上限（字符）
 
+# email 正则 [\w.+-]+@... 在「长且不含 @」的文本上是 O(n²)（每个起点都把 [\w.+-]+ 贪婪匹配
+# 到底再回溯找 @）。补记把它搬到了启动主线程 → 必须兜底。超过该长度的文本跳过 email 识别。
+# ⚠️ 这是**安全相关**取舍：超长文本里的邮箱将不再触发 skip_sensitive / mask_sensitive；
+# 详见 clipboard.scan_sensitive 的注释。scan_sensitive 与 detect_tags 共用此值（单一来源）。
+EMAIL_SCAN_MAXLEN = 10000
+
 SCHEMA_VERSION = 3
 
 # ---------- UI 等比缩放 ----------

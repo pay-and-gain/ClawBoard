@@ -10,6 +10,7 @@ import re
 import struct
 
 from clawboard import runtime
+from clawboard.config import EMAIL_SCAN_MAXLEN
 from clawboard.win32 import (
     u32, k32, CF_UNICODETEXT, CF_HDROP, GMEM_MOVEABLE,
     CF_NAME_EXCLUDE, CF_NAME_INCLUDE_HISTORY, shell32,
@@ -240,9 +241,32 @@ SENS_PATTERNS = [
 ]
 
 
+# 每条敏感规则可带一个「廉价前置判据」：跑正则前先做 O(n) 的 `in` 预判，命中才跑正则。
+# 为什么必须：email 正则 [\w.+-]+@... 在「长且**不含 @**」的文本上是 O(n²) —— 每个起点都把
+# [\w.+-]+ 贪婪匹配到底、再逐字回溯找 @（实测 60K 字符≈6.6s、200K≈130s）。补记把它搬到了
+# 启动主线程 → 会假死；实时复制同样中招。'@' 缺失时正则必不可能命中，预筛**零功能损失**。
+# 逐条实测：身份证/银行卡/手机号是定长数字+边界（线性），Token/密码是字面前缀（线性），
+# 均无需预筛（见 tests/_t42.py 的耗时回归）。
+_SENS_PREFILTER = {'邮箱': '@'}
+# 含 '@' 的**超长**文本仍是 O(n²)（'@' 只是缩小平方路径的范围、没消除）。超过该长度即跳过
+# email 正则，为最坏耗时兜底。代价见 config.EMAIL_SCAN_MAXLEN 注释（安全相关、非静默）。
+_SENS_MAXLEN = {'邮箱': EMAIL_SCAN_MAXLEN}
+
+
 def scan_sensitive(text):
     try:
-        return [name for name, pat in SENS_PATTERNS if pat.search(text or '')]
+        text = text or ''
+        out = []
+        for name, pat in SENS_PATTERNS:
+            need = _SENS_PREFILTER.get(name)
+            if need and need not in text:
+                continue
+            cap = _SENS_MAXLEN.get(name, 0)
+            if cap and len(text) > cap:
+                continue
+            if pat.search(text):
+                out.append(name)
+        return out
     except Exception:
         return []
 
