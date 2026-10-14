@@ -80,4 +80,7 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         self.render()
         self.root.after(120, self.render)
         self.poll_clip()
+        # 补记「程序未运行时复制的内容」：启动那一刻剪贴板里已有、但序列号没变化的最后一条。
+        # 放在 poll_clip 之后（首次 poll 因 seq==基线不会记任何东西），用户不会感到重复。
+        self.catchup_clipboard()
         self.poll_bg()          # 前台窗口记录已并入本循环，定时器从 3 个降到 2 个

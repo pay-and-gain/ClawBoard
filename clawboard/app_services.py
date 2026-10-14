@@ -5,6 +5,7 @@ DataMixin：norm_item / load_data / save_now / validate / save / note / next_seq
 SystemMixin：setup_system / apply_hotkey / on_hotkey / on_tray / poll_bg / _poll_hotkey /
              poll_clip / quit_app / toggle_listen / tray_menu / about
 """
+import hashlib
 import json
 import os
 import time
@@ -25,7 +26,7 @@ from clawboard.classify import classify, crop_items, detect_content_type, byte_s
 from clawboard.timefmt import now_ms, match_ignore, backup_data, migrate
 from clawboard.win32 import (
     u32, MOD_CONTROL, MOD_SHIFT, MOD_ALT, VK_V, VK_CONTROL,
-    capture_source, window_title_of,
+    capture_source, window_title_of, get_autostart,
     start_keyboard_hook, stop_keyboard_hook, send_backspaces, send_ctrl_v,
     is_fullscreen_window, top_hwnd,
 )
@@ -37,6 +38,9 @@ from clawboard.image import clipboard_has_image, read_clipboard_dib, dib_to_png
 from clawboard.tag import detect_tags
 from clawboard.hotkey import HiddenWindow
 from clawboard.widgets import Dialog
+# 空库判定复用 onboard 的现成实现：是「是否显示首次启动引导卡片」的唯一来源，
+# 两处若各写一套，补记与引导就会因判定口径不同而互相打架。
+from clawboard.onboard import is_empty_data
 
 
 class DataMixin:
@@ -522,28 +526,41 @@ class SystemMixin:
             self._hk_down = False
 
     # ---------- 循环 ----------
-    def _ingest_image(self):
-        """剪贴板里有图片时入库：读 DIB → 转 PNG → 存盘 → 记录条目。"""
+    def _read_clip_image(self):
+        """读剪贴板图片并转成 PNG，返回 (png 字节, 宽, 高)；无图片/失败返回 None。
+
+        抽成独立方法（而非留在 _ingest_image 里）是为了让 poll_clip 与
+        catchup_clipboard 复用同一次读取+转换：补记需要先拿到 PNG 的哈希去查重，
+        若各读一次就得多开一次剪贴板、还可能两次读到不同内容。
+        """
         dib = read_clipboard_dib()
         if not dib:
-            return
+            return None
         try:
-            png, w, h = dib_to_png(dib)
+            return dib_to_png(dib)
         except Exception as e:
             self.note('图片转换失败：%s' % e)
-            return
+            return None
+
+    def _store_image(self, png, w, h, quiet=False):
+        """把已转好的 PNG 落盘并入库（含条数裁剪）。
+
+        quiet=True 用于补记场景：用户并没有在复制，不弹「已记录图片」提示、
+        也不播复制音（理由见 catchup_clipboard）。
+        返回是否成功入库（落盘/建目录失败返回 False），供补记判断"是否真的补了"。
+        """
         img_dir = os.path.join(BASE_DIR, 'images')
         try:
             os.makedirs(img_dir, exist_ok=True)
         except Exception:
-            return
+            return False
         fname = '%d.png' % now_ms()
         try:
             with open(os.path.join(img_dir, fname), 'wb') as f:
                 f.write(png)
         except Exception as e:
             self.note('图片保存失败：%s' % e)
-            return
+            return False
         ts = now_ms()
         rec = {'id': uid(), 'text': '[图片]', 'created_at': ts, 'updated_at': ts,
                'seq': self.next_seq(), 'content_type': 'image',
@@ -558,13 +575,153 @@ class SystemMixin:
         self.save(True)
         if self.tab == 'clip':
             self.render()
-        self.tip('已记录图片 %d×%d' % (w, h))
-        # 复制音：图片也是一条"记下的新内容"，与文本路径保持一致（同样受 sound_copy 开关控制）。
-        # 这里没有 manual/去重概念 —— 图片只由轮询触发、每次都是全新条目（不比文本那样查重），
-        # 且 poll_clip 里「图片」与「文本/文件路径」是互斥分支，绝不会既走这里又走 ingest，
-        # 所以按开关播放即可，不会漏也不会重复响。
-        if self.st.get('sound_copy'):
-            sound.play_copy()
+        if not quiet:
+            self.tip('已记录图片 %d×%d' % (w, h))
+            # 复制音：图片也是一条"记下的新内容"，与文本路径保持一致（同样受 sound_copy 开关控制）。
+            # 这里没有 manual/去重概念 —— 图片只由轮询触发、每次都是全新条目（不比文本那样查重），
+            # 且 poll_clip 里「图片」与「文本/文件路径」是互斥分支，绝不会既走这里又走 ingest，
+            # 所以按开关播放即可，不会漏也不会重复响。
+            if self.st.get('sound_copy'):
+                sound.play_copy()
+        return True
+
+    def _ingest_image(self):
+        """poll_clip 用：剪贴板里有图片时入库（读 DIB → 转 PNG → 存盘 → 记录）。"""
+        got = self._read_clip_image()
+        if got:
+            self._store_image(got[0], got[1], got[2])
+
+    def _is_dup_text(self, txt):
+        """补记去重：剪贴板文本与库中**最新一条**的 text 完全相同 → 视为重复。
+
+        场景：用户在程序运行时复制了 X（已入库）→ 关掉程序 → 再打开，剪贴板里仍是 X。
+        若不比对就会把同一条 X 再记一次，用户会莫名其妙多出一条重复。
+        只比「最新一条」而不全库搜索，是因为补记的语义就是"最后复制的那条"。
+        """
+        clip = self.data.get('clip') or []
+        return bool(clip) and clip[0].get('text') == txt
+
+    def _is_dup_image(self, png):
+        """补记去重：剪贴板图片与库中**最新一条**（当其本身是图片）的 PNG 内容相同 → 重复。
+
+        对比 PNG 的 sha256：同一张图再次复制时 DIB 完全相同，dib_to_png 是确定性编码
+        （zlib 对同输入同级别输出一致），所以"字节相同"足以代表"同一张图"。
+        最新一条不是图片 / 没有图片文件 / 读盘失败 → 一律当作不重复（宁可多记一条，
+        也不要因为一次读盘异常把用户真正新复制的内容丢掉）。
+        """
+        clip = self.data.get('clip') or []
+        if not clip:
+            return False
+        top = clip[0]
+        if top.get('content_type') != 'image':
+            return False
+        fname = top.get('image_path')
+        if not fname:
+            return False
+        try:
+            with open(os.path.join(BASE_DIR, 'images', fname), 'rb') as f:
+                return hashlib.sha256(f.read()).digest() == hashlib.sha256(png).digest()
+        except Exception:
+            return False
+
+    def _handle_clipboard_change(self, quiet=False, dedup=False):
+        """剪贴板内容的统一处理：私密 → 图片 → 文本/文件路径，三选一。
+
+        poll_clip（序列号变化时）与 catchup_clipboard（补记程序未运行期间复制的内容）
+        共用这一套分支，避免两处各写一套、日后行为悄悄分叉。
+
+        quiet=True：补记场景，抑制复制音与提示浮窗（用户并没有在复制）。
+        dedup=True：补记场景，入库前先与库中最新一条比对，相同则不重复入库。
+
+        返回处理结果字符串，供调用方决定是否需要额外反馈：
+          'private' 私密跳过 / 'image' 记了图片 / 'text' 记了文本或文件路径 /
+          'empty' 无可记录内容 / 'sensitive' 命中敏感词按设置不入库 /
+          'dup' 与库中最新一条相同已跳过（仅 dedup=True 时可能返回）。
+        """
+        if self.st.get('smart_private', True) and clip_is_private():
+            # 密码管理器用这个标记告诉所有监听者「这条别记」。补记时静默跳过即可。
+            if not quiet:
+                self.tip('这条带了「不要记录」标记，已跳过')
+            return 'private'
+        if clipboard_has_image():
+            got = self._read_clip_image()
+            if not got:
+                return 'empty'
+            png, w, h = got
+            if dedup and self._is_dup_image(png):
+                return 'dup'
+            # 落盘/入库失败就不算"记了图片"，返回 'empty' 避免补记误报成功
+            return 'image' if self._store_image(png, w, h, quiet=quiet) else 'empty'
+        txt = clip_read()
+        if not (txt and txt.strip()):
+            # 资源管理器复制文件：剪贴板只有 CF_HDROP、没有文本，
+            # 把文件路径当普通文本记录（多条用换行连接）。
+            files = clip_read_files()
+            if files:
+                txt = '\n'.join(files)
+        if not (txt and txt.strip()):
+            return 'empty'
+        if len(txt) > MAX_TEXT:
+            txt = txt[:MAX_TEXT] + '\n…（内容超长已截断）'
+        if dedup and self._is_dup_text(txt):
+            return 'dup'
+        hits = scan_sensitive(txt)
+        if hits and self.st['skip_sensitive']:
+            if not quiet:
+                self.tip('检测到%s，按设置不入库' % '/'.join(hits))
+            return 'sensitive'
+        # manual=quiet：补记时借 ingest 的 manual 语义跳过复制音与提示浮窗
+        #（ingest 末尾的音效/toast 只在 manual=False 时触发）。
+        self.ingest(txt, hits, manual=quiet)
+        return 'text'
+
+    def catchup_clipboard(self):
+        """补记「程序未运行时复制的内容」（A 方案）。
+
+        背景：poll_clip 只在剪贴板序列号**变化**时入库；而程序启动那一刻剪贴板里已经
+        有内容，clipboard.py 又把初始序列号设成基线，于是"关程序期间复制的那条"永远
+        不会入库 —— 这就是用户反馈的"程序没运行时复制的内容不会出现在历史里"。
+
+        Windows 剪贴板只保留**最后一条**，所以这里只能补回"你最后一次复制的那条"，
+        更早的无法恢复（技术上限，不试图突破）。
+
+        在「程序启动后」与「监听开关由关变开时」两处触发（关闭监听期间的内容同样会漏）。
+        返回是否真的补记了一条（供测试与调用方判断）。
+        """
+        # ① 用户关掉了监听 → 明确表示不要记录，跳过。
+        if not self.st.get('listen'):
+            return False
+        # ② 库为空 → 跳过。P1-1 的首次启动引导卡片，触发条件正是"整库为空"
+        #    （onboard.is_empty_data / should_show）。若这里补读一条，库就不再为空，
+        #    引导卡片将永远不显示 —— 新用户第一眼看不到"这是什么、怎么用"。
+        #    所以空库时绝不补读（复用 onboard 的判定，保证与引导口径一致）。
+        if is_empty_data(self.data):
+            return False
+        # ③ 补读：复用 poll_clip 的三分支逻辑（私密 → 图片 → 文本/文件路径）。
+        #    quiet=True 抑制复制音/toast —— 补读发生在启动时，用户并没有在复制，
+        #    突然响一声或弹个浮窗很莫名；dedup=True 与库中最新一条比对，防止"重复记一条"。
+        status = self._handle_clipboard_change(quiet=True, dedup=True)
+        if status in ('image', 'text'):
+            self.tip(self._catchup_tip())
+            return True
+        # 'empty' / 'private' / 'sensitive' / 'dup' 都属于"没补记"，静默返回。
+        return False
+
+    @staticmethod
+    def _catchup_tip():
+        """补记成功后的提示文案。
+
+        补读出来的这条用户没有印象"我复制过"，很容易疑惑它从哪来，所以要 tip 一句。
+        若开机自启没开，再补一句建议：开机自启才能让程序常驻后台、从源头减少漏记。
+        """
+        msg = '已补记程序未运行时复制的内容'
+        try:
+            on, _ = get_autostart()
+        except Exception:
+            on = True     # 读不到注册表就当作已开启，避免无谓地打扰用户
+        if not on:
+            msg += '；想完全避免漏记：设置 → 开机自启'
+        return msg
 
     def poll_clip(self):
         if not self.st['listen']:
@@ -575,27 +732,8 @@ class SystemMixin:
             seq = clip_seq()
             if seq != runtime.LAST_SEQ:
                 runtime.LAST_SEQ = seq
-                if self.st.get('smart_private', True) and clip_is_private():
-                    # 密码管理器用这个标记告诉所有监听者「这条别记」
-                    self.tip('这条带了「不要记录」标记，已跳过')
-                elif clipboard_has_image():
-                    self._ingest_image()
-                else:
-                    txt = clip_read()
-                    if not (txt and txt.strip()):
-                        # 资源管理器复制文件：剪贴板只有 CF_HDROP、没有文本，
-                        # 把文件路径当普通文本记录（多条用换行连接）。
-                        files = clip_read_files()
-                        if files:
-                            txt = '\n'.join(files)
-                    if txt and txt.strip():
-                        if len(txt) > MAX_TEXT:
-                            txt = txt[:MAX_TEXT] + '\n…（内容超长已截断）'
-                        hits = scan_sensitive(txt)
-                        if hits and self.st['skip_sensitive']:
-                            self.tip('检测到%s，按设置不入库' % '/'.join(hits))
-                        else:
-                            self.ingest(txt, hits)
+                # 三分支逻辑抽到 _handle_clipboard_change，与「补记」共用（见 catchup_clipboard）
+                self._handle_clipboard_change()
         except Exception as e:
             self.note('监听异常：%s' % e)
         self.root.after(400, self.poll_clip)
@@ -617,9 +755,14 @@ class SystemMixin:
         self.root.destroy()
 
     def toggle_listen(self):
+        was = self.st['listen']
         self.st['listen'] = not self.st['listen']
         self.save(True)
         self.tip('监听已暂停' if not self.st['listen'] else '监听已恢复')
+        # 由关变开：关闭监听期间复制的内容同样会漏，重开时补记一次
+        #（catchup 成功时会把上面的 tip 覆盖成"已补记…"，用户就知道这条哪来的）。
+        if not was and self.st['listen']:
+            self.catchup_clipboard()
 
     def tray_menu(self):
         m = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,

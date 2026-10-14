@@ -7,10 +7,8 @@ import threading
 import subprocess
 import tkinter as tk
 
-from clawboard.config import (
-    APP_NAME, APP_VER, BASE_DIR, DATA_FILE, DEFAULT_SETTINGS, SCHEMA_VERSION,
-    WHEEL_LINES, FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS,
-)
+from clawboard.config import (APP_NAME, APP_VER, BASE_DIR, DATA_FILE, DEFAULT_SETTINGS,
+                              SCHEMA_VERSION, WHEEL_LINES, FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS)
 from clawboard.theme import T, set_theme
 from clawboard.runtime import tx
 from clawboard.classify import byte_size, detect_content_type
@@ -500,8 +498,8 @@ class SettingsWindow:
 
         r2 = tk.Frame(master, bg=T['bg'])
         r2.pack(fill='x', pady=(0, 4))
-        b = tk.Label(r2, text='不想改注册表？点这里打开启动文件夹手动放快捷方式',
-                     bg=T['bg'], fg=T['fg2'], font=FONT_SM, cursor='hand2', anchor='w')
+        b = tk.Label(r2, text='开启后程序常驻后台，能减少“程序没运行时复制的内容被漏记”；不想改注册表？点此手动放快捷方式',
+                     bg=T['bg'], fg=T['fg2'], font=FONT_SM, cursor='hand2', anchor='w', justify='left', wraplength=340)
         b.pack(anchor='w')
         b.bind('<Button-1>', lambda e: self.open_startup())
 
@@ -706,8 +704,7 @@ class ExportDialog:
         self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         body = tk.Frame(self.win, bg=T['bg'])
         body.pack(fill='both', expand=True, padx=14, pady=10)
-        tk.Label(body, text='共 %d 条待导出（多选优先，否则导出当前筛选结果）'
-                 % len(items), bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(fill='x')
+        tk.Label(body, text='共 %d 条待导出（多选优先，否则导出当前筛选结果）' % len(items), bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(fill='x')
         self.fmt = tk.StringVar(value='txt')
         self.rows = []
         for v, label in (('txt', 'TXT（序号/时间/来源/内容）'),
@@ -732,8 +729,7 @@ class ExportDialog:
         self.paint()
         sens = sum(1 for x in items if x.get('sens'))
         if sens:
-            tk.Label(body, text='⚠ 其中 %d 条含敏感内容，导出为明文' % sens,
-                     bg=T['bg'], fg=T['danger'], font=FONT_SM, anchor='w').pack(fill='x', pady=4)
+            tk.Label(body, text='⚠ 其中 %d 条含敏感内容，导出为明文' % sens, bg=T['bg'], fg=T['danger'], font=FONT_SM, anchor='w').pack(fill='x', pady=4)
         btns = tk.Frame(body, bg=T['bg'])
         btns.pack(fill='x', pady=(8, 0))
         b = tk.Label(btns, text='导出到本目录', bg=T['acc'], fg='#fff', font=FONT_B,
