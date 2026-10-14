@@ -306,10 +306,32 @@ class GeometryMixin:
         r.bind('<B1-Motion>', self.on_zone_drag)
         r.bind('<ButtonRelease-1>', self.on_zone_release)
 
+    # ---------- 置顶状态机（用户意图 × 全屏抑制） ----------
+    def sync_topmost(self):
+        """按「用户意图 + 全屏抑制」统一决定实际的 -topmost，只在变化时才写。
+
+        实际置顶 = 用户意图(_topmost_user) 且 未被全屏抑制。
+        全屏抑制条件：前台是全屏程序 **且** 面板不是用户主动呼出来的 ——
+        这时面板应被游戏覆盖（保持可见，只是不再置顶）。
+
+        只改 `root.attributes('-topmost')`，**绝不改 `_topmost_user`**：否则用户
+        手动取消置顶后，一进一出全屏就会被强行改回置顶（用户会认为是 bug）。
+        """
+        want = bool(self._topmost_user)
+        if self._fg_fullscreen and not self._user_pulled:
+            want = False
+        if want != self._topmost_applied:
+            try:
+                self.root.attributes('-topmost', want)
+            except Exception:
+                pass
+            self._topmost_applied = want
+
     def toggle_pin(self):
-        cur = bool(self.root.attributes('-topmost'))
-        self.root.attributes('-topmost', not cur)
-        self.tip('已取消置顶' if cur else '窗口已置顶')
+        """标题栏 📌：切换用户期望置顶的意图，再由 sync_topmost 落地。"""
+        self._topmost_user = not bool(self._topmost_user)
+        self.sync_topmost()
+        self.tip('窗口已置顶' if self._topmost_user else '已取消置顶')
 
     # ---------- 靠边自动隐藏（像输入法一样贴边收纳） ----------
     def edge_update(self):
@@ -434,6 +456,8 @@ class GeometryMixin:
             return
         self.root.withdraw()
         self.hidden = True
+        self._user_pulled = False          # 面板已收起 → 撤销「主动呼出」，回到可被全屏抑制的状态
+        self.sync_topmost()
         if not self._told_tray:
             self._told_tray = True
             self.hw.balloon('ClawBoard 还在后台运行',
@@ -446,8 +470,9 @@ class GeometryMixin:
         w, h = 340, 480
         _, _, r, b = self.primary_monitor()
         self.root.geometry('%dx%d+%d+%d' % (w, h, r - w - 14, b - h - 62))
+        self._user_pulled = True           # 用户主动找回面板 → 视为主动呼出
         self.root.deiconify()
-        self.root.attributes('-topmost', True)
+        self.sync_topmost()
         self.root.lift()
         self.hidden = False
         self._edge_hidden = False
@@ -468,8 +493,9 @@ class GeometryMixin:
     def toggle_show(self):
         if self.hidden:
             self.hidden = False
+            self._user_pulled = True       # 热键/托盘呼出 → 全屏时也保持置顶可见
             self.root.deiconify()
-            self.root.attributes('-topmost', True)
+            self.sync_topmost()
             self.root.lift()
             if not self.ensure_onscreen():
                 self.focus_search()

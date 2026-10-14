@@ -38,6 +38,7 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         root.title(APP_NAME)
         root.overrideredirect(True)
         root.attributes('-topmost', True)
+        self._topmost_applied = True    # 与上一行同步：供 sync_topmost 去重，避免开始时重复写
         root.attributes('-alpha', 0.97)
         root.configure(bg=T['bg'])
         root.bind('<Escape>', lambda e: self.hide())

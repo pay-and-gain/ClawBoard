@@ -471,6 +471,93 @@ def rects_overlap(a, b):
     return not (ar <= bx or br <= ax or ab <= by or bb <= ay)
 
 
+# ---------------- 全屏检测（全屏程序前台时面板不再置顶） ----------------
+MONITOR_DEFAULTTONEAREST = 2
+
+
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.DWORD),
+                ('rcMonitor', wintypes.RECT),
+                ('rcWork', wintypes.RECT),
+                ('dwFlags', wintypes.DWORD)]
+
+
+u32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+u32.MonitorFromWindow.restype = wintypes.HMONITOR
+u32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+u32.GetMonitorInfoW.restype = wintypes.BOOL
+# 坑③同类：HWND 在 64 位是 64 位句柄，不声明 argtypes 会被 ctypes 按 c_int 截断。
+u32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+u32.GetClassNameW.restype = ctypes.c_int
+
+# 桌面 / Shell 窗口本来就铺满整屏，但绝不是「全屏程序」，必须排除；否则桌面上
+# 会永远被判成全屏。Shell_TrayWnd/Shell_SecondaryTrayWnd 是任务栏（本就不满屏），一并排除。
+_DESKTOP_CLASSES = ('progman', 'workerw', 'shell_traywnd', 'shell_secondarytraywnd')
+
+
+def class_name_of(hwnd):
+    """窗口类名（小写）。取不到返回 ''。"""
+    try:
+        buf = ctypes.create_unicode_buffer(256)
+        u32.GetClassNameW(wintypes.HWND(int(hwnd or 0)), buf, 256)
+        return (buf.value or '').lower()
+    except Exception:
+        return ''
+
+
+def monitor_rect_of(hwnd):
+    """窗口**所在显示器**的完整矩形 (left, top, right, bottom)，物理像素。
+
+    必须用 MonitorFromWindow 取窗口所在的那台显示器 —— 本机双屏 + 主屏 125%，
+    拿主屏尺寸去比副屏上的窗口会直接判错。
+    """
+    hwnd = int(hwnd or 0)
+    if not hwnd:
+        return None
+    try:
+        hmon = u32.MonitorFromWindow(wintypes.HWND(hwnd), MONITOR_DEFAULTTONEAREST)
+        if not hmon:
+            return None
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        if u32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
+            r = mi.rcMonitor
+            return (r.left, r.top, r.right, r.bottom)
+    except Exception:
+        pass
+    return None
+
+
+def rect_covers(win_rect, mon_rect, tol=2):
+    """窗口矩形是否覆盖整个显示器矩形（容差 tol 像素，容忍边框 / 取整误差）。"""
+    if not win_rect or not mon_rect:
+        return False
+    wl, wt, wr, wb = win_rect
+    ml, mt, mr, mb = mon_rect
+    return (wl <= ml + tol and wt <= mt + tol and
+            wr >= mr - tol and wb >= mb - tol)
+
+
+def is_fullscreen_window(hwnd, self_hwnd=0):
+    """窗口是否「全屏」覆盖了它所在显示器的整个画面。
+
+    用于「全屏程序前台时面板不再置顶」。排除三类：句柄 0 / 面板自己 / 桌面与 Shell。
+
+    坐标系：进程启动时已声明 per-monitor DPI 感知（init_dpi_awareness →
+    SetProcessDpiAwareness(2)），因此 GetWindowRect 与 GetMonitorInfoW 返回的都是
+    **物理像素**，可直接比较，不需要再乘 / 除任何缩放系数（这正是本机双屏 + 主屏
+    125% 下不引入 1/缩放 偏差的关键）。
+    """
+    hwnd = int(hwnd or 0)
+    if not hwnd:
+        return False
+    if self_hwnd and hwnd == int(self_hwnd):
+        return False
+    if class_name_of(hwnd).lower() in _DESKTOP_CLASSES:
+        return False
+    return rect_covers(window_rect(hwnd), monitor_rect_of(hwnd), 2)
+
+
 
 def force_foreground(hwnd, timeout=0.35):
     """把目标窗口抢回前台，并且**等它真的拿到焦点**才返回。

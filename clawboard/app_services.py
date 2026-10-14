@@ -27,6 +27,7 @@ from clawboard.win32 import (
     u32, MOD_CONTROL, MOD_SHIFT, MOD_ALT, VK_V, VK_CONTROL,
     capture_source, window_title_of,
     start_keyboard_hook, stop_keyboard_hook, send_backspaces, send_ctrl_v,
+    is_fullscreen_window, top_hwnd,
 )
 from clawboard.clipboard import (
     clip_seq, clip_read, clip_read_files, clip_is_private, scan_sensitive, clip_write,
@@ -476,8 +477,14 @@ class SystemMixin:
         try:
             try:
                 h = u32.GetForegroundWindow()
-                if h and h != self.root.winfo_id():
+                own = int(self.root.winfo_id())
+                own_top = top_hwnd(self.root)
+                if h and h not in (own, own_top):
                     self.prev_hwnd = h
+                # 前台是否全屏（排除自己 / 桌面 Shell）—— 供「全屏时不再置顶」用。
+                # 这里已经有 GetForegroundWindow，顺手判一次，成本极低。
+                self._fg_fullscreen = (bool(h) and h not in (own, own_top)
+                                       and is_fullscreen_window(h, own_top))
             except Exception:
                 pass
             if self._tray_menu:
@@ -485,8 +492,8 @@ class SystemMixin:
                 self.tray_menu()
             if self._need_show:
                 self._need_show = False
+                self._user_pulled = True       # 后台请求显示 = 用户要它出来 → 主动呼出
                 self.root.deiconify()
-                self.root.attributes('-topmost', True)
                 if not self.ensure_onscreen():
                     self.render()
             if getattr(self, '_paste_fail', False):
@@ -494,6 +501,7 @@ class SystemMixin:
                 self.tip('目标窗口拒绝焦点（可能是管理员权限），已复制，请手动 Ctrl+V')
             if self.hotkey_fallback:
                 self._poll_hotkey()
+            self.sync_topmost()        # 按全屏状态落地实际置顶（放在 _need_show 之后）
             self.edge_update()
         except Exception as e:
             self.note('poll_bg 异常已吞掉（循环继续）：%s' % e)

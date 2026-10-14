@@ -340,6 +340,7 @@ class InteractionMixin(PhraseMixin):
                 need_yield = self._panel_overlaps(hwnd)
                 if need_yield:
                     self.root.attributes('-topmost', False)
+                    self._topmost_applied = False   # 同步实际值，粘完交给 sync_topmost 恢复
                 threading.Thread(target=self._paste_worker,
                                  args=(hwnd, need_yield), daemon=True).start()
             # 粘贴音：走到这里 = 剪贴板已写好 + 粘贴已投递（真正去贴），故播放。
@@ -377,6 +378,7 @@ class InteractionMixin(PhraseMixin):
             need_yield = self._panel_overlaps(hwnd)
             if need_yield:
                 self.root.attributes('-topmost', False)
+                self._topmost_applied = False       # 同步实际值，粘完交给 sync_topmost 恢复
             threading.Thread(target=self._paste_worker,
                              args=(hwnd, need_yield), daemon=True).start()
             # 图片粘贴同样给听觉确认（覆盖范围与文本粘贴一致）
@@ -403,7 +405,8 @@ class InteractionMixin(PhraseMixin):
 
     def _restore_topmost(self):
         if not self.hidden:
-            self.root.attributes('-topmost', True)
+            # 走统一状态机：尊重用户意图 + 全屏抑制，而不是无脑置顶
+            self.sync_topmost()
 
     def _paste_worker(self, hwnd, restore_topmost=False):
         """把焦点还给原窗口，再模拟 Ctrl+V。

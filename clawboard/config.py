@@ -255,3 +255,11 @@ class AppState:
     _fx_supported: Optional[tuple] = None  # (圆角是否生效, 毛玻璃是否生效)，启动时探测一次
     _pv_job: Optional[str] = None          # 角落预览的防抖定时器 id
     _preview: Optional[object] = None      # 角落预览浮窗实例
+    # ---- 置顶状态机（全屏程序前台时面板不再置顶）----
+    # 拆分三件事，互不混淆：① 用户意图（toggle_pin 改）；② 全屏抑制（只改实际属性）；
+    # ③ 实际写进去的值（去重）。把它们混成一个 attributes 读写，会出现
+    # "用户取消置顶 → 进游戏 → 退出游戏被强行改回置顶" 这种把用户意图吃掉的问题。
+    _topmost_user: bool = True             # 用户期望的置顶意图（全屏抑制不改它）
+    _user_pulled: bool = False             # 用户是否「主动呼出」了面板（热键/托盘/重置位置）；隐藏时清除
+    _fg_fullscreen: bool = False           # 前台窗口当前是否全屏（poll_bg 每轮刷新）
+    _topmost_applied: Optional[bool] = None  # 上次真正写进 -topmost 的值（去重，避免每 120ms 空设）
