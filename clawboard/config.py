@@ -256,6 +256,7 @@ class AppState:
     _edge_tick: int = 0
     _edge_side: Optional[str] = None
     _edge_pos: Optional[tuple] = None
+    _edge_mon: Optional[tuple] = None     # 收起时所在显示器矩形（碰边滑出按它判定，多屏必需）
     _rz_dir: Optional[str] = None         # 正在进行的边缘拉伸方向（'n'/'se'/…），None=没在拉
     _hover_dir: Optional[str] = None      # 鼠标悬停的边缘方向（用于光标切换）
     _fx_supported: Optional[tuple] = None  # (圆角是否生效, 毛玻璃是否生效)，启动时探测一次

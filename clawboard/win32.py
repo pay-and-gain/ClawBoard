@@ -650,14 +650,23 @@ def monitors():
 
 
 def visible_ratio(x, y, w, h):
-    """窗口与所有显示器的可见交集占自身面积的比例"""
-    best = 0.0
+    """窗口与**所有**显示器的可见交集**之和**占自身面积的比例（上限 1.0）。
+
+    docstring 一直这么写，但旧实现取的是「各显示器交集比例的最大值」——
+    窗口跨在两屏之间时按单屏最多只能算到 0.5，于是被 ensure_onscreen 误判成
+    「跑出屏幕」而拉回主屏（跨过去了下次呼出又被拽回来）。改成求和才与文档一致：
+    跨屏（整个窗口落在虚拟桌面内）→ 1.0；完全出屏 → 0；单屏内 → 1.0。
+    多显示器矩形互不重叠时和自然 ≤ 1.0，重叠时 clamp 到 1.0 以防 > 1。
+    """
+    if w <= 0 or h <= 0:
+        return 0.0
+    total = 0.0
     for (l, t, r, b) in monitors():
         iw = min(x + w, r) - max(x, l)
         ih = min(y + h, b) - max(y, t)
         if iw > 0 and ih > 0:
-            best = max(best, (iw * ih) / float(w * h))
-    return best
+            total += (iw * ih) / float(w * h)
+    return min(total, 1.0)
 
 
 def proc_name_of(hwnd):

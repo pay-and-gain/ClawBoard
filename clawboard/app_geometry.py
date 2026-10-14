@@ -2,9 +2,11 @@
 """GeometryMixin：窗口几何 / 靠边自动隐藏 / 折叠展开 / 显示隐藏 / 重置位置。
 
 min_size / apply_geometry / _saved_pos / _expanded_geometry / fit_geometry /
-primary_monitor / clamp_to_screen / start_move / do_move / start_resize / do_resize /
-toggle_pin / edge_update / _edge_hide / _edge_show / corner_pos / toggle_collapse /
-hide / reset_position / ensure_onscreen / toggle_show / focus_search / rebuild。
+primary_monitor / _enough_visible / _nearest_monitor / clamp_to_screen /
+start_move / do_move / start_resize / do_resize /
+toggle_pin / edge_update / _edge_hide / _edge_show / _window_monitor / corner_pos /
+toggle_collapse / hide / reset_position / ensure_onscreen / toggle_show /
+focus_search / rebuild。
 """
 import re
 import ctypes
@@ -17,6 +19,10 @@ from clawboard.config import (BAR_H, MIN_W, MIN_H, RESIZE_ZONE,
 from clawboard.theme import T, apply_theme
 from clawboard.win32 import (u32, monitors, dpi_scale, visible_ratio,
                              apply_window_effects)
+
+# 「没有存档位置」的哨兵坐标（apply_geometry / _saved_pos / _expanded_geometry 都用它）。
+# 抽成常量是为了让 fit_geometry 能区分「哨兵 → 主屏默认位」与「真实坐标 → 最近屏回推」。
+_NO_POS = 10 ** 6
 
 
 class GeometryMixin:
@@ -103,7 +109,7 @@ class GeometryMixin:
         return int(MIN_W * k * config.UI_SCALE), int(MIN_H * k * config.UI_SCALE)
 
     def apply_geometry(self):
-        """恢复位置。必须完整落在某一个显示器内：跨屏缝隙会让面板看起来开着却点不到"""
+        """恢复位置：只要还「抓得住」（≥80×40 可见）就原样恢复，允许跨屏 / 部分出屏"""
         if self.st.get('collapsed'):
             # 上次是折叠着退出的：按折叠态恢复，别把尺寸硬拉到最小尺寸
             self.collapsed = True
@@ -157,11 +163,19 @@ class GeometryMixin:
         return '%dx%d+%d+%d' % (w, h, x, y)
 
     def fit_geometry(self, w, h, x, y):
-        """保证窗口完整落在某个显示器内；做不到就放到主屏右下角并按需缩小"""
-        for (l, t, r, b) in monitors():
-            if x >= l and y >= t and x + w <= r and y + h <= b:
-                return w, h, x, y
-        l, t, r, b = self.primary_monitor()
+        """保证窗口「抓得住」（≥ min(80,w)×min(40,h) 露在某个显示器内）；否则拉回最近屏。
+
+        与旧实现（要求**完整**落在某一个显示器内、做不到就回退主屏）的关键差别：
+        现在只要还够得着就原样保留 —— 允许跨屏、允许部分出屏地存档与恢复。
+        这正是多屏下「跨屏位置存不住、下次启动被丢回主屏」的根源。
+        没有存档时的哨兵坐标（_NO_POS）仍回退主屏右下角（首启默认位）。
+        """
+        if x < _NO_POS and y < _NO_POS and self._enough_visible(x, y, w, h):
+            return w, h, x, y                        # 可见足够 → 原样保留
+        if x >= _NO_POS or y >= _NO_POS:
+            l, t, r, b = self.primary_monitor()      # 哨兵 → 主屏右下角（首启）
+        else:
+            l, t, r, b = self._nearest_monitor(x, y, w, h)   # 拖出屏 → 拉回最近屏
         w = min(w, max(260, r - l - 24))
         h = min(h, max(200, b - t - 24))
         return w, h, r - w - 14, b - h - 62
@@ -173,20 +187,68 @@ class GeometryMixin:
                 return m
         return monitors()[0]
 
-    def clamp_to_screen(self):
-        """拖动时保证至少 80x40 露在屏幕内，防止拖出去找不回来"""
-        w, h = self.root.winfo_width(), self.root.winfo_height()
-        x, y = self.root.winfo_x(), self.root.winfo_y()
-        best, bi = -1, 0
-        for i, (l, t, r, b) in enumerate(monitors()):
+    @staticmethod
+    def _enough_visible(x, y, w, h):
+        """窗口是否在某个显示器里露出一块「抓得住」的区域（放行判据）。
+
+        判据：可见矩形宽 ≥ min(80,w) 且高 ≥ min(40,h)。
+        - 80 宽足够点中标题栏（标题栏几乎横贯窗口宽度）；
+        - 40 高 > 标题栏高度 scaled(BAR_H)≈34 —— 上/下/左/右任一方向贴边时，
+          标题栏都还在可见区内，可被抓住拖回来。
+        这是 clamp_to_screen / fit_geometry 共用的「放行」判据：够得着就一笔不动，
+        窗口因此可以自由跨屏（跨屏时整个窗口 100% 落在虚拟桌面内）。
+        """
+        if w <= 0 or h <= 0:
+            return False
+        nw, nh = min(80, w), min(40, h)
+        for (l, t, r, b) in monitors():
+            if (min(x + w, r) - max(x, l) >= nw and
+                    min(y + h, b) - max(y, t) >= nh):
+                return True
+        return False
+
+    @staticmethod
+    def _nearest_monitor(x, y, w, h):
+        """离窗口最近的显示器矩形：优先相交面积最大者；完全不相交则取矩形间距最近者。
+
+        回推目标必须是「最近」而不是固定主屏 —— 用户把面板拖到副屏附近时，
+        固定主屏会让面板莫名其妙地跨半个桌面跳回主屏。
+        """
+        mons = monitors()
+        best, hit = -1, None
+        for (l, t, r, b) in mons:
             iw = min(x + w, r) - max(x, l)
             ih = min(y + h, b) - max(y, t)
             if iw > 0 and ih > 0 and iw * ih > best:
-                best, bi = iw * ih, i
-        l, t, r, b = monitors()[bi]
+                best, hit = iw * ih, (l, t, r, b)
+        if hit is not None:
+            return hit
+        # 与所有显示器都不相交 → 按「窗口中心到矩形」的距离取最近
+        cx, cy = x + w / 2.0, y + h / 2.0
+        far, pick = None, mons[0]
+        for (l, t, r, b) in mons:
+            dx = max(l - cx, 0.0, cx - r)
+            dy = max(t - cy, 0.0, cy - b)
+            d = dx * dx + dy * dy
+            if far is None or d < far:
+                far, pick = d, (l, t, r, b)
+        return pick
+
+    def clamp_to_screen(self):
+        """拖动时保证至少 min(80,w)×min(40,h) 露在某个显示器内（防拖丢）。
+
+        只要还够得着就**一个像素都不动** —— 如此窗口才能自由地跨屏移动。
+        旧实现每次把窗口完整推进「相交面积最大」的那台显示器，于是窗口一贴住本屏
+        右边界就被钳在 r-w，永远长不到「相交面积翻转」的程度 → 两个方向都跨不过去。
+        只有露出的区域已经抓不住时，才回推到**最近**的显示器。
+        """
+        w, h = self.root.winfo_width(), self.root.winfo_height()
+        x, y = self.root.winfo_x(), self.root.winfo_y()
+        if self._enough_visible(x, y, w, h):
+            return
+        l, t, r, b = self._nearest_monitor(x, y, w, h)
         w = min(w, max(260, r - l - 24))
         h = min(h, max(200, b - t - 24))
-        # 完整推进该显示器内部，绝不跨屏
         nx = min(max(x, l), r - w)
         ny = min(max(y, t), b - h)
         if (nx, ny) != (x, y) or (w, h) != (self.root.winfo_width(), self.root.winfo_height()):
@@ -335,7 +397,12 @@ class GeometryMixin:
 
     # ---------- 靠边自动隐藏（像输入法一样贴边收纳） ----------
     def edge_update(self):
-        """贴住屏幕左/右/上边缘且鼠标离开 → 收起只留 6px；鼠标碰边缘 → 滑出"""
+        """贴住**窗口所在显示器**的左/右/上边缘且鼠标离开 → 收起只留 6px；鼠标碰边缘 → 滑出。
+
+        边缘判定与收起位置一律用窗口所在显示器，不能用主屏尺寸：
+        副屏上 `wx + ww >= winfo_screenwidth()-4` 会恒真（那是主屏宽），窗口会被
+        误判成「贴右边缘」并被搬到主屏最右（edge_hide 一开就是必现）。
+        """
         st = self.st
         if not st.get('edge_hide') or self.hidden or self.collapsed:
             if self._edge_hidden:
@@ -350,23 +417,23 @@ class GeometryMixin:
             return
         if self._edge_hidden:
             gap = 10
-            sw = self.root.winfo_screenwidth()
+            l, t, r, b = self._edge_mon or self._window_monitor()
             side = self._edge_side
-            near = ((side == 'left' and mx <= gap) or
-                    (side == 'right' and mx >= sw - gap) or
-                    (side == 'top' and my <= gap))
+            near = ((side == 'left' and mx <= l + gap) or
+                    (side == 'right' and mx >= r - gap) or
+                    (side == 'top' and my <= t + gap))
             if near:
                 self._edge_show()
             return
         wx, wy = self.root.winfo_x(), self.root.winfo_y()
         ww, wh = self.root.winfo_width(), self.root.winfo_height()
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        l, t, r, b = self._window_monitor()
         side = None
-        if wx <= 4:
+        if wx <= l + 4:
             side = 'left'
-        elif wx + ww >= sw - 4:
+        elif wx + ww >= r - 4:
             side = 'right'
-        elif wy <= 4:
+        elif wy <= t + 4:
             side = 'top'
         if side is None:
             self._edge_tick = 0
@@ -382,15 +449,16 @@ class GeometryMixin:
     def _edge_hide(self, side):
         wx, wy = self.root.winfo_x(), self.root.winfo_y()
         ww, wh = self.root.winfo_width(), self.root.winfo_height()
-        sw = self.root.winfo_screenwidth()
+        l, t, r, b = self._window_monitor()     # 用窗口所在屏，收起后仍在同一块屏上
         self._edge_side = side
-        self._edge_pos = (wx, wy)      # 收起前记住原位，滑出时原样还原
+        self._edge_mon = (l, t, r, b)           # 记住所在屏：碰边滑出按它判定
+        self._edge_pos = (wx, wy)               # 收起前记住原位，滑出时原样还原
         if side == 'left':
-            nx, ny = -(ww - 6), wy
+            nx, ny = l - (ww - 6), wy
         elif side == 'right':
-            nx, ny = sw - 6, wy
+            nx, ny = r - 6, wy
         else:
-            nx, ny = wx, -(wh - 6)
+            nx, ny = wx, t - (wh - 6)
         self.root.geometry('+%d+%d' % (nx, ny))
         self._edge_hidden = True
 
@@ -400,18 +468,23 @@ class GeometryMixin:
         self._edge_hidden = False
         self._edge_tick = 0
 
-    def corner_pos(self, w, h):
-        """所在屏幕的右下角坐标（底部留出任务栏的高度）。
-        折叠成一条标题栏后还留在原处很突兀，贴到右下角更像是"收起来了"。"""
+    def _window_monitor(self):
+        """窗口**中心点**所在显示器（窗口跨屏时按中心点归属）；取不到则主屏。
+
+        多屏下绝不能再拿 winfo_screenwidth()/winfo_screenheight() 当屏幕边界
+        （那只是主屏），否则副屏上的窗口会被按主屏边界错误判定贴边/收起/对齐。
+        """
         cx = self.root.winfo_x() + self.root.winfo_width() // 2
         cy = self.root.winfo_y() + self.root.winfo_height() // 2
-        scr = None
-        for box in monitors():
-            l, t, r, b = box
+        for (l, t, r, b) in monitors():
             if l <= cx <= r and t <= cy <= b:
-                scr = box
-                break
-        l, t, r, b = scr or self.primary_monitor()
+                return (l, t, r, b)
+        return self.primary_monitor()
+
+    def corner_pos(self, w, h):
+        """窗口所在屏幕的右下角坐标（底部留出任务栏的高度）。
+        折叠成一条标题栏后还留在原处很突兀，贴到右下角更像是"收起来了"。"""
+        l, t, r, b = self._window_monitor()
         return max(l + 2, r - w - 14), max(t + 2, b - h - 62)
 
     def toggle_collapse(self):
@@ -465,10 +538,15 @@ class GeometryMixin:
                             '要彻底退出：右键托盘图标 → 退出'
                             % (self.st.get('hotkey', 'ctrl+shift+v').upper()))
 
-    def reset_position(self):
-        """应急：把面板拉回主屏右下角（托盘菜单与热键唤起都会自动兜底）"""
+    def reset_position(self, mon=None):
+        """应急：把面板拉回**主屏**右下角（托盘菜单与热键唤起都会自动兜底）。
+
+        mon 给定时改放到该显示器右下角 —— 供 ensure_onscreen 把跑出屏幕的窗口
+        拉到**离它最近**的显示器用。用户主动重置（无参：托盘菜单 command / 热键）
+        仍固定回主屏：语义明确、可预期，符合「救命重置」的直觉。
+        """
         w, h = 340, 480
-        _, _, r, b = self.primary_monitor()
+        _, _, r, b = mon or self.primary_monitor()
         self.root.geometry('%dx%d+%d+%d' % (w, h, r - w - 14, b - h - 62))
         self._user_pulled = True           # 用户主动找回面板 → 视为主动呼出
         self.root.deiconify()
@@ -481,12 +559,17 @@ class GeometryMixin:
         self.tip('面板位置已重置')
 
     def ensure_onscreen(self):
-        """窗口跑出屏幕时自动拉回，避免"点了没反应" """
+        """窗口跑出屏幕时自动拉回（避免"点了没反应"），目标为**离窗口最近**的显示器。
+
+        用 visible_ratio 判定：窗口跨在两屏之间时整个窗口都在虚拟桌面内 → 1.0，
+        不再被误判成跑出屏幕（旧实现取各屏交集最大值，跨屏只有 0.5 → 被拉回主屏）。
+        只有真的出屏（比例 < 0.999）才拉回，且拉到最近的显示器而不是固定主屏。
+        """
         m = re.match(r'^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$', self.root.geometry())
         if m:
             w, h, x, y = (int(v) for v in m.groups())
-            if visible_ratio(x, y, w, h) < 0.999:      # 跨屏/出屏都算不可见
-                self.reset_position()
+            if visible_ratio(x, y, w, h) < 0.999:      # 跨屏 = 1.0（不拉回）
+                self.reset_position(self._nearest_monitor(x, y, w, h))
                 return True
         return False
 
