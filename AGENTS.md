@@ -66,6 +66,9 @@ https://pay-and-gain.github.io/ClawBoard/images/xxx.png
 
 - 每加一个功能，就在 `tests/` 放一个 `_tNN.py` 回归脚本。
 - 提交前确认 `git status` 里没有意外文件（尤其是数据文件、日志、竞品分析）。
+- **发布产物落到 `C:\Users\pay and gain\Desktop\cut\`，不放桌面**（master 指定，2026-10-14 起）：
+  新 exe 拷进 `cut\` 并删掉上一个版本的 exe；**exe 与 `ClawBoard数据.json` 必须同层** ——
+  便携模式下数据跟 exe 走，拆到子目录会让程序在新位置新建空数据文件（用户会以为历史丢了）。
 
 ## 6. 代码组织
 
@@ -80,4 +83,6 @@ https://pay-and-gain.github.io/ClawBoard/images/xxx.png
 - 单实例互斥会同时锁住 GUI 用例，跑测试前先退出正在运行的 ClawBoard。
 - C 版与 Python 版能力不完全对齐（C 版更精简，产物约 205 KB）。
 - 拼音搜索不支持多音字展开。
-- 目前没有自动更新；`%LOCALAPPDATA%` 之外的便携模式数据跟随 exe 所在目录。
+- 有「检查更新」提示（v2.5.0 起）：启动静默查一次 + 设置页手动检查，但**只提示、只跳转下载页**，
+  不自动下载、不校验 SHA256、不替换自身。
+- `%LOCALAPPDATA%` 之外的便携模式数据跟随 exe 所在目录（**exe 与数据文件必须同层**）。
