@@ -80,11 +80,18 @@ classDiagram
     }
     class GeometryMixin {
         +apply_geometry()
-        +fit_geometry()
-        +toggle_collapse()
+        +fit_geometry(w, h, x, y)
+        +_enough_visible(x, y, w, h) bool
+        +_nearest_monitor(x, y, w, h)
+        +clamp_to_screen()
         +edge_update()
+        +_edge_hide(side)
+        +_window_monitor()
+        +corner_pos(w, h)
+        +preview_corner(w, h)
+        +toggle_collapse()
         +hide()
-        +reset_position()
+        +reset_position(mon=None)
     }
     class InteractionMixin {
         +on_click_item()

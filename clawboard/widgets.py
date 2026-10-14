@@ -458,21 +458,15 @@ class CopyToast:
         self._fade_in(0.0)
 
     def _pos(self):
-        """默认贴窗口所在屏幕的右下角；那儿被面板占着就改左下角。"""
+        """贴**面板所在屏幕**的角落、并与面板错开一侧。
+
+        落点由 app.preview_corner 按面板所在显示器算好 —— 浮窗自己不再碰
+        winfo_screenwidth/height（那只是主屏，面板在副屏时预览会跑错屏）。
+        """
         try:
-            x, y = self.app.corner_pos(self.W, self.H)
+            return self.app.preview_corner(self.W, self.H)
         except Exception:
-            x = self.win.winfo_screenwidth() - self.W - self.GAP
-            y = self.win.winfo_screenheight() - self.H - 62
-        try:
-            if not self.app.collapsed and not self.app.hidden:
-                r = self.app.root
-                if (abs(r.winfo_x() - x) < self.W + 20
-                        and abs(r.winfo_y() - y) < self.H + 20):
-                    x = 12                            # 面板在右下角 → 让到左下角
-        except Exception:
-            pass
-        return x, y
+            return 12, 12
 
     def _fade_in(self, a):
         a = min(0.96, a + 0.16)
@@ -561,17 +555,9 @@ class ContentPreview:
         return 'break'
 
     def _pos(self):
-        """贴面板的另一侧角落，避免遮住面板自己。"""
+        """贴面板的另一侧角落，避免遮住面板自己（落点按**面板所在屏**算）。"""
         try:
-            r = self.app.root
-            rl, rt = r.winfo_x(), r.winfo_y()
-            rr, rb = rl + r.winfo_width(), rt + r.winfo_height()
-            sw = self.win.winfo_screenwidth()
-            sh = self.win.winfo_screenheight()
-            # 面板在左半屏 → 预览放右下；否则放左下
-            if rl + r.winfo_width() // 2 < sw // 2:
-                return sw - self.W - self.GAP, sh - self.H - 62
-            return self.GAP, sh - self.H - 62
+            return self.app.preview_corner(self.W, self.H)
         except Exception:
             return 12, 12
 
@@ -625,14 +611,9 @@ class ImagePreview:
         self._fade_in(0.0)
 
     def _pos(self):
+        """贴面板的另一侧角落（落点按**面板所在屏**算，不再自算 winfo_screen*）。"""
         try:
-            r = self.app.root
-            rl, rt = r.winfo_x(), r.winfo_y()
-            sw = self.win.winfo_screenwidth()
-            sh = self.win.winfo_screenheight()
-            if rl + r.winfo_width() // 2 < sw // 2:
-                return sw - self.W - self.GAP, sh - self.H - 62
-            return self.GAP, sh - self.H - 62
+            return self.app.preview_corner(self.W, self.H)
         except Exception:
             return 12, 12
 

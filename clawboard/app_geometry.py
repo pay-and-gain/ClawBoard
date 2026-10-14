@@ -487,6 +487,22 @@ class GeometryMixin:
         l, t, r, b = self._window_monitor()
         return max(l + 2, r - w - 14), max(t + 2, b - h - 62)
 
+    def preview_corner(self, w, h):
+        """角落预览浮窗（复制提示 / 内容预览 / 图片预览）的落点，返回 (x, y)。
+
+        贴**面板所在显示器**的角落，并与面板错开一侧（面板中点在该屏左半 → 落右下角，
+        否则落左下角，避免遮住面板）；y 按该屏底边算 —— 副屏顶边比主屏低（t≠0），
+        所以必须用该屏矩形，不能用主屏高度。
+
+        为什么放到 app 侧算：预览浮窗自己只能拿 winfo_screenwidth/height（那是**主屏**），
+        面板挪到副屏后预览会孤零零跑到主屏角落、跟面板分居两块屏 —— 正是"不能正常使用"。
+        """
+        l, t, r, b = self._window_monitor()
+        cx = self.root.winfo_x() + self.root.winfo_width() // 2
+        if cx - l < (r - l) // 2:
+            return r - w - 12, b - h - 62
+        return l + 12, b - h - 62
+
     def toggle_collapse(self):
         self.close_preview()         # 折叠时角落预览一并收起
         self.collapsed = not self.collapsed

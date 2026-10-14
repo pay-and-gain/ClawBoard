@@ -27,6 +27,7 @@ I. 数据不污染：真实 ClawBoard数据.json sha256 前后一致、无新增
 import ctypes
 import glob
 import hashlib
+import inspect
 import os
 import sys
 import tempfile
@@ -415,9 +416,47 @@ check('单屏：哨兵 → 主屏右下角（1920-340-14=1566）',
       x6 == 1920 - 340 - 14 and y6 == 1080 - 480 - 62, 'x=%d y=%d' % (x6, y6))
 
 # ============================================================
-# I. 数据不污染
+# I. 角落预览浮窗定位（跟随面板所在屏）
 # ============================================================
-section('I. 数据不污染')
+section('I. 角落预览浮窗跟随面板所在屏（含副屏顶边偏移 + 不自算主屏）')
+set_monitors(DUAL)
+PW, PH = 460, 340
+place(SECOND[0] + 100, 400)          # 面板中心在副屏**左半**
+px, py = app.preview_corner(PW, PH)
+check('面板在副屏(左半) → 预览落副屏右下角 (5120-460-12=4648)',
+      px == SECOND[2] - PW - 12 and py == SECOND[3] - PH - 62,
+      '(x=%d y=%d)' % (px, py))
+check('预览完整落在副屏内', 
+      SECOND[0] <= px and px + PW <= SECOND[2] and
+      SECOND[1] <= py and py + PH <= SECOND[3],
+      'rect=(%d..%d, %d..%d) sec=%s' % (px, px + PW, py, py + PH, SECOND))
+check('y 按副屏底边 1757 算（=1355），不是主屏底边 1440（=1038）',
+      py == 1355, 'py=%d' % py)
+
+place(SECOND[0] + 2000, 400)         # 面板中心在副屏**右半**
+px2, py2 = app.preview_corner(PW, PH)
+check('面板在副屏(右半) → 预览落副屏左下角 (2560+12=2572)',
+      px2 == SECOND[0] + 12 and py2 == SECOND[3] - PH - 62,
+      '(x=%d y=%d)' % (px2, py2))
+
+place(100, 100)                      # 面板在主屏 → 预览回主屏（不串屏）
+px3, py3 = app.preview_corner(PW, PH)
+check('面板在主屏 → 预览落主屏内',
+      PRIMARY[0] <= px3 and px3 + PW <= PRIMARY[2] and
+      PRIMARY[1] <= py3 and py3 + PH <= PRIMARY[3],
+      '(x=%d y=%d)' % (px3, py3))
+
+import clawboard.widgets as WG       # noqa: E402
+for _cls in (WG.CopyToast, WG.ContentPreview, WG.ImagePreview):
+    _src = inspect.getsource(_cls._pos)
+    # 用 '.winfo_screen'（带点、即真正的方法调用）判定，避免误伤解释"为什么不用"的注释/文档串
+    check('%s._pos 不再自算 winfo_screen*（改由 preview_corner 算）' % _cls.__name__,
+          '.winfo_screen' not in _src and 'preview_corner' in _src)
+
+# ============================================================
+# J. 数据不污染
+# ============================================================
+section('J. 数据不污染')
 check('真实数据 sha256 未变',
       HASH_BEFORE == file_hash(REAL_DATA) ==
       '5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079',
