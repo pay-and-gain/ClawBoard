@@ -18,6 +18,7 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 - **First-run guide** — new users get an onboarding card on an empty board: 3 steps, shortcuts, and one-click sample data
 - **Clipboard history** — auto capture, dedupe, configurable cap, starring; hover for time, right-click for details
+- **Backfills what you copied while it was closed** — on startup the last item is recovered (only the most recent one; Windows keeps just a single clipboard entry)
 - **Quick paste** — `Ctrl+1..9` / `Ctrl+0` pastes items 1–10 directly
 - **Privacy** — honors Windows' "don't record me" flags, app/title ignore lists, sensitive-content detection and masking
 - **Sound feedback** — independent copy / paste cues (off by default), so blind pastes can still be confirmed by ear
@@ -30,8 +31,8 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-2.5.0-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
-| **Portable** | `ClawBoard-2.5.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Installer** (recommended) | `ClawBoard-2.6.0-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-2.6.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
 👉 Everything lives on the [**Releases page**](../../releases/latest).
@@ -107,10 +108,10 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 ## 🚀 Quick start
 
 ### Option 1 — Installer
-Download `ClawBoard-2.5.0-setup.exe` and follow the prompts (Windows 10 / 11).
+Download `ClawBoard-2.6.0-setup.exe` and follow the prompts (Windows 10 / 11).
 
 ### Option 2 — Portable
-Download `ClawBoard-2.5.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+Download `ClawBoard-2.6.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 
 ### Option 3 — From source
 ```bash
