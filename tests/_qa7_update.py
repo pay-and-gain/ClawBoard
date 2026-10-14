@@ -126,7 +126,7 @@ FILES_BEFORE = sidecars()
 # ============================================================
 section('A. parse_ver / is_newer（含脏输入与对称性）')
 
-check('APP_VER 是 2.4.0', APP_VER == '2.4.0', APP_VER)
+check('APP_VER 是 2.5.0', APP_VER == '2.5.0', APP_VER)
 
 _parse_cases = [
     ('v2.4.0', (2, 4, 0)),

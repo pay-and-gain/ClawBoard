@@ -20,6 +20,9 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 - **Clipboard history** — auto capture, dedupe, configurable cap, starring; hover for time, right-click for details
 - **Quick paste** — `Ctrl+1..9` / `Ctrl+0` pastes items 1–10 directly
 - **Privacy** — honors Windows' "don't record me" flags, app/title ignore lists, sensitive-content detection and masking
+- **Sound feedback** — independent copy / paste cues (off by default), so blind pastes can still be confirmed by ear
+- **Update notice** — a silent check at startup; when a new version exists, one-click "Download" in Settings. Notifies only, never nags
+- **Won't cover fullscreen games** — drops always-on-top while a fullscreen app is focused, so it's hidden behind the game; summoning the panel still works
 
 👉 New here? Read the [**Getting Started guide**](docs/getting-started.en.md) — up and running in 30 seconds, fluent in 5 minutes.
 
@@ -27,8 +30,8 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 | Package | File | Notes |
 |---|---|---|
-| **Installer** (recommended) | `ClawBoard-2.4.0-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
-| **Portable** | `ClawBoard-2.4.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
+| **Installer** (recommended) | `ClawBoard-2.5.0-setup.exe` | Double-click to install; adds Start-menu / desktop shortcuts plus an uninstaller |
+| **Portable** | `ClawBoard-2.5.0-portable.zip` | Unzip and run — no registry writes, no leftovers |
 | **Source** | `Source code (zip/tar.gz)` | Provided automatically by GitHub on the Release page; or `git clone` |
 
 👉 Everything lives on the [**Releases page**](../../releases/latest).
@@ -95,18 +98,19 @@ A lightweight clipboard history panel that sits in a corner of your screen: copy
 
 <p align="center">
   <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-general.png" alt="Settings - general" width="300">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png" alt="Settings - advanced" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-sound.png" alt="Settings - sound cues" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png" alt="Settings - advanced & updates" width="300">
 </p>
 
-- A single scrollable panel for listening, masking, theme, scaling, ignore lists, length filters and autostart
+- A single scrollable panel for listening, masking, theme, scaling, ignore lists, length filters, sound cues, update checks and autostart
 
 ## 🚀 Quick start
 
 ### Option 1 — Installer
-Download `ClawBoard-2.4.0-setup.exe` and follow the prompts (Windows 10 / 11).
+Download `ClawBoard-2.5.0-setup.exe` and follow the prompts (Windows 10 / 11).
 
 ### Option 2 — Portable
-Download `ClawBoard-2.4.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
+Download `ClawBoard-2.5.0-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 
 ### Option 3 — From source
 ```bash

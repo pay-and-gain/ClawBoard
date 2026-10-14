@@ -20,6 +20,9 @@
 - **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
 - **快速粘贴** —— `Ctrl+1..9` / `Ctrl+0` 直接粘贴第 1~10 项
 - **隐私保护** —— 遵守 Windows「别记录我」标记、程序 / 标题忽略名单、敏感内容识别与打码
+- **音效反馈** —— 复制 / 粘贴各一个独立开关（默认关），盲操时不用看屏幕也能确认「贴没贴上」
+- **自动更新提示** —— 启动静默检查；发现新版在设置里一键「去下载」——只提示、不打扰
+- **全屏不挡游戏** —— 全屏程序在前台时自动取消置顶、被游戏覆盖；热键呼出面板照常用
 
 👉 第一次用？看 [**新手教程**](docs/getting-started.md) —— 30 秒上手，5 分钟摸透全部核心功能。
 
@@ -27,8 +30,8 @@
 
 | 方式 | 文件 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `ClawBoard-2.4.0-setup.exe` | 双击安装，自动建开始菜单 / 桌面快捷方式，带卸载项 |
-| **绿色版** | `ClawBoard-2.4.0-portable.zip` | 解压即用，不写注册表、不留残留 |
+| **安装包**（推荐） | `ClawBoard-2.5.0-setup.exe` | 双击安装，自动建开始菜单 / 桌面快捷方式，带卸载项 |
+| **绿色版** | `ClawBoard-2.5.0-portable.zip` | 解压即用，不写注册表、不留残留 |
 | **源码** | `Source code (zip/tar.gz)` | Release 页由 GitHub 自动提供；也可 `git clone` |
 
 👉 全部文件在 [**Releases 页面**](../../releases/latest)。
@@ -95,18 +98,19 @@
 
 <p align="center">
   <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-general.png" alt="设置 - 基础" width="300">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png" alt="设置 - 进阶" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-sound.png" alt="设置 - 音效反馈" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png" alt="设置 - 进阶与更新" width="300">
 </p>
 
-- 基础 / 进阶分栏滚动：监听、打码、主题、缩放、忽略名单、长度过滤、开机自启一屏可调
+- 基础 / 进阶分栏滚动：监听、打码、主题、缩放、忽略名单、长度过滤、音效反馈、检查更新、开机自启一屏可调
 
 ## 🚀 快速开始
 
 ### 方式一：装安装包
-下载 `ClawBoard-2.4.0-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
+下载 `ClawBoard-2.5.0-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
 
 ### 方式二：绿色版
-下载 `ClawBoard-2.4.0-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
+下载 `ClawBoard-2.5.0-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
 
 ### 方式三：从源码运行
 ```bash

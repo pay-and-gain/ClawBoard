@@ -1,0 +1,137 @@
+
+== A. rect_covers 纯逻辑 ==
+OK    A1 完全重合 → True
+OK    A2 每边内缩 1px → True
+OK    A3 每边内缩 2px（容差边界）→ True
+OK    A4 每边内缩 3px（超容差）→ False
+OK    A5 仅上边多 2px → True
+OK    A6 仅上边多 3px → False
+OK    A7 仅右边少 2px → True
+OK    A8 仅右边少 3px → False
+OK    A9 仅下边少 2px → True
+OK    A10 仅下边少 3px → False
+OK    A11 仅左边多出 2px → True
+OK    A12 仅左边多出 3px → False
+OK    A13 只覆盖左半 → False
+OK    A14 只覆盖上半 → False
+OK    A15 只覆盖右下角 1x1 → False
+OK    A16 空矩形 (0,0,0,0) → False
+OK    A17 零宽 → False
+OK    A18 反转矩形 → False
+OK    A19 比显示器大 1px → True
+OK    A20 比显示器大很多 → True
+OK    A21 整体右移 2px → True（容差内）
+OK    A22 整体右移 5px → False
+OK    A23 None 输入 → False
+
+== A2. 真实多屏（本机双屏，不同分辨率） ==
+....  本机显示器: [(2560, 157, 5120, 1757), (0, 0, 2560, 1440)]
+OK    A24 至少两块显示器（真实多屏前提）  got=2
+....  主屏=(0, 0, 2560, 1440) 副屏=(2560, 157, 5120, 1757)
+OK    A25 副屏窗口 monitor_rect_of == 窗口所在显示器（非主屏）  got=(2560, 157, 5120, 1757) expected=(2560, 157, 5120, 1757) primary=(0, 0, 2560, 1440)
+OK    A26 副屏全屏（用所在显示器）→ True
+OK    A27 副屏窗口误用主屏尺寸 → False（证明必须用所在显示器）
+
+== A3. 排除项与类名大小写 ==
+OK    A28 句柄 0 → False
+OK    A29 面板自己（self_hwnd 相等）→ False
+OK    A30 排除类 progman                  → False
+OK    A30 排除类 Progman                  → False
+OK    A30 排除类 PROGMAN                  → False
+OK    A30 排除类 workerw                  → False
+OK    A30 排除类 WorkerW                  → False
+OK    A30 排除类 shell_traywnd            → False
+OK    A30 排除类 Shell_TrayWnd            → False
+OK    A30 排除类 SHELL_TRAYWND            → False
+OK    A30 排除类 shell_secondarytraywnd   → False
+OK    A30 排除类 Shell_SecondaryTrayWnd   → False
+OK    A31 普通类 chrome_widgetwin_1 满屏 → True
+OK    A32 真实 class_name_of 返回 str 且已小写  class='#32769'
+
+== A4. 错误路径（不抛 + False） ==
+OK    A33 window_rect=None → False 且不抛
+OK    A34 monitor_rect_of=None → False 且不抛
+OK    A35 MonitorFromWindow=0 → monitor_rect_of 返回 None 且不抛
+OK    A36 GetMonitorInfoW 失败 → monitor_rect_of 返回 None 且不抛
+OK    A37 异常 hwnd（0/-1/huge）→ 返回 bool 不抛
+OK    A38 monitor_rect_of(0) → None
+OK    A39 class_name_of(0) → str 不抛
+OK    A40 is_zoomed(0)/has_caption(0) → False 且不抛
+OK    A41 is_zoomed/has_caption 异常 hwnd → 返回 bool 不抛
+
+== B. 副作用实测（真实最大化窗口 / 任务栏自动隐藏） ==
+....  标注：[真机] = 真实窗口实测；[构造] = stub 构造矩形/状态
+....  最大化窗口 GetWindowRect = (2551, 148, 5129, 1694)
+....  所在显示器 rcMonitor     = (2560, 157, 5120, 1757)
+....  所在显示器 rcWork        = (2560, 157, 5120, 1685)
+....  rect_covers(win, rcMonitor) = False ; rect_covers(win, rcWork) = True
+OK    B1 任务栏可见时，真实最大化窗口 不 被判为全屏（covers_mon=False）
+OK    B2 最大化窗口矩形覆盖工作区（covers_work=True，机制成立）
+....  真实 is_fullscreen_window(最大化窗口) = False
+....  最大化窗口 is_zoomed=True has_caption=True
+....  模拟自动隐藏：旧口径=True  新口径(zoomed+caption)=False
+OK    B3 复现旧口径副作用：自动隐藏时最大化普通窗口被误判为全屏
+OK    B4 新排除生效：有标题栏的最大化普通窗口不再被判全屏
+OK    B5 真实最大化普通窗口 is_zoomed=True 且 有标题栏
+OK    B6 独占 / F11 全屏（非 zoomed）→ True
+OK    B7 无边框窗口化全屏（zoomed 但无标题栏）→ True
+OK    B8 有标题栏但非 zoomed 的满屏窗口 → True
+....  [构造] 取舍评估：若判据只用 IsZoomed（不加 has_caption），B7 的「无边框窗口化全屏」会被误杀为"非全屏"；加 has_caption 后恰好保号 → 该取舍成立
+OK    B9 真实普通（非最大化）窗口 has_caption=True 且 is_zoomed=False  cap=True zoom=False
+
+== C. 置顶状态机 ==
+OK    C0 AppState 默认: _topmost_user=True / _user_pulled=False / _fg_fullscreen=False / _topmost_yield=False / _topmost_applied=None
+OK    C1 初始（非全屏）→ 实际置顶 True
+OK    C2 _topmost_applied 去重：状态不变时 5 次 sync 不重复写  writes=[]
+OK    C3 进全屏（未呼出）→ -topmost 变 False
+OK    C4 进全屏后面板仍可见（未隐藏）
+OK    C5 退全屏 → 恢复 True
+OK    C6 toggle_pin 取消置顶 → False & _topmost_user=False
+OK    C7 取消置顶 + 进全屏 → 仍 False
+OK    C8 取消置顶 + 出全屏 → 仍 False（不被强行改回）
+OK    C9 toggle_pin 恢复 → True & 一致
+OK    C10 toggle_pin 再取消 → False & 一致
+OK    C11 toggle_pin 再恢复 → True & 一致
+OK    C12 非全屏但「让位进行中」→ 取消置顶
+OK    C13 让位结束（非全屏）→ 恢复置顶
+
+== D. 呼出 / 隐藏交互 ==
+OK    D1 全屏 + 隐藏 → 不置顶
+OK    D2 全屏中呼出 → 置顶可见 & 未隐藏
+OK    D3 呼出后 hide() → _user_pulled 清除 & 又被抑制
+OK    D4 reset_position → _user_pulled=True & 置顶可见
+OK    D5 _need_show → _user_pulled=True（后台请求显示=主动呼出）
+OK    D6 呼出且未取消置顶 → True
+OK    D7 呼出中取消置顶 → False（用户意图优先于 _user_pulled）
+OK    D8 真实 poll_bg：前台=全屏程序 → _fg_fullscreen=True 且取消置顶
+OK    D9 GetForegroundWindow 返回 0 → _fg_fullscreen=False（不抛）
+
+== E. 粘贴让位路径 ==
+OK    E1 paste() 返回 True
+OK    E2 让位：_topmost_applied 被同步为 False（否则后续 sync 会漏写）
+OK    E3 让位：实际 -topmost 变 False
+OK    E4 全屏中粘贴完成 → 仍被抑制，不恢复置顶
+OK    E5 非全屏粘贴完成 → 恢复置顶
+OK    E6 面板不覆盖目标 → 置顶保持不变（True）
+OK    E7 paste_image() 让位：_topmost_applied=False & -topmost=False
+OK    E8 让位开始 → _topmost_yield=True 且 不置顶
+OK    E8b 让位进行中：连续 5 次 poll_bg 的 sync_topmost 均不得改回置顶
+OK    E8c 让位期间去重：5 次 sync 未产生任何 -topmost 写入  delta=0
+OK    E9 让位结束（非全屏）→ 清除 _topmost_yield 并恢复置顶
+OK    E9b 让位结束 → 恰好写一次 -topmost（去重正确）  delta=1
+OK    E10 让位结束 + 前台全屏 → 不恢复置顶（抑制保留）
+OK    E11 让位中面板已隐藏 → 清除 _topmost_yield 且不抛（不置顶）
+
+== F. 回归 + 数据不污染 ==
+OK    F tests/test_core.py 通过  rc=0 tail=['OK']
+OK    F tests/test_refactor.py 通过  rc=0 tail=['OK']
+OK    F tests/_t38.py 通过  rc=0 tail=['全部通过']
+OK    F tests/_t39.py 通过  rc=0 tail=['全部通过']
+OK    F tests/_t40.py 通过  rc=0 tail=['全部通过']
+OK    F tests/_t41.py 通过  rc=0 tail=['全部通过']
+OK    F 真实数据 sha256 未变  before=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079 after=5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079
+OK    F _t41 自测项数 == 52  got=52
+OK    F 真实目录无新增 .bak / 旁车文件  before=['ClawBoard数据.json', 'ClawBoard数据.json.bak'] after=['ClawBoard数据.json', 'ClawBoard数据.json.bak']
+OK    F 临时数据文件未被写入（NO_SAVE 生效）
+
+全部通过

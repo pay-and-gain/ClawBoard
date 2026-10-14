@@ -351,7 +351,7 @@ def demo_clip(app):
         _demo('https://github.com/pay-and-gain/ClawBoard', 'msedge',
               ctype='url', fav=1, mins=3),
         _demo('user@example.com', 'outlook', mins=9),
-        _demo('{"app": "ClawBoard", "version": "2.4.0", "deps": []}', 'Code',
+        _demo('{"app": "ClawBoard", "version": "2.5.0", "deps": []}', 'Code',
               ctype='json', mins=17),
         _demo('13800138000', 'chrome', mins=24),
         _demo('北京市朝阳区示例路 88 号 A 座 12 层', 'notepad', mins=36),
@@ -695,6 +695,29 @@ def shot_theme_compare(root, app):
     save(compose(tiles, captions=caps, valign='top'), 'theme-compare.png')
 
 
+def _scroll_to_label(canvas, inner, needle, margin=12):
+    """把「含指定文字的那一行」滚到可视区顶部附近。
+
+    设置项一多就会滚动，顶部/底部两张图之间会夹着一堆拍不到的中间行（音效开关就落在中段）。
+    直接按文字定位比硬编码一个 yview 分数稳，设置项增删后也不会拍歪。
+    """
+    try:
+        inner.update_idletasks()
+        h = max(1, inner.winfo_reqheight())
+        for row in inner.winfo_children():
+            for ch in row.winfo_children():
+                try:
+                    if needle in str(ch.cget('text')):
+                        y = row.winfo_y()
+                        canvas.yview_moveto(max(0.0, min(1.0, (y - margin) / float(h))))
+                        return True
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return False
+
+
 def shot_settings(root, app):
     print('[settings] 设置界面（重制，更高清）')
     sw = C.SettingsWindow(app)
@@ -705,7 +728,12 @@ def shot_settings(root, app):
         sw.win.update()
         time.sleep(0.25)
         save(decorate(snap(sw.win)), 'settings-general.png')
-        # 滚到底部 → 进阶项
+        # 中段：音效反馈两个开关（v2.5.0 新增）—— 顶部/底部两张都拍不到它，单出一张
+        _scroll_to_label(sw.sc.canvas, sw.sc.inner, '复制音')
+        sw.win.update()
+        time.sleep(0.25)
+        save(decorate(snap(sw.win)), 'settings-sound.png')
+        # 滚到底部 → 进阶项 + 更新区块
         sw.sc.canvas.yview_moveto(1.0)
         sw.win.update()
         time.sleep(0.25)
