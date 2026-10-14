@@ -406,6 +406,12 @@ _calls['n'] = 0
 app.start_update_check(manual=True)
 check('手动检查不受频率闸限制', _calls['n'] == 1, '实际 %d' % _calls['n'])
 
+# 还原 NO_SAVE：F4/F5/F6 的 sync_check 会**同步**触发 done()→save(True)（延迟 300ms 落盘）。
+# 若此刻 NO_SAVE 仍为 False，那次延迟写会让末尾「临时数据文件未被写入」断言偶发假失败 ——
+# 这是测试自身的时序竞态（start_update_check 本就不读 NO_SAVE，设回 True 不影响用例意图），
+# 不是产品缺陷：产品的 save() 在调用点就已正确遵守 NO_SAVE。
+RT.NO_SAVE = True
+
 # ---- F4. 发现新版：写缓存 + tip + ⚙ 染色 ----
 update.check_async = sync_check
 update.LATEST = None
