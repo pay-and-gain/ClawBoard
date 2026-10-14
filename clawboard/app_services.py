@@ -216,9 +216,14 @@ class DataMixin:
         self._seq += 1
         return self._seq
 
-    def ingest(self, txt, hits=None, manual=False):
+    def ingest(self, txt, hits=None, manual=False, quiet=False):
         """入库：重复内容只刷新 updated_at / copy_count，created_at 永不改写。
-        manual=True 是用户手动添加（拆词、变换存新条目），此时跳过忽略规则与长度过滤。"""
+
+        manual=True：用户手动添加（拆词/变换），跳过忽略规则与长度过滤。
+        quiet=True：只抑制复制音/toast（补记在启动时发生、用户并没在复制），**不**跳过
+        长度过滤与忽略规则 —— 补记是自动行为，用户设的过滤必须继续生效，否则同一条内容
+        会"运行时被过滤、补记却入库"。返回是否真的入库（被过滤/忽略拦下则 False）。
+        """
         ts = now_ms()
         # 不在这里做 50ms 延迟重试：那会卡住 UI 线程。抓不到就交给后台线程补抓。
         src, src_hwnd = capture_source(self.root.winfo_id(), delay_retry=False)
@@ -231,13 +236,17 @@ class DataMixin:
             hi = int(self.st.get('max_len') or 0)
             msg = length_filtered(txt, lo, hi)
             if msg:
-                self.tip(msg)
-                return
+                if not quiet:
+                    self.tip(msg)
+                return False
+            # ⚠️ 补记(quiet)路径上 ignore_apps/ignore_titles 无法可靠应用：启动时无从得知
+            # 内容当初来自哪个应用/窗口，这里拿到的 src/title 只是"当前前台"。属固有限制。
             hit = match_ignore(src, title, self.st.get('ignore_apps'),
                                self.st.get('ignore_titles'))
             if hit:
-                self.tip('命中忽略规则（%s），未记录' % hit)
-                return
+                if not quiet:
+                    self.tip('命中忽略规则（%s），未记录' % hit)
+                return False
         dup = None
         for x in self.data['clip']:
             if x.get('text') == txt:
@@ -293,11 +302,13 @@ class DataMixin:
         # 若挂在那里会在"空剪贴板"上反复响；ingest 只在下述条件全满足时才走到这行 ——
         # 序列号真的变了、非空文本、长度过滤与忽略规则都放行 —— 即"确实记录了一条内容"。
         # manual=True（拆词/变换存新条目）是用户对面板的操作、不是一次剪贴，故两者都不触发。
-        if not manual:
+        # quiet=True（补记）同理不触发：补记时用户并没有在复制。
+        if not manual and not quiet:
             if self.st.get('show_toast', True):
                 self.show_copy_toast(txt)
             if self.st.get('sound_copy'):
                 sound.play_copy()
+        return True
 
     def _late_source(self, rid):
         """后台补抓来源：竞态下第一次可能抓到自己或抓空，50ms 后再试一次"""
@@ -636,6 +647,7 @@ class SystemMixin:
         返回处理结果字符串，供调用方决定是否需要额外反馈：
           'private' 私密跳过 / 'image' 记了图片 / 'text' 记了文本或文件路径 /
           'empty' 无可记录内容 / 'sensitive' 命中敏感词按设置不入库 /
+          'skip' 被长度过滤/忽略规则拦下未入库 / 
           'dup' 与库中最新一条相同已跳过（仅 dedup=True 时可能返回）。
         """
         if self.st.get('smart_private', True) and clip_is_private():
@@ -670,10 +682,10 @@ class SystemMixin:
             if not quiet:
                 self.tip('检测到%s，按设置不入库' % '/'.join(hits))
             return 'sensitive'
-        # manual=quiet：补记时借 ingest 的 manual 语义跳过复制音与提示浮窗
-        #（ingest 末尾的音效/toast 只在 manual=False 时触发）。
-        self.ingest(txt, hits, manual=quiet)
-        return 'text'
+        # quiet=quiet：补记时只抑制复制音/toast，**不**跳过长度过滤与忽略规则
+        #（补记是自动行为，用户的过滤设置必须继续生效）。用 ingest 的返回值判断是否真的
+        #入库，被过滤/忽略规则拦下时返回 'skip'，避免补记误报"已补记"。
+        return 'text' if self.ingest(txt, hits, quiet=quiet) else 'skip'
 
     def catchup_clipboard(self):
         """补记「程序未运行时复制的内容」（A 方案）。

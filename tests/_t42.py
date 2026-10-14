@@ -13,7 +13,10 @@ H. **不播复制音**：把 sound.play_copy 换成探针，断言调用 0 次�
 I. 重复调用 catchup_clipboard() 不会把同一条补多次
 J. 触发点①「监听」开关由关变开 → 补一次；触发点② 启动流程调用了 catchup_clipboard
 K. tip 文案：未开开机自启时追加建议、已开时不追加
-L. 数据不污染：真实 ClawBoard数据.json sha256 前后一致、无新增 .bak
+L. 补记**应用** min_len / max_len 长度过滤（补记是自动行为，必须尊重用户的过滤设置）
+M. manual 路径（拆词/变换存新条目）行为未变：仍跳过长度过滤、不播复制音；
+   常规 ingest（quiet=False）仍播复制音（quiet 未误伤常规路径）
+N. 数据不污染：真实 ClawBoard数据.json sha256 前后一致、无新增 .bak
 
 为什么全程 stub 剪贴板：本机剪贴板会被外部进程锁定（OpenClipboard → ERROR_ACCESS_DENIED，
 _t35/_t37 已知环境问题），直接读真剪贴板会不稳定；补记逻辑只依赖「读到的内容」，用 stub
@@ -370,9 +373,80 @@ check('未开开机自启 → 追加建议', '开机自启' in t_off, 'tip=%r' %
 check('已开开机自启 → 不追加建议', '开机自启' not in t_on, 'tip=%r' % t_on)
 
 # ============================================================
-# L. 数据不污染
+# L. 补记应用长度过滤（min_len / max_len）—— 补记是自动行为，必须尊重过滤设置
 # ============================================================
-section('L. 数据不污染')
+section('L. 补记应用长度过滤')
+check('ingest 有独立 quiet 参数', 'quiet' in inspect.signature(app.ingest).parameters)
+app.st['skip_sensitive'] = False
+
+# L1. 短于 min_len → 不补
+app.st['min_len'] = 5
+app.st['max_len'] = 0
+set_lib([item('已有')])
+reset_clip('text', text='ab')          # 2 字符 < 5
+r = app.catchup_clipboard()
+check('短于 min_len → 不补', r is False, 'got=%r' % r)
+check('条数不变', len(app.data['clip']) == 1)
+
+# L2. 达到 min_len → 补
+app.st['min_len'] = 5
+set_lib([item('已有')])
+reset_clip('text', text='abcdef')      # 6 字符 >= 5
+r = app.catchup_clipboard()
+check('达到 min_len → 补', r is True and len(app.data['clip']) == 2,
+      'r=%r n=%d' % (r, len(app.data['clip'])))
+
+# L3. 长于 max_len → 不补
+app.st['min_len'] = 0
+app.st['max_len'] = 3
+set_lib([item('已有')])
+reset_clip('text', text='abcdef')      # 6 字符 > 3
+r = app.catchup_clipboard()
+check('长于 max_len → 不补', r is False, 'got=%r' % r)
+check('条数不变', len(app.data['clip']) == 1)
+
+# 复位为默认（min_len=1 / max_len=0）
+app.st['min_len'] = 1
+app.st['max_len'] = 0
+
+# ============================================================
+# M. manual 路径（拆词/变换存新条目）行为未变
+# ============================================================
+section('M. manual 路径行为未变')
+_played2 = {'n': 0}
+_orig_play2 = S.sound.play_copy
+S.sound.play_copy = lambda: _played2.__setitem__('n', _played2['n'] + 1)
+try:
+    app.st['sound_copy'] = True
+    app.st['min_len'] = 100            # 正常 ingest 会把 3 字符内容过滤掉
+    set_lib([item('已有')])
+    ok = app.ingest('短内容', manual=True)     # manual 跳过过滤 → 应入库
+finally:
+    S.sound.play_copy = _orig_play2
+    app.st['sound_copy'] = False
+    app.st['min_len'] = 1
+check('manual=True 仍跳过长度过滤 → 入库', ok is True and len(app.data['clip']) == 2,
+      'ok=%r n=%d' % (ok, len(app.data['clip'])))
+check('manual=True 不播复制音', _played2['n'] == 0, '实际 %d' % _played2['n'])
+
+# 普通 ingest（manual=False, quiet=False）在有 sound_copy 时仍播复制音（确认未误伤）
+_played3 = {'n': 0}
+_orig_play3 = S.sound.play_copy
+S.sound.play_copy = lambda: _played3.__setitem__('n', _played3['n'] + 1)
+try:
+    app.st['sound_copy'] = True
+    set_lib([item('已有')])
+    app.ingest('正常复制内容')          # 常规路径
+finally:
+    S.sound.play_copy = _orig_play3
+    app.st['sound_copy'] = False
+check('常规 ingest 仍播复制音（quiet 未误伤常规路径）', _played3['n'] == 1,
+      '实际 %d' % _played3['n'])
+
+# ============================================================
+# N. 数据不污染
+# ============================================================
+section('N. 数据不污染')
 check('真实数据 sha256 未变',
       HASH_BEFORE == file_hash(REAL_DATA) ==
       '5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079',
