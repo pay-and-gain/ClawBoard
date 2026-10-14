@@ -204,6 +204,15 @@ check('窗口比阈值小：宽<80 时要求全宽可见',
       app._enough_visible(-20, 0, 60, 30) is False,
       '60 宽窗口左移 20 → 可见 40<60')
 
+# 空显示器列表：不留理论崩溃点（_nearest_monitor 不转调 primary_monitor，后者会 monitors()[0]）
+set_monitors([])
+_nm = app._nearest_monitor(100, 100, 350, 480)
+check('monitors() 为空 → _nearest_monitor 返回默认矩形且不抛',
+      _nm == (0, 0, 1920, 1080), 'got=%s' % (_nm,))
+check('monitors() 为空 → _enough_visible 返回 False 且不抛',
+      app._enough_visible(0, 0, 350, 480) is False)
+set_monitors(DUAL)
+
 # ============================================================
 # B. 拖动序列：双向连续跨屏（修复前必失败）
 # ============================================================
@@ -269,7 +278,8 @@ check('屏内 → 1.0', abs(W.visible_ratio(100, 100, 350, 480) - 1.0) < 1e-9,
       'got=%.4f' % W.visible_ratio(100, 100, 350, 480))
 check('完全出屏 → 0', W.visible_ratio(6000, 300, 350, 480) == 0.0,
       'got=%.4f' % W.visible_ratio(6000, 300, 350, 480))
-check('一半出屏 → 约 0.5（旧实现也是 0.5，但那是"误判"的根源）',
+check('50/50 骑跨 → 0.5（注意：一般骑跨是 <1 而非恒等于 0.5；旧 max 语义对任何骑跨恒 <1，'
+      '故必被 ensure_onscreen 拉回）',
       abs(W.visible_ratio(-175, 300, 350, 480) - 0.5) < 1e-6,
       'got=%.4f' % W.visible_ratio(-175, 300, 350, 480))
 
