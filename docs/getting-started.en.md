@@ -6,24 +6,24 @@ ClawBoard keeps a history of copied content and a panel of reusable phrases. Sta
 
 The current interface uses Chinese labels: **设置** is Settings, **常用语** is Phrases, **关于** is About, and **退出** is Quit.
 
-> This guide describes the **refactor preview in PR #1**. Its internal version remains 2.6.1; it has not been merged into main or released. Published v2.6.1 packages do not include the current IME and permission fixes. Keep trigger expansion disabled in those packages. Use the separate links below for published downloads and preview source.
+> This guide describes **v2.7.0**. Older v2.6.1 packages lack the current IME and permission safeguards; keep triggers disabled while using that older build. Back up the data file and image folder before upgrading.
 
 ## 1. Choose how to run it
 
-**For the published build**, open the [v2.6.1 release](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.6.1). Neither packaged option requires Python.
+**For the published build**, open the [v2.7.0 release](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0). Neither packaged option requires Python.
 
-- [ClawBoard-2.6.1-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-portable.zip): extract the whole archive into a writable folder and run `ClawBoard.exe`. Keep the executable beside its data files.
-- [ClawBoard-2.6.1-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-setup.exe): follow the setup wizard. A desktop shortcut is optional.
+- [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip): extract the whole archive into a writable folder and run `ClawBoard.exe`. Keep the executable beside its data files.
+- [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe): follow the setup wizard. A desktop shortcut is optional.
 
-**To try the refactor preview**, use Windows 10/11, Git and Python 3.10+ with Tcl/Tk included in the Python installation:
+**To run from source**, use Windows 10/11, Git and Python 3.10+ with Tcl/Tk included in the Python installation:
 
 ```powershell
-git clone --branch refactor/services-and-responsiveness --single-branch https://github.com/pay-and-gain/ClawBoard.git ClawBoard-preview
-cd ClawBoard-preview
+git clone https://github.com/pay-and-gain/ClawBoard.git
+cd ClawBoard
 python ClawBoard.py
 ```
 
-The application only needs the Python standard library; there are no pip dependencies to install. Track the preview in [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1). Source runs store data in the source directory by default. Keep an experimental preview separate from your existing clipboard library.
+The application only needs the Python standard library; there are no pip dependencies to install. See [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) for the refactor. Source runs store data in the source directory by default; development tests must use a separate temporary library.
 
 ## 2. Copy and paste your first entry
 
@@ -61,7 +61,7 @@ Startup catch-up can read the current clipboard content available at startup. It
 
 Open the phrases tab, select a group and click **＋** at the bottom. Enter a name and the text; the trigger field can stay empty. Click the saved phrase whenever you need to copy or paste it. You can also right-click a history entry and save it as a phrase.
 
-**Optional trigger expansion is limited to a separate standard US keyboard layout in the preview:**
+**Optional trigger expansion is limited to a separate standard US keyboard layout:**
 
 1. Give a harmless phrase a trigger such as `cbqa`, then enable trigger expansion in Settings.
 2. Press **Win+Space** and select a separate **English (United States) — US** keyboard. If it is not available, leave triggers off and use the phrase list instead.
@@ -96,9 +96,9 @@ Portable use creates these local files. The optional Start with Windows setting 
 3. For a portable upgrade, replace `ClawBoard.exe` in its existing location and keep the data and images beside it. A new exe in a separate subfolder uses a different data location and can make the history appear missing.
 4. To move or restore data, quit the destination application first, copy the JSON and image folder to its actual data directory, then launch and check the contents. Do not let two instances write to the same library.
 
-Back up before an installer upgrade too, and read the keep/delete-data choice when uninstalling. **This preview's installation and uninstallation flow has not completed real-world validation.** A successfully compiled installer is not evidence that installation was tested.
+Back up before an installer upgrade too. The uninstall data question defaults to keeping data, and silent uninstall also keeps it. Silent installation and data-preserving uninstallation were tested in a separate local directory; see the [validation record](WINDOWS_VALIDATION.md) for scope.
 
-The Python and C implementations support the shared JSON format, but the C version has fewer features. Quit and back up before switching. The preview retaining the 2.6.1 version number does not mean the published release was updated.
+The Python and C implementations support the shared JSON format, but the C version has fewer features. Quit and back up before switching. Older 2.6.1 preview packages are different builds from the official v2.7.0 release.
 
 ## 7. Privacy settings
 
@@ -114,11 +114,11 @@ Review these settings for your use:
 
 ## 8. Troubleshooting
 
-**The global shortcut does nothing.** Open Settings from the tray and try `Alt+V` or `Ctrl+Alt+V`. The preview tries alternate combinations; if none can be registered, it falls back to detecting the default `Ctrl+Shift+V`. Follow the actual combination shown in Settings or the status message.
+**The global shortcut does nothing.** Open Settings from the tray and try `Alt+V` or `Ctrl+Alt+V`. ClawBoard tries alternate combinations; if none can be registered, it falls back to detecting the default `Ctrl+Shift+V`. Follow the actual combination shown in Settings or the status message.
 
 **The destination runs as administrator.** Normal-privilege ClawBoard stops key injection into higher-privilege targets; unknown integrity levels also stop key injection. If copying succeeded, press `Ctrl+V` in the destination yourself. Use the same fallback when a target refuses focus or input.
 
-**A trigger does not expand.** Check that you are using the preview, the setting is enabled, the target is outside ClawBoard, and a separate standard US keyboard is selected. Microsoft Pinyin switched to English is still an IME and is skipped. Clicking the phrase remains available.
+**A trigger does not expand.** Check that you are using v2.7.0, the setting is enabled, the target is outside ClawBoard, and a separate standard US keyboard is selected. Microsoft Pinyin switched to English is still an IME and is skipped. Clicking the phrase remains available.
 
 **The panel is missing.** Try the global show/hide shortcut, then use the tray's Reset position command. Mixed-DPI behavior has been checked for the main panel; this does not imply every already-open dialog adapts identically across displays.
 

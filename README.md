@@ -4,23 +4,23 @@
 
 Windows 剪贴板历史与常用语面板。找回复制过的文字、截图和文件路径，搜索后粘贴到正在编辑的位置，也能把重复使用的内容存成常用语。
 
-[下载已发布版本](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.6.1) · [新手指南](docs/getting-started.md) · [重构预览 PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) · [Windows 验证记录](docs/WINDOWS_VALIDATION.md)
+[下载 v2.7.0](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0) · [新手指南](docs/getting-started.md) · [本次改动 PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) · [Windows 验证记录](docs/WINDOWS_VALIDATION.md)
 
-> **当前是重构预览，内部版本仍为 2.6.1。** 本轮修复尚未合并 main，也未正式发布；下方正式版下载不包含本轮输入法和权限保护。使用已发布的 v2.6.1 时，请保持触发词功能关闭。本文的输入保护和跨屏行为以预览源码为准。
+> **v2.7.0 包含服务重构、输入法防误删、管理员窗口安全降级和主面板跨屏缩放。** 升级前备份数据文件和图片目录。旧 v2.6.1 不包含本轮输入保护，仍使用旧版时请关闭触发词。
 
 <p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 重构预览的剪贴板历史，使用合成示例内容" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 剪贴板历史，使用合成示例内容" width="420">
 </p>
 
 ## 下载与开始使用
 
-运行打包好的程序无需安装 Python。正式版下载与预览源码是两种不同交付：
+运行打包好的程序无需安装 Python。推荐便携包，也可选择安装向导或完整分享包：
 
 | 交付 | 入口 | 说明 |
 |---|---|---|
-| 正式版便携包 | [ClawBoard-2.6.1-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-portable.zip) | 解压后运行 `ClawBoard.exe`；不包含本轮重构修复 |
-| 正式版安装包 | [ClawBoard-2.6.1-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-setup.exe) | 安装向导、开始菜单快捷方式和卸载入口；不包含本轮重构修复 |
-| 重构预览源码 | [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) | `refactor/services-and-responsiveness` 分支；需要 Windows、Python 3.10+ 和 Tcl/Tk |
+| 便携包 | [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip) | 解压后运行 `ClawBoard.exe`，数据与 exe 同层 |
+| 安装包 | [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe) | 安装向导、开始菜单快捷方式和卸载入口 |
+| 完整分享包 | [ClawBoard-2.7.0-windows.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip) | 便携程序、安装包、中英文说明与校验清单，一份文件便于转发 |
 
 1. 启动程序，在其他应用复制一段测试文字。
 2. 回到要输入的位置，按 **Ctrl+Shift+V** 唤起面板。
@@ -33,11 +33,11 @@ Windows 剪贴板历史与常用语面板。找回复制过的文字、截图和
 - **找回与整理**：记录文字、图片、文件路径，去重、收藏，按关键词、来源、类型或时间筛选；支持中文拼音搜索。
 - **重复使用**：常用语分组，键盘选择和前十项快捷粘贴；可选的触发词展开有下述布局限制。
 - **处理内容**：文本编码、JSON、大小写和行处理等变换；选中内容可导出为 TXT、CSV、JSON 或 Markdown。
-- **适应桌面**：亮暗主题、用户缩放、折叠和靠边隐藏。预览版主面板会在跨屏稳定落位后适应屏幕 DPI。
+- **适应桌面**：亮暗主题、用户缩放、折叠和靠边隐藏。主面板会在跨屏稳定落位后适应屏幕 DPI。
 
 <p align="center">
   <img src="https://pay-and-gain.github.io/ClawBoard/images/search-highlight.png" alt="搜索筛选合成剪贴板条目" width="420">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/phrases.png" alt="按分组管理常用语的预览界面" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/phrases.png" alt="按分组管理常用语的界面" width="420">
 </p>
 
 截图使用示例数据。搜索写法包括 `app:chrome`、`type:url`、`is:fav`、`tag:email`；可组合关键词或用 `-关键词` 排除。拼音搜索不展开所有多音字读法。
@@ -65,7 +65,7 @@ Windows 剪贴板历史与常用语面板。找回复制过的文字、截图和
 - **管理员目标需要手动粘贴**：普通权限进程不会向更高权限窗口自动发键；权限无法确认时也停止自动发键。看到“已复制”后，在目标窗口按 Ctrl+V。自动输入不能保证任意应用都接受内容。
 - **记录不是完整审计**：程序关闭或连续快速复制时，无法保证保留每一个中间状态；启动补记只读取当时可取得的当前剪贴板。
 
-预览版已实测浏览器输入框、中文候选保护、独立 US 触发、管理员手动粘贴降级和混合 DPI 主面板；本机独立目录的静默安装、启动及保留数据卸载也已通过。交互式安装向导、物理托盘点击、真实 Explorer 重启恢复及长期运行仍有未验收部分，完整范围见 [Windows 验证记录](docs/WINDOWS_VALIDATION.md)。
+已实测浏览器粘贴、中文候选保护、独立 US 触发、管理员手动粘贴、混合 DPI 主面板、真实托盘打开和 Explorer 重启恢复；独立测试目录的静默安装/保留数据卸载、GUI 保存后新进程重载也已通过。5,000 条合成记录完成 15 分钟搜索/滚动负载；交互式安装向导及多日运行未测，完整范围见 [Windows 验证记录](docs/WINDOWS_VALIDATION.md)。
 
 ## 常用快捷键
 
@@ -83,11 +83,11 @@ Windows 剪贴板历史与常用语面板。找回复制过的文字、截图和
 | `Ctrl+=` / `Ctrl+-` | 调整用户缩放档位 |
 | `Esc` / `Ctrl+Q` | 隐藏 / 退出 |
 
-## 从预览源码运行
+## 从源码运行
 
 ```powershell
-git clone --branch refactor/services-and-responsiveness --single-branch https://github.com/pay-and-gain/ClawBoard.git ClawBoard-preview
-cd ClawBoard-preview
+git clone https://github.com/pay-and-gain/ClawBoard.git
+cd ClawBoard
 python ClawBoard.py
 ```
 
@@ -115,5 +115,5 @@ python tests/test_core.py
 - [当前架构与维护约定](docs/REFACTOR.md)
 - [Windows 验证与尚未完成的场景](docs/WINDOWS_VALIDATION.md)
 - [项目审阅与性能对照](docs/PROJECT_REVIEW.md)
-- [重构预览版前后对照](docs/PREVIEW_COMPARISON.md)
+- [重构前后对照](docs/PREVIEW_COMPARISON.md)
 - [更新记录](CHANGELOG.md) · [MIT 许可](LICENSE)

@@ -99,8 +99,17 @@
   <h1 data-lang="zh">悬浮剪贴板 &amp; 常用语面板</h1>
   <h1 data-lang="en">Floating clipboard &amp; phrases panel</h1>
 
-  <p class="sub" data-lang="zh">Windows · 零第三方依赖 · Python 与纯 C 双版本</p>
-  <p class="sub" data-lang="en">Windows · Zero third-party dependencies · Python and pure C builds</p>
+  <p class="sub" data-lang="zh">v2.7.0 · Windows 10/11 · 零运行时第三方依赖</p>
+  <p class="sub" data-lang="en">v2.7.0 · Windows 10/11 · No third-party runtime dependencies</p>
+
+  <div class="links">
+    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip" data-lang="zh">下载便携版</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip" data-lang="en">Download portable</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip" data-lang="zh">完整分享包</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip" data-lang="en">Complete bundle</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0" data-lang="zh">安装包与更新说明</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0" data-lang="en">Installer and release notes</a>
+  </div>
 
   <p data-lang="zh">贴在屏幕一角的轻量面板，管两件事：<b>你复制过什么</b>、<b>你常要打什么</b>。支持搜索、文本变换、批量导出、快速粘贴，以及一整套面向隐私的剪贴板处理机制。</p>
   <p data-lang="en">A lightweight panel docked in a corner of your screen that handles two things: <b>what you copied</b> and <b>what you type often</b>. With search, text transforms, batch export, quick paste, and a full set of privacy-oriented clipboard handling.</p>
@@ -108,15 +117,7 @@
   <div class="shots">
     <img src="images/main-window.png" alt="main window">
     <img src="images/search-highlight.png" alt="advanced search with highlighting">
-    <img src="images/image-clipboard.png" alt="image clipboard with corner preview">
     <img src="images/phrases.png" alt="phrases and trigger snippets">
-    <img src="images/transform.png" alt="text transforms">
-    <img src="images/command-palette.png" alt="command palette">
-    <img src="images/theme-compare.png" alt="light and dark themes">
-    <img src="images/scale-compare.png" alt="proportional UI scaling">
-    <img src="images/folded-edge.png" alt="expanded panel vs. double-click collapse to the edge" style="height:auto;width:260px">
-    <img src="images/settings-general.png" alt="settings">
-    <img src="images/settings-advanced.png" alt="settings advanced">
   </div>
 
   <h2 data-lang="zh">功能</h2>
@@ -148,8 +149,11 @@
   <h3 data-lang="zh">运行</h3>
   <h3 data-lang="en">Run</h3>
   <pre><code>python ClawBoard.py     <span data-lang="zh"># 需要 Python 3 + tkinter</span><span data-lang="en"># requires Python 3 + tkinter</span></code></pre>
-  <p data-lang="zh">或直接运行打包好的 <code>ClawBoard.exe</code>，数据文件生成在 exe 旁边。</p>
-  <p data-lang="en">Or run the packaged <code>ClawBoard.exe</code>; the data file is created next to it.</p>
+  <p data-lang="zh">或解压便携包运行 <code>ClawBoard.exe</code>，无需安装 Python。可写便携目录的数据与 exe 同层；目录不可写时回退到 <code>%APPDATA%\ClawBoard</code>，以托盘“关于”显示的路径为准。</p>
+  <p data-lang="en">Or extract the portable package and run <code>ClawBoard.exe</code>; Python is not required. Writable portable folders keep data beside the exe. An unwritable folder falls back to <code>%APPDATA%\ClawBoard</code>; check the actual path in About.</p>
+
+  <p data-lang="zh">触发词仅对独立标准 US 键盘布局启用；中文输入法仍可正常复制、搜索和点击常用语。向管理员窗口输入时会保留复制并提示手动 Ctrl+V。升级前备份 JSON 和整个图片目录。</p>
+  <p data-lang="en">Triggers require a separate standard US keyboard layout. Chinese IMEs still support normal copy, search and phrase clicks. Elevated targets fall back to copying and manual Ctrl+V. Back up the JSON file and complete image folder before upgrading.</p>
 
   <h3 data-lang="zh">快捷键</h3>
   <h3 data-lang="en">Shortcuts</h3>
@@ -171,13 +175,13 @@
     <li>数据存 <code>ClawBoard数据.json</code>，纯文本、可备份、可迁移</li>
     <li>写文件采用「先写临时文件再原子替换」，不会写一半变成坏文件</li>
     <li>版本升级前自动备份（保留最近 3 份）；读取时逐字段校验</li>
-    <li>Python 版与 C 版<b>共用同一份数据文件</b>，可互换使用</li>
+    <li>Python 与精简 C 实现保持共享数据契约，功能范围不同；切换前先退出并备份</li>
   </ul>
   <ul data-lang="en">
     <li>Data lives in <code>ClawBoard数据.json</code> — plain text, easy to back up and migrate</li>
     <li>Writes go to a temp file and are atomically swapped in — no half-written file</li>
     <li>Automatic backup before schema upgrades (keeps the last 3); per-field validation on read</li>
-    <li>The Python and C builds <b>share the same data file</b> and can be swapped freely</li>
+    <li>Python and the smaller C implementation share a data contract, with different feature sets; quit and back up before switching</li>
   </ul>
 
   <h2 data-lang="zh">设计思路要点</h2>
@@ -185,28 +189,28 @@
 
   <ul data-lang="zh">
     <li><b>先能跑 → 再跑得稳 → 最后才堆功能</b>：分三批做，第一批就能日常使用，后面每批都在可用的基础上加</li>
-    <li><b>为什么不用现成软件</b>：现成的要么功能太多（云同步/账号/收费），要么不能自定义常用语分组</li>
-    <li><b>为什么做两个版本</b>：Python 版验证复杂逻辑，C 版验证脱离解释器能压到多小 —— 12 MB/66 MB 对 205 KB/15 MB</li>
-    <li><b>1 万条不卡的关键</b>：虚拟列表，屏幕上只创建看得见的 9 个控件</li>
+    <li><b>本地工作流</b>：把历史、常用语、搜索和粘贴放在一个面板中，更新检查可关闭</li>
+    <li><b>实现取舍</b>：Python/tkinter 作为当前完整发布，C/Win32 保留精简实现和数据兼容参考</li>
+    <li><b>有界界面工作</b>：虚拟列表复用可见控件，后台查询与图片处理通过主线程队列交付结果</li>
     <li><b>三道数据保险</b>：原子写 + 升级前备份 + 逐字段校验</li>
   </ul>
   <ul data-lang="en">
     <li><b>Make it run → make it stable → then pile on features</b>: three batches; the first is already usable daily</li>
-    <li><b>Why not an existing tool</b>: they're either overloaded (cloud sync / accounts / paywalls) or can't do custom phrase groups</li>
-    <li><b>Why two builds</b>: Python gets the complex logic working, C proves how small the same design gets — 12 MB/66 MB vs 205 KB/15 MB</li>
-    <li><b>Why 10k items don't lag</b>: a virtual list keeps only the ~9 visible widgets alive</li>
+    <li><b>A local workflow</b>: history, phrases, search and paste in one panel, with optional update checks</li>
+    <li><b>Implementation tradeoff</b>: Python/tkinter is the current full release; C/Win32 remains a smaller implementation and compatibility reference</li>
+    <li><b>Bounded UI work</b>: visible widgets are reused, while background queries and image processing deliver results through the main-thread queue</li>
     <li><b>Three data safeguards</b>: atomic writes + pre-upgrade backup + per-field validation</li>
   </ul>
 
   <p data-lang="zh">完整内容见文档：</p>
   <p data-lang="en">Full details:</p>
   <div class="links">
-    <a href="制作思路.md" data-lang="zh">📘 制作思路（中文）</a>
-    <a href="DESIGN.en.md" data-lang="en">📘 Design notes (English)</a>
-    <a href="架构设计.md" data-lang="zh">🏗️ 架构设计</a>
-    <a href="架构设计.md" data-lang="en">🏗️ Architecture</a>
-    <a href="../CHANGELOG.md">📝 CHANGELOG</a>
-    <a href="../LICENSE">📄 MIT License</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/getting-started.md" data-lang="zh">新手指南</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/getting-started.en.md" data-lang="en">Getting started</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/REFACTOR.md" data-lang="zh">当前架构</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/REFACTOR.md" data-lang="en">Architecture</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/CHANGELOG.md">CHANGELOG</a>
+    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/LICENSE">MIT License</a>
   </div>
 
   <footer>

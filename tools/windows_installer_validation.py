@@ -104,8 +104,9 @@ def prepare(installer, installer_sha256, exe_sha256):
     from tools.windows_test_guard import acquire_desktop_test_lease
     acquire_desktop_test_lease()
     installer = _safe_path(installer)
-    if not installer.is_relative_to(VALIDATION):
-        raise ValueError('installer must be inside repository validation directory')
+    if not any(installer.is_relative_to(base) for base in
+               (VALIDATION, ROOT / 'dist/release-builds')):
+        raise ValueError('installer must be inside repository validation or release build directory')
     if not all(re.fullmatch('[0-9a-f]{64}', value) for value in (installer_sha256, exe_sha256)):
         raise ValueError('full reviewed SHA256 values are required')
     if digest(installer) != installer_sha256:

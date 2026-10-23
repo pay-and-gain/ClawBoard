@@ -4,24 +4,24 @@
 
 ClawBoard 用来找回复制过的内容，并把常用文字放在随时可用的面板里。先用一段无敏感信息的测试文字，走完一次“复制 → 找到 → 粘贴”。
 
-> 本指南以 **PR #1 的重构预览**为准，内部版本仍是 2.6.1，尚未合并 main 或正式发布。已发布的 v2.6.1 下载不包含本轮输入法和权限修复；使用该正式包时请关闭触发词。预览源码与正式下载请按下面的入口区分。
+> 本指南适用于 **v2.7.0**。旧 v2.6.1 不包含本轮输入法和权限保护，仍使用旧版时请关闭触发词；升级前备份数据文件和图片目录。
 
 ## 1. 选择运行方式
 
-**直接使用正式版**：到 [v2.6.1 发布页](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.6.1)，选择便携包或安装包。两种打包形式都不需要安装 Python。
+**直接使用正式版**：到 [v2.7.0 发布页](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0)，选择便携包或安装包。两种打包形式都不需要安装 Python。
 
-- [ClawBoard-2.6.1-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-portable.zip)：完整解压到一个可写文件夹，再双击 `ClawBoard.exe`。以后保持 exe 与数据文件同层。
-- [ClawBoard-2.6.1-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-setup.exe)：按向导选择安装位置；桌面快捷方式是可选项。
+- [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip)：完整解压到一个可写文件夹，再双击 `ClawBoard.exe`。以后保持 exe 与数据文件同层。
+- [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe)：按向导选择安装位置；桌面快捷方式是可选项。
 
-**体验重构预览**：准备 Windows 10/11、Git、Python 3.10+，安装 Python 时包含 Tcl/Tk，然后运行：
+**从源码运行**：准备 Windows 10/11、Git、Python 3.10+，安装 Python 时包含 Tcl/Tk，然后运行：
 
 ```powershell
-git clone --branch refactor/services-and-responsiveness --single-branch https://github.com/pay-and-gain/ClawBoard.git ClawBoard-preview
-cd ClawBoard-preview
+git clone https://github.com/pay-and-gain/ClawBoard.git
+cd ClawBoard
 python ClawBoard.py
 ```
 
-运行只需要 Python 标准库，没有 pip 依赖。预览状态与源码变更见 [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1)。源码运行的数据默认写在该源码目录，请勿将测试用的预览直接指向自己的历史库。
+运行只需要 Python 标准库，没有 pip 依赖。本轮源码变更见 [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1)。源码运行的数据默认写在该源码目录，开发测试使用独立临时数据。
 
 ## 2. 第一次复制和粘贴
 
@@ -59,7 +59,7 @@ python ClawBoard.py
 
 切换到“常用语”页，选择分组，再点底部 **＋**，填写名称和正文。触发词可以留空；以后点击条目即可复制或粘贴。历史条目也能通过右键“存为常用语”加入。
 
-**可选触发词只在预览版受支持的独立标准 US 键盘布局下使用**：
+**可选触发词只在受支持的独立标准 US 键盘布局下使用**：
 
 1. 给一条无敏感内容的常用语设置触发词，例如 `cbqa`；在设置里开启“触发词快速粘贴”。
 2. 按 **Win+空格**，选择独立的“英语（美国）— US”键盘。若列表没有该布局，先保持触发词关闭，仍可点击常用语粘贴。
@@ -94,9 +94,9 @@ python ClawBoard.py
 3. 便携升级时，只替换原位置的 `ClawBoard.exe`，保留同层数据和 `images/`。若把新 exe 放到另一个子目录，它会从另一个数据位置启动，看起来像没有历史。
 4. 换电脑或恢复备份时，先退出目标程序，再把 JSON 和图片目录放到目标实际数据目录，然后启动核对。不要让多个实例同时写同一份库。
 
-安装包升级前也先备份；卸载时看清保留/删除数据选项。**本轮预览的安装/卸载流程尚未完成实际验收**，不能把已编译安装包当作安装验证通过。
+安装包升级前也先备份；卸载默认保留数据，静默卸载也保留数据。已验证本机独立目录的静默安装与保留数据卸载，范围见 [Windows 验证记录](WINDOWS_VALIDATION.md)。
 
-Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现前同样先退出并备份。本轮预览仍用 2.6.1 版本号，不意味着正式发布页已更新。
+Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现前同样先退出并备份。旧 2.6.1 预览包与正式 v2.7.0 是不同构建。
 
 ## 7. 隐私设置
 
@@ -112,11 +112,11 @@ Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现�
 
 ## 8. 常见问题
 
-**唤起快捷键没有反应。** 先从托盘打开设置，改用 `Alt+V` 或 `Ctrl+Alt+V`。预览版会尝试候选组合，并在都注册失败时回退检测默认 `Ctrl+Shift+V`；以设置和提示中显示的实际组合为准。
+**唤起快捷键没有反应。** 先从托盘打开设置，改用 `Alt+V` 或 `Ctrl+Alt+V`。程序会尝试候选组合，并在都注册失败时回退检测默认 `Ctrl+Shift+V`；以设置和提示中显示的实际组合为准。
 
 **目标是管理员程序。** 普通权限 ClawBoard 会停止向更高权限目标自动发键；无法确认权限时也不自动发键。若内容已成功复制，在目标框手动按 `Ctrl+V`。目标拒绝焦点或输入时，也使用这一降级方式。
 
-**触发词没有展开。** 先确认使用预览版、开关开启、输入位置不是 ClawBoard 面板本身，并且选的是独立标准 US 键盘。微软拼音切换到“英”仍不属于这个布局。也可直接点击常用语使用。
+**触发词没有展开。** 先确认已升级到 v2.7.0、开关开启、输入位置不是 ClawBoard 面板本身，并且选的是独立标准 US 键盘。微软拼音切换到“英”仍不属于这个布局。也可直接点击常用语使用。
 
 **面板找不到。** 先尝试唤起，再用托盘右键的“面板找不到了？重置位置”。主面板支持跨屏缩放；已经打开的独立弹窗并不代表都有相同的跨屏适配能力。
 

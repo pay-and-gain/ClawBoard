@@ -8,6 +8,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PackagingTests(unittest.TestCase):
+    def test_release_version_agrees_across_installer_notes_and_downloads(self):
+        from tools.build_release import version
+        current = version()
+        installer = (ROOT / 'packaging/installer.iss').read_text(encoding='utf-8')
+        self.assertIn('#define MyAppVersion "' + current + '"', installer)
+        self.assertIn('## v' + current, (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8'))
+        self.assertTrue((ROOT / ('release/release-notes-' + current + '.md')).is_file())
+        for name in ('README.md', 'README.en.md', 'docs/getting-started.md',
+                     'docs/getting-started.en.md'):
+            source = (ROOT / name).read_text(encoding='utf-8')
+            self.assertIn('ClawBoard-' + current + '-portable.zip', source)
+            self.assertIn('ClawBoard-' + current + '-setup.exe', source)
+
     def test_all_runtime_modules_are_declared_for_packaging(self):
         tree = ast.parse((ROOT / 'packaging/ClawBoard.spec').read_text(encoding='utf-8'))
         analysis = next(n.value for n in tree.body if isinstance(n, ast.Assign)

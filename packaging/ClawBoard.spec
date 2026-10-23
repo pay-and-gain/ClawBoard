@@ -8,9 +8,30 @@
 这样 spec 挪到 packaging/ 之后仍能正确找到入口与图标。
 """
 import os
+import ast
+from PyInstaller.utils.win32.versioninfo import (
+    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, StringStruct, VarFileInfo, VarStruct,
+)
 
 _HERE = os.path.abspath(SPECPATH)     # packaging/
 _ROOT = os.path.dirname(_HERE)        # 项目根目录
+
+# 从同一版本来源生成 PE 属性，避免文件属性与程序“关于”显示不同版本。
+with open(os.path.join(_ROOT, 'clawboard', 'config.py'), encoding='utf-8') as _source:
+    _tree = ast.parse(_source.read())
+_APP_VER = next(ast.literal_eval(node.value) for node in _tree.body
+                if isinstance(node, ast.Assign) and any(
+                    isinstance(target, ast.Name) and target.id == 'APP_VER' for target in node.targets))
+_version = tuple(int(part) for part in _APP_VER.split('.')) + (0,)
+_VERSION_RESOURCE = VSVersionInfo(
+    ffi=FixedFileInfo(filevers=_version, prodvers=_version, mask=0x3f, flags=0,
+                     OS=0x40004, fileType=1, subtype=0, date=(0, 0)),
+    kids=[StringFileInfo([StringTable('040904B0', [
+        StringStruct('FileDescription', 'ClawBoard clipboard history and phrases'),
+        StringStruct('FileVersion', _APP_VER), StringStruct('ProductVersion', _APP_VER),
+        StringStruct('ProductName', 'ClawBoard'), StringStruct('InternalName', 'ClawBoard'),
+        StringStruct('OriginalFilename', 'ClawBoard.exe'), StringStruct('LegalCopyright', 'MIT License'),
+    ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])])
 
 a = Analysis(
     [os.path.join(_ROOT, 'ClawBoard.py')],
@@ -113,4 +134,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=[os.path.join(_HERE, 'ClawBoard.ico')],
+    version=_VERSION_RESOURCE,
 )
