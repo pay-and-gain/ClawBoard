@@ -132,6 +132,24 @@ v2.7.0 准备阶段重跑 `_t44`：372 项，359 通过、13 项 POSIX C 用例�
 
 仍未覆盖：安装向导逐页交互、卸载明确选“删除数据”、半截触发词的物理布局切换、独立弹窗全部 DPI 适配及多日持续运行。v2.7.0 发布包采用固定公开文件白名单，不包含合成库、真实历史、图片或私密备份；`_t52` 检查 ZIP 字节校验、额外文件拒绝及不覆盖现有成品。
 
+## v2.7.0 正式构建与发布
+
+PR #1 已合并，正式 tag `v2.7.0` 对应源码 `dcd3f7fa8ca348934f5e5a7cba1bb04759b0a568`。[主分支 Windows / Ubuntu 回归](https://github.com/pay-and-gain/ClawBoard/actions/runs/40008905673)均通过。最终构建用时 PyInstaller 8.187 秒、Inno 1.600 秒；源码构建前后 hash 一致，所有运行模块和 Tcl/Tk 已入包，无额外第三方运行模块，PE 文件属性为 2.7.0。
+
+最终二进制另外完成本机独立目录安装周期 `install-cycle-3ab7d044bee146c8b03ae3cbd80fbc26`：安装 exit 0，`--bench` NO_SAVE 启动 8.058 秒 exit 0，卸载 exit 0。合成 JSON/图片完整保留，安装登记、exe 与卸载器移除，真实库、原启动项和快捷方式保持不变。
+
+| 发布文件 | 字节数 | SHA256 |
+|---|---:|---|
+| `ClawBoard-2.7.0-portable.zip` | 13,891,243 | `6f196ec516cd2910c1c7a89d15f4246a4db3a1f058b65afb1f80c6393cb64297` |
+| `ClawBoard-2.7.0-windows.zip` | 29,250,039 | `d97eefbc39b34da00bf14dd5264ca05a538a5aaa64efc6d29e368dbba4ea8f07` |
+| `ClawBoard-2.7.0-setup.exe` | 15,908,870 | `e0d4c0395205692d76fb5a95d6203d4a585abd919fba1f7fedced52197e80daf` |
+
+便携 exe SHA256 为 `3529d1079c79a1392bb1466b00d569ac3a6535b109a853e2dcf836587b1b338d`。公开附件仅上述三文件与 `SHA256SUMS.txt`，GitHub 返回的四个摘要逐一匹配本地结果。[v2.7.0 正式发布页](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0)已公开；tag 与包内 `BUILD-INFO.txt` 指向同一源码提交。后续仅更新本文验收记录，不改变该发布包的源码身份。
+
+Pages 已按合并提交部署，线上首页含 v2.7.0，三张截图 HTTP 200 且字节摘要均与仓库一致。内嵌浏览器打开超时后停止操作，未绕过网址检查；上述核对使用明确 HTTPS 地址的响应内容。
+
+另尝试真实交互安装向导：临时目录和 `/NOICONS` 等约束与静默周期相同。窗口可见，但鼠标工具在许可页点击后页面未变化，因此在实际安装前关闭了本次专用进程；`check-aborted` 确认登记、启动项、真实库和快捷方式基线恢复。交互向导与明确选择删除数据仍列为未完成，不把截图或点击返回值当作通过。
+
 ## 复现入口
 
 ```powershell
