@@ -7,9 +7,9 @@
 ; 路径均相对本 .iss 文件所在目录（packaging\），因此 ..\ 指向项目根。
 ;
 ; 卸载残留说明（v1.6.1 修）：
-;   1. 自启动注册表值不是用户数据，卸载后无条件删掉；
+;   1. 自启动值与便携版共用名称，只清理仍指向本安装的值；
 ;   2. 数据文件由程序运行时生成、不在 [Files] 里，卸载不会带走 —— 这里在卸载时
-;      先问一下，选「是」才连 %APPDATA%\ClawBoard 一起删，默认保留。
+;      先问一下，选「是」才连 %APPDATA%\ClawBoard 一起删，默认保留；静默卸载不询问、不删数据。
 
 #define MyAppName "ClawBoard"
 #define MyAppVersion "2.6.1"
@@ -30,6 +30,8 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+; 自动化安装的 /NOICONS 也需要启用此选项；默认仍创建开始菜单快捷方式。
+AllowNoIcons=yes
 LicenseFile=..\LICENSE
 OutputDir=..\release
 OutputBaseFilename=ClawBoard-{#MyAppVersion}-setup
@@ -69,26 +71,38 @@ var
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  DataDir: String;
+  DataDir, RunCommand, InstalledExe: String;
 begin
   if CurUninstallStep = usUninstall then
   begin
+    WipeData := False;
+    if UninstallSilent then
+      Exit;
+
     DataDir := ExpandConstant('{userappdata}\ClawBoard');
     WipeData := MsgBox('要一并删除 ClawBoard 的数据吗（剪切板历史、常用语、设置）？'
                        + #13#10#13#10
                        + '选「是」：彻底清干净，卸载后不留任何痕迹。' + #13#10
                        + '选「否」：数据保留在 ' + DataDir + #13#10
                        + '　　　　　以后重装还能接着用。',
-                       mbConfirmation, MB_YESNO) = IDYES;
+                       mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
     Exit;
   end;
 
   if CurUninstallStep = usPostUninstall then
   begin
-    { 自启动项是注册表垃圾，不是用户数据：无条件清掉，否则开机一直拉一个已删除的程序 }
-    RegDeleteValue(HKEY_CURRENT_USER,
-                   'Software\Microsoft\Windows\CurrentVersion\Run',
-                   '{#MyAppName}');
+    { 便携版也使用同名 Run 值，不能卸载本安装时误删它的自启动设置 }
+    InstalledExe := ExpandConstant('{app}\{#MyAppExeName}');
+    if RegQueryStringValue(HKEY_CURRENT_USER,
+                           'Software\Microsoft\Windows\CurrentVersion\Run',
+                           '{#MyAppName}', RunCommand) then
+    begin
+      if (CompareText(RunCommand, InstalledExe) = 0)
+         or (CompareText(RunCommand, '"' + InstalledExe + '"') = 0) then
+        RegDeleteValue(HKEY_CURRENT_USER,
+                       'Software\Microsoft\Windows\CurrentVersion\Run',
+                       '{#MyAppName}');
+    end;
 
     if not WipeData then
       Exit;

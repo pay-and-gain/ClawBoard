@@ -10,7 +10,6 @@ import json
 import os
 import time
 import threading
-import queue
 import tkinter as tk
 
 from clawboard import runtime
@@ -27,13 +26,15 @@ from clawboard.timefmt import now_ms, match_ignore, backup_data, migrate
 from clawboard.win32 import (
     u32, MOD_CONTROL, MOD_SHIFT, MOD_ALT, VK_V, VK_CONTROL,
     capture_source, window_title_of, get_autostart,
-    start_keyboard_hook, stop_keyboard_hook, send_backspaces, send_ctrl_v,
+    start_keyboard_hook, stop_keyboard_hook, target_focus_hwnd,
     is_fullscreen_window, top_hwnd,
 )
 from clawboard.clipboard import (
-    clip_seq, clip_read, clip_read_files, clip_is_private, scan_sensitive, clip_write,
+    clip_seq, clip_read, clip_read_files, clip_is_private, scan_sensitive,
 )
-from clawboard.trigger import TriggerEngine
+from clawboard.paste_adapter import TriggerRequest
+from clawboard.trigger import TriggerEngine, is_supported_trigger_layout
+from clawboard.windows_layout import keyboard_layout
 from clawboard.image import clipboard_has_image, read_clipboard_dib, dib_to_png
 from clawboard.tag import detect_tags
 from clawboard.hotkey import HiddenWindow
@@ -121,59 +122,76 @@ class SystemMixin:
         if not self.st.get('trigger_enabled'):
             return
         self._stop_trigger_worker()
-        self._trigger_engine = TriggerEngine()
-        self._trigger_q = queue.Queue()
-        self._trigger_stop = threading.Event()
+        # 重新启用时必须替换旧闭包，而不是沿用已经停止的监听回调。
+        stop_keyboard_hook()
+        self._ensure_paste()
+        engine = self._trigger_engine = TriggerEngine()
+        stopped = self._trigger_stop = threading.Event()
+        own = top_hwnd(self.root)
+        context = [None]
+        pending = self._trigger_pending = [None]
         self._refresh_triggers()
 
+        def reset():
+            if pending[0] is not None:
+                pending[0].set()
+                pending[0] = None
+            context[0] = None
+            engine.reset()
+
+        def input_target():
+            target = int(u32.GetForegroundWindow() or 0)
+            focus = int(target_focus_hwnd(target) or 0) if target else 0
+            layout = keyboard_layout(focus)
+            current = (target, focus, layout)
+            if current != context[0]:
+                reset()
+                context[0] = current
+            if (stopped.is_set() or not target or target == own
+                    or not is_supported_trigger_layout(layout)):
+                reset()
+                return None
+            if pending[0] is not None:
+                pending[0].set()
+                pending[0] = None
+            return current
+
         def on_char(ch):
-            r = self._trigger_engine.feed(ch)
+            if ch in ('\n', '\t'):
+                reset()
+                return
+            current = input_target()
+            if current is None:
+                return
+            r = engine.feed(ch)
             if r:
-                self._trigger_q.put(r)
+                engine.reset()
+                cancellation = pending[0] = threading.Event()
+                self.application.dispatcher.post(
+                    self._queue_trigger, TriggerRequest(*r, *current), cancellation, stopped)
 
         def on_backspace():
-            self._trigger_engine.feed_backspace()
+            if input_target() is not None:
+                engine.feed_backspace()
 
-        if start_keyboard_hook(on_char, on_backspace):
+        if start_keyboard_hook(on_char, on_backspace, on_reset=reset):
             n = len(self._trigger_engine.triggers)
             self.note('触发词监听已启动（%d 个触发词）' % n)
-            self._trigger_thread = threading.Thread(
-                target=self._trigger_worker, args=(self._trigger_q, self._trigger_stop),
-                daemon=True, name='clawboard-trigger')
-            self._trigger_thread.start()
         else:
+            stopped.set()
             self.note('触发词监听启动失败')
 
-    def _trigger_worker(self, events=None, stopped=None):
-        """独立线程：消费触发事件，执行替换（退格 + 剪贴板 + Ctrl+V）。"""
-        events = self._trigger_q if events is None else events
-        stopped = getattr(self, '_trigger_stop', threading.Event()) if stopped is None else stopped
-        while not stopped.is_set():
-            event = events.get()
-            if event is None or stopped.is_set():
-                break
-            trig, repl = event
-            try:
-                if stopped.wait(0.05):
-                    break
-                send_backspaces(len(trig) + 1)      # 删掉 触发词 + 分隔符
-                if stopped.wait(0.03):
-                    break
-                if not clip_write(repl):
-                    continue
-                self.application.dispatcher.post(self.application.reset_clipboard, runtime.LAST_WRITE_SEQ)
-                send_ctrl_v()
-            except Exception as e:
-                self.note('触发词替换失败：%s' % e)
-
     def _stop_trigger_worker(self):
+        """取消旧一代监听及其排队请求；替换由普通粘贴串行 worker 执行。"""
         stopped = getattr(self, '_trigger_stop', None)
         if stopped is not None:
             stopped.set()
-            self._trigger_q.put(None)
 
     def _refresh_triggers(self):
         """从常用语收集触发词映射 {触发词: 内容}。"""
+        pending = getattr(self, '_trigger_pending', None)
+        if pending and pending[0] is not None:
+            pending[0].set()
         trigs = {}
         for g in self.data.get('groups', []):
             for it in g.get('items', []):
@@ -259,6 +277,7 @@ class SystemMixin:
             if self.hotkey_fallback:
                 self._poll_hotkey()
             self.sync_topmost()        # 按全屏状态落地实际置顶（放在 _need_show 之后）
+            self.sync_window_dpi()
             self.edge_update()
         except Exception as e:
             self.note('poll_bg 异常已吞掉（循环继续）：%s' % e)

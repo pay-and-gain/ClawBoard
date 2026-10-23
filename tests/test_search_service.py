@@ -250,6 +250,15 @@ class ViewportTests(unittest.TestCase):
         v.set_data(self.items[1:], None, '')
         self.assertEqual(v.multi, {'20'})
 
+    def test_search_placeholder_preserves_multi_until_final_results_arrive(self):
+        v = self.view
+        v.set_data(self.items, None, '')
+        v.multi = {'0', '20'}
+        v.set_data([], None, 'hello', preserve_selection=True)
+        self.assertEqual(v.multi, {'0', '20'})
+        v.set_data(self.items[1:], None, 'hello')
+        self.assertEqual(v.multi, {'20'})
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

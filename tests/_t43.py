@@ -39,17 +39,18 @@ except Exception:
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from tools.windows_test_guard import acquire_desktop_test_lease
+acquire_desktop_test_lease()
 
 # ---- 重定向落盘目标（必须在 import 业务模块之前）----
 TMP_DIR = tempfile.mkdtemp(prefix='cb_t43_')
 TMP_DATA = os.path.join(TMP_DIR, 'ClawBoard数据.json')
 
-import clawboard.app_services as S            # noqa: E402
-S.DATA_FILE = TMP_DATA
-S.CRASH_LOG = os.path.join(TMP_DIR, 'crash.log')
-
-import clawboard.timefmt as TF                # noqa: E402
-TF.DATA_FILE = TMP_DATA
+# 路径由业务模块在导入时读取，改兼容入口的同名导出不能隔离真实存储。
+from clawboard import config as CFG           # noqa: E402
+CFG.BASE_DIR = TMP_DIR
+CFG.DATA_FILE = TMP_DATA
+CFG.CRASH_LOG = os.path.join(TMP_DIR, 'crash.log')
 
 from clawboard import runtime as RT           # noqa: E402
 RT.NO_SAVE = True
@@ -91,7 +92,7 @@ def sidecars():
     return sorted(os.path.basename(p) for p in glob.glob(REAL_DATA + '*'))
 
 
-HASH_BEFORE = file_hash(REAL_DATA)             # 期望 == 5c21d32f...4079
+HASH_BEFORE = file_hash(REAL_DATA)
 FILES_BEFORE = sidecars()
 
 # ============================================================
@@ -468,8 +469,7 @@ for _cls in (WG.CopyToast, WG.ContentPreview, WG.ImagePreview):
 # ============================================================
 section('J. 数据不污染')
 check('真实数据 sha256 未变',
-      HASH_BEFORE == file_hash(REAL_DATA) ==
-      '5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079',
+      HASH_BEFORE == file_hash(REAL_DATA),
       'before=%s after=%s' % (HASH_BEFORE, file_hash(REAL_DATA)))
 check('真实目录无新增 .bak', sidecars() == FILES_BEFORE,
       'before=%s after=%s' % (FILES_BEFORE, sidecars()))
@@ -491,4 +491,4 @@ with open(out, 'w', encoding='utf-8') as f:
     f.write('\n'.join(LOG) + '\n\n' + ('全部通过\n' if OK else '有失败项\n'))
 print('\n'.join(LOG), flush=True)
 print('全部通过' if OK else '有失败项', flush=True)
-os._exit(0)
+sys.exit(0 if OK else 1)

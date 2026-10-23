@@ -8,6 +8,7 @@ import winreg
 from ctypes import wintypes
 
 from clawboard.config import APP_NAME, BASE_DIR
+from clawboard.windows_geometry import top_hwnd
 
 from clawboard.windows_api import (
     PROCESS_MEMORY_COUNTERS, PROCESS_QUERY_LIMITED_INFORMATION, gdi32, k32, psapi,
@@ -89,9 +90,16 @@ def system_dpi():
 def dpi_scale(root):
     """当前屏幕相对 100% 的缩放系数（96 DPI=1.0，120 DPI=1.25）。
 
-    用 Win32 GetDpiForSystem 直读系统 DPI，不读 tk scaling —— 后者在 frozen 下
-    会延迟生效，且已被 UI 缩放（config.UI_SCALE）改写，读它会双重缩放/误判。
+    优先读取窗口所在屏的 DPI；窗口尚未建立或旧系统不支持时才回退系统 DPI。
+    不读已被 UI 缩放改写的 tk scaling，否则会双重缩放。
     """
+    try:
+        hwnd = top_hwnd(root)
+        dpi = u32.GetDpiForWindow(hwnd)
+        if 48 <= dpi <= 384:
+            return dpi / 96.0
+    except Exception:
+        pass
     k = system_dpi() / 96.0
     return k if 0.5 <= k <= 4.0 else 1.0
 

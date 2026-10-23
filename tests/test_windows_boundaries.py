@@ -44,17 +44,24 @@ class WindowsHarness:
         self.queues = {}
         self.pump_entered = threading.Event()
         self.callback = None
+        self.mouse_callback = None
         self.module = None
         package = types.ModuleType('clawboard')
         package.__path__ = [str(ROOT / 'clawboard')]
         config = types.ModuleType('clawboard.config')
         config.APP_NAME, config.BASE_DIR = 'ClawBoardTest', '/tmp'
+        config.ICON_FILE = '/tmp/clawboard-test.ico'
+        config.BAR_H, config.MIN_W, config.MIN_H, config.RESIZE_ZONE = 34, 280, 340, 6
+        config.UI_SCALE_LEVELS, config.scaled = (0.5, 1.0, 1.5), int
+        config.UI_SCALE, config.DPI_SCALE = 1.0, 1.0
         registry = types.ModuleType('winreg')
         registry.HKEY_CURRENT_USER, registry.KEY_SET_VALUE, registry.REG_SZ = 0, 2, 1
         # Remove already imported adapters inside this isolated module dictionary;
         # their original objects are restored when the patch closes.
         modules = {k: v for k, v in sys.modules.items()
-                   if not k.startswith('clawboard.windows_') and k != 'clawboard.win32'}
+                   if not k.startswith('clawboard.windows_') and
+                   k not in ('clawboard.win32', 'clawboard.hotkey', 'clawboard.app_geometry',
+                             'clawboard.tk_dpi', 'clawboard.runtime')}
         modules.update({'clawboard': package, 'clawboard.config': config, 'winreg': registry})
         self.stack.enter_context(patch.dict(sys.modules, modules, clear=True))
         self.stack.enter_context(patch.object(ctypes, 'WinDLL', self.library, create=True))
@@ -81,8 +88,11 @@ class WindowsHarness:
         return 0
 
     def install(self, kind, callback, module, tid):
-        self.callback = callback
-        return 0x123456781234
+        if kind == self.module.WH_KEYBOARD_LL:
+            self.callback = callback
+            return 0x123456781234
+        self.mouse_callback = callback
+        return 0x123456781235
 
     def get_message(self, *args):
         self.pump_entered.set()
@@ -193,6 +203,210 @@ class WindowsBoundaryTests(unittest.TestCase):
         self.assertIs(function.argtypes[-1]._type_, ctypes.c_size_t)
         self.assertEqual(self.w.PASTE_MESSAGE_TIMEOUT_MS, 500)
         self.assertEqual(self.w.SMTO_ABORTIFHUNG, 2)
+
+    def test_tray_timeout_version_union_keeps_native_field_offsets(self):
+        record = self.w.NOTIFYICONDATA
+        self.assertEqual(record.uTimeout.offset, record.uVersion.offset)
+        self.assertEqual(record.szInfoTitle.offset,
+                         record.uTimeout.offset + ctypes.sizeof(ctypes.c_uint))
+        info = record()
+        info.uTimeout = 6000
+        self.assertEqual(info.uVersion, 6000)
+        if sys.platform == 'win32':
+            self.assertEqual(ctypes.sizeof(record), 976 if ctypes.sizeof(ctypes.c_void_p) == 8 else 956)
+        self.assertEqual(self.w.u32.DestroyWindow.argtypes, [ctypes.wintypes.HWND])
+        self.assertEqual(self.w.u32.UnregisterClassW.argtypes,
+                         [ctypes.wintypes.LPCWSTR, ctypes.wintypes.HINSTANCE])
+
+    def test_geometry_primary_monitor_excludes_left_and_top_boundary(self):
+        geometry = importlib.import_module('clawboard.app_geometry')
+        geometry.monitors = lambda: [(-1920, 0, 0, 1080), (0, -1080, 1920, 0),
+                                    (0, 0, 1920, 1080)]
+        self.assertEqual(geometry.GeometryMixin.primary_monitor(), (0, 0, 1920, 1080))
+        panel = geometry.GeometryMixin()
+        panel.root = types.SimpleNamespace(winfo_x=lambda: -100, winfo_y=lambda: 100,
+                                          winfo_width=lambda: 200, winfo_height=lambda: 100)
+        self.assertEqual(panel._window_monitor(), (0, 0, 1920, 1080))
+
+    def prepare_hidden_window(self):
+        classes, windows = {}, {}
+        def register(pointer):
+            record = pointer._obj
+            if record.lpszClassName in classes:
+                return 0
+            classes[record.lpszClassName] = record.lpfnWndProc
+            return 1
+        def create(style, name, title, *args):
+            tid = threading.get_ident()
+            self.win.queues[tid] = queue.Queue()
+            hwnd = 0x123456780000 + len(windows) + 1
+            windows[hwnd] = (tid, classes[name])
+            return hwnd
+        def post(hwnd, message, wp, lp):
+            tid, _ = windows[hwnd]
+            self.win.queues[tid].put((hwnd, message, wp, lp))
+            return 1
+        def get(pointer, *args):
+            value = self.win.queues[threading.get_ident()].get(timeout=2)
+            if value == self.w.WM_QUIT:
+                return 0
+            record = pointer._obj
+            record.hWnd, record.message, record.wParam, record.lParam = value
+            return 1
+        def dispatch(pointer):
+            record = pointer._obj
+            return windows[record.hWnd][1](record.hWnd, record.message, record.wParam, record.lParam)
+        def destroy(hwnd):
+            windows[hwnd][1](hwnd, self.w.WM_DESTROY, 0, 0)
+            return 1
+        def unregister(name, instance):
+            classes.pop(name)
+            return 1
+        self.win.u32.RegisterClassW.impl = register
+        self.win.u32.CreateWindowExW.impl = create
+        self.win.u32.PostMessageW.impl = post
+        self.win.u32.GetMessageW.impl = get
+        self.win.u32.DispatchMessageW.impl = dispatch
+        self.win.u32.DestroyWindow.impl = destroy
+        self.win.u32.PostQuitMessage.impl = lambda code: self.win.queues[threading.get_ident()].put(self.w.WM_QUIT)
+        self.win.u32.UnregisterClassW.impl = unregister
+        self.win.u32.AddClipboardFormatListener.impl = lambda hwnd: 1
+        self.win.u32.RegisterHotKey.impl = lambda *args: 1
+        return importlib.import_module('clawboard.hotkey').HiddenWindow, classes
+
+    def test_hidden_window_repeated_start_routes_callbacks_and_cleans_owner_resources(self):
+        hidden_class, classes = self.prepare_hidden_window()
+        caller = threading.get_ident()
+        seen = []
+        for value in ('first', 'second'):
+            event = threading.Event()
+            def tray(kind, value=value):
+                seen.append((value, kind))
+                event.set()
+            hidden = hidden_class(lambda: None, tray, lambda: None)
+            hidden.start()
+            try:
+                self.assertTrue(hidden.ready.wait(2))
+                self.assertTrue(hidden.hwnd)
+                self.assertTrue(hidden.reg_hotkey(2, 0x41))
+                self.win.u32.PostMessageW(hidden.hwnd, self.w.WM_TRAY, 0, self.w.WM_LBUTTONUP)
+                self.assertTrue(event.wait(1))
+            finally:
+                hidden.stop()
+                hidden.join(2)
+            self.assertFalse(hidden.is_alive())
+            self.assertIsNone(hidden.hwnd)
+            self.assertFalse(hidden.clipboard_listener)
+            self.assertFalse(hidden.hotkey_ok)
+            self.assertEqual(classes, {})
+            for name in ('DestroyWindow', 'UnregisterClassW', 'RemoveClipboardFormatListener'):
+                self.assertEqual(self.win.u32.functions[name].calls[-1][0], hidden.ident)
+                self.assertNotEqual(hidden.ident, caller)
+        self.assertEqual(seen, [('first', 'left'), ('second', 'left')])
+
+    def test_hidden_window_stop_before_start_does_not_leave_native_window(self):
+        hidden_class, classes = self.prepare_hidden_window()
+        hidden = hidden_class(lambda: None, lambda action: None)
+        hidden.stop()
+        hidden.start()
+        hidden.join(2)
+        self.assertFalse(hidden.is_alive())
+        self.assertTrue(hidden.ready.is_set())
+        self.assertEqual(classes, {})
+        self.assertEqual(self.win.u32.CreateWindowExW.calls, [])
+
+    def test_taskbar_created_restores_only_enabled_tray_without_reloading_icon(self):
+        hidden_class, classes = self.prepare_hidden_window()
+        module = importlib.import_module('clawboard.hotkey')
+        self.win.u32.RegisterWindowMessageW.impl = lambda name: 0xC123
+        self.win.u32.LoadImageW.impl = lambda *args: 0x123456789
+        icons = set()
+        def notify(command, pointer):
+            record = pointer._obj
+            identity = (record.hWnd, record.uID)
+            if command == module.NIM_ADD:
+                if identity in icons:
+                    return 0
+                icons.add(identity)
+                return 1
+            if command == module.NIM_DELETE:
+                icons.discard(identity)
+                return 1
+            return 0
+        self.win.module.sh32.Shell_NotifyIconW.impl = notify
+        received = threading.Event()
+        hidden = hidden_class(lambda: None, lambda action: received.set())
+        def send_broadcast_then_barrier():
+            received.clear()
+            self.win.u32.PostMessageW(hidden.hwnd, 0xC123, 0, 0)
+            self.win.u32.PostMessageW(hidden.hwnd, self.w.WM_TRAY, 0, self.w.WM_LBUTTONUP)
+            self.assertTrue(received.wait(1))
+        with patch.object(module.os.path, 'exists', return_value=True):
+            hidden.start()
+            try:
+                self.assertTrue(hidden.ready.wait(2))
+                self.assertTrue(hidden.hwnd)
+                # A real broadcast reaches unshown top-level windows, not HWND_MESSAGE.
+                self.assertIsNone(self.win.u32.CreateWindowExW.calls[-1][1][8])
+                self.assertEqual(self.win.u32.RegisterWindowMessageW.calls[-1][1], ('TaskbarCreated',))
+                send_broadcast_then_barrier()
+                self.assertEqual(icons, set(), 'broadcast enabled an unused tray')
+                self.assertTrue(hidden.tray_add())
+                identity = (hidden.hwnd, 1)
+                self.assertEqual(icons, {identity})
+                icons.clear()  # Fake Explorer lost its notification area state.
+                send_broadcast_then_barrier()
+                self.assertEqual(icons, {identity})
+                send_broadcast_then_barrier()
+                self.assertEqual(icons, {identity}, 'duplicate broadcast duplicated an icon')
+                self.assertEqual(len(self.win.u32.LoadImageW.calls), 1)
+                hidden.tray_del()
+                send_broadcast_then_barrier()
+                self.assertEqual(icons, set(), 'broadcast restored a disabled tray')
+                self.assertFalse(hidden._tray_enabled)
+            finally:
+                hidden.stop()
+                hidden.join(2)
+        self.assertFalse(hidden.is_alive())
+        self.assertEqual(classes, {})
+        self.assertIsNone(hidden._icon)
+        self.assertEqual(len(self.win.u32.DestroyIcon.calls), 1)
+
+    def test_taskbar_created_retries_failed_initial_add_until_explicitly_disabled(self):
+        hidden_class, _ = self.prepare_hidden_window()
+        module = importlib.import_module('clawboard.hotkey')
+        self.win.u32.RegisterWindowMessageW.impl = lambda name: 0xC123
+        self.win.u32.LoadImageW.impl = lambda *args: 123
+        adds, recovered, barrier = [], threading.Event(), threading.Event()
+        def notify(command, pointer):
+            if command == module.NIM_ADD:
+                adds.append(pointer._obj.hWnd)
+                if len(adds) == 1:
+                    return 0  # Explorer is unavailable during the first attempt.
+                recovered.set()
+            return 1
+        self.win.module.sh32.Shell_NotifyIconW.impl = notify
+        hidden = hidden_class(lambda: None, lambda action: barrier.set())
+        with patch.object(module.os.path, 'exists', return_value=True):
+            hidden.start()
+            try:
+                self.assertTrue(hidden.ready.wait(2))
+                self.assertFalse(hidden.tray_add())
+                self.assertTrue(hidden._tray_enabled)
+                self.win.u32.PostMessageW(hidden.hwnd, 0xC123, 0, 0)
+                self.assertTrue(recovered.wait(1))
+                self.assertEqual(adds, [hidden.hwnd, hidden.hwnd])
+                hidden.tray_del()
+                self.win.u32.PostMessageW(hidden.hwnd, 0xC123, 0, 0)
+                self.win.u32.PostMessageW(hidden.hwnd, self.w.WM_TRAY, 0, self.w.WM_LBUTTONUP)
+                self.assertTrue(barrier.wait(1))
+                self.assertEqual(len(adds), 2)
+            finally:
+                hidden.stop()
+                hidden.join(2)
+        self.assertFalse(hidden._tray_enabled)
+        self.assertFalse(hidden.tray_add(), 'a stopped window accepted a new enable request')
+        self.assertFalse(hidden._tray_enabled)
 
     def test_paste_message_treats_zero_target_result_as_delivered(self):
         self.w.target_focus_hwnd = lambda hwnd: 0x123456789

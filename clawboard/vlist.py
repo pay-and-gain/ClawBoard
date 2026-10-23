@@ -76,7 +76,7 @@ class VirtualList(tk.Frame):
                 pass
             self._empty = None
 
-    def set_data(self, items, sel, kw, reset_scroll=False):
+    def set_data(self, items, sel, kw, reset_scroll=False, preserve_selection=False):
         """替换视图数据；库更新保留阅读位置，用户换搜索/Tab 时显式回顶部。"""
         top = max(0.0, self.canvas.canvasy(0))
         row_h = scaled(ITEM_H)
@@ -87,7 +87,9 @@ class VirtualList(tk.Frame):
         self.sel = sel
         self.kw = kw
         ids = {item.get('id') for item in items}
-        self.multi.intersection_update(ids)
+        # 异步搜索的空占位列表并不表示记录已删除；最终结果交付后才校验多选 ID。
+        if not preserve_selection:
+            self.multi.intersection_update(ids)
         if reset_scroll:
             self._pending_top = 0.0
         elif anchor is not None:
@@ -318,15 +320,15 @@ class VirtualList(tk.Frame):
         if getattr(f, '_lw', None) == w:
             return
         f._lw = w
-        num = 16 if w >= 190 else 0
-        badge = 80 if w >= 240 else (48 if w >= 180 else 0)
-        x0 = (6 + num + 2) if num else 7
-        right = (badge + 10) if badge else 7
+        num = scaled(16) if w >= scaled(190) else 0
+        badge = scaled(80) if w >= scaled(240) else (scaled(48) if w >= scaled(180) else 0)
+        x0 = (scaled(6) + num + scaled(2)) if num else scaled(7)
+        right = (badge + scaled(10)) if badge else scaled(7)
         f._numw = num
-        f._num.place_configure(x=6, y=7, width=max(1, num), height=16)
-        f._row.place_configure(x=x0, y=6, relwidth=1, width=-(x0 + right), height=18)
-        f._l2.place_configure(x=x0, y=28, relwidth=1, width=-(x0 + 7), height=16)
-        f._badge.place_configure(relx=1.0, x=-10, y=6, anchor='ne', height=18,
+        f._num.place_configure(x=scaled(6), y=scaled(7), width=max(1, num), height=scaled(16))
+        f._row.place_configure(x=x0, y=scaled(6), relwidth=1, width=-(x0 + right), height=scaled(18))
+        f._l2.place_configure(x=x0, y=scaled(28), relwidth=1, width=-(x0 + scaled(7)), height=scaled(16))
+        f._badge.place_configure(relx=1.0, x=-scaled(10), y=scaled(6), anchor='ne', height=scaled(18),
                                  width=max(1, badge))
 
     def _first_hit(self, body):

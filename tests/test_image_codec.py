@@ -4,6 +4,7 @@ import importlib.util
 import pathlib
 import struct
 import sys
+import types
 import unittest
 import zlib
 from unittest.mock import MagicMock, patch
@@ -151,7 +152,16 @@ class Win32OwnershipTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('image_adapter_test',
                     ROOT / 'clawboard/image_win32.py')
         module = importlib.util.module_from_spec(spec)
-        with patch.object(ctypes, 'WinDLL',
+        # image_win32 复用 clipboard helper；单测必须同时替换该依赖，
+        # 不能只 fake 新建的 DLL，否则 helper 仍会操作已经导入的真实剪贴板。
+        clipboard = types.ModuleType('clawboard.clipboard')
+        clipboard._write_own_marker = MagicMock(return_value=None)
+        clipboard.clip_seq = user.GetClipboardSequenceNumber
+        def acknowledge(sequence, marker):
+            runtime.LAST_SEQ = runtime.LAST_WRITE_SEQ = sequence
+        clipboard._ack_own_write = MagicMock(side_effect=acknowledge)
+        with patch.dict(sys.modules, {'clawboard.clipboard': clipboard}), \
+             patch.object(ctypes, 'WinDLL',
                           lambda name, **kw: user if name == 'user32' else kernel,
                           create=True):
             spec.loader.exec_module(module)
@@ -165,6 +175,8 @@ class Win32OwnershipTests(unittest.TestCase):
             self.assertTrue(module.write_clipboard_dib(bytes(40)))
             self.assertEqual(runtime.LAST_SEQ, 123)
             self.assertEqual(runtime.LAST_WRITE_SEQ, 123)
+            module._write_own_marker.assert_called_once_with()
+            module._ack_own_write.assert_called_once_with(123, None)
             kernel.GlobalFree.assert_not_called()
             kernel.GlobalUnlock.assert_called_once_with(77)
             user.CloseClipboard.assert_called_once()

@@ -120,6 +120,9 @@ u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wint
 
 u32.PostMessageW.restype = wintypes.BOOL
 
+u32.RegisterWindowMessageW.argtypes = [wintypes.LPCWSTR]
+u32.RegisterWindowMessageW.restype = wintypes.UINT
+
 u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 
 u32.GetCursorPos.restype = wintypes.BOOL
@@ -142,6 +145,12 @@ u32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWS
                                 wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p]
 
 u32.CreateWindowExW.restype = wintypes.HWND
+
+u32.DestroyWindow.argtypes = [wintypes.HWND]
+u32.DestroyWindow.restype = wintypes.BOOL
+
+u32.UnregisterClassW.argtypes = [wintypes.LPCWSTR, wintypes.HINSTANCE]
+u32.UnregisterClassW.restype = wintypes.BOOL
 
 u32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 
@@ -218,6 +227,11 @@ u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.
 
 u32.GetWindowThreadProcessId.restype = wintypes.DWORD
 
+# HKL 是句柄，不能沿用 ctypes 默认的 c_int；调用者需要的是目标焦点线程，
+# 传 0 会误读当前 hook/worker 自己的布局。
+u32.GetKeyboardLayout.argtypes = [wintypes.DWORD]
+u32.GetKeyboardLayout.restype = ctypes.c_void_p
+
 k32.GetCurrentThreadId.restype = wintypes.DWORD
 
 k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
@@ -275,13 +289,19 @@ u32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]
 
 u32.RegisterClassW.restype = wintypes.ATOM
 
+class _NOTIFYICONTIMEOUT(ctypes.Union):
+    # 两个名字共用同一 DWORD；分开声明会错移气泡标题、图标标志和后续字段。
+    _fields_ = [('uTimeout', wintypes.UINT), ('uVersion', wintypes.UINT)]
+
+
 class NOTIFYICONDATA(ctypes.Structure):
+    _anonymous_ = ('timeout_version',)
     _fields_ = [('cbSize', wintypes.DWORD), ('hWnd', wintypes.HWND), ('uID', wintypes.UINT),
                 ('uFlags', wintypes.UINT), ('uCallbackMessage', wintypes.UINT),
                 ('hIcon', wintypes.HICON), ('szTip', wintypes.WCHAR * 128),
                 ('dwState', wintypes.DWORD), ('dwStateMask', wintypes.DWORD),
-                ('szInfo', wintypes.WCHAR * 256), ('uTimeout', wintypes.UINT),
-                ('uVersion', wintypes.UINT), ('szInfoTitle', wintypes.WCHAR * 64),
+                ('szInfo', wintypes.WCHAR * 256), ('timeout_version', _NOTIFYICONTIMEOUT),
+                ('szInfoTitle', wintypes.WCHAR * 64),
                 ('dwInfoFlags', wintypes.DWORD), ('guidItem', ctypes.c_byte * 16),
                 ('hBalloonIcon', wintypes.HICON)]
 
@@ -517,6 +537,8 @@ gdi32.GetDeviceCaps.restype = ctypes.c_int
 try:
     u32.GetDpiForSystem.argtypes = []
     u32.GetDpiForSystem.restype = wintypes.UINT
+    u32.GetDpiForWindow.argtypes = [wintypes.HWND]
+    u32.GetDpiForWindow.restype = wintypes.UINT
 except AttributeError:
     pass
 if shcore is not None:

@@ -9,8 +9,20 @@
 - 触发词前面必须是词边界（非字母/数字/下划线），避免「address 里的 addr」被误触发
 - 长触发词优先匹配（「邮箱」优先于「邮」，若两者都是触发词）
 """
+from threading import RLock
 
 SEPARATORS = set(' \n\t,.;:!?()[]{}，。；：！？、（）【】')
+
+# 物理 VK 映射只对独立 US 布局成立。微软拼音即使显示“英”，也不能
+# 将其候选提交后的字符数当作原始字母数退格；未知布局必须保留用户输入。
+TRIGGER_LAYOUT_US = 0x04090409
+
+
+def is_supported_trigger_layout(layout):
+    try:
+        return int(layout or 0) & 0xFFFFFFFF == TRIGGER_LAYOUT_US
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 def _is_word_char(ch):
@@ -21,30 +33,36 @@ class TriggerEngine:
     """输入缓冲区 + 触发词匹配。所有方法都返回确定性结果，无副作用。"""
 
     def __init__(self, triggers=None):
+        self._lock = RLock()
         self.triggers = dict(triggers or {})
         self.buf = []
         self.MAX_BUF = 64
 
     def set_triggers(self, triggers):
-        self.triggers = dict(triggers)
+        with self._lock:
+            self.triggers = dict(triggers)
+            self.buf = []
 
     def reset(self):
-        self.buf = []
+        with self._lock:
+            self.buf = []
 
     def feed(self, ch):
         """输入一个普通字符 ch（单字符 str），返回 (trigger, replacement) 若命中，
         否则 None。控制键（退格等）请用 feed_backspace / reset，别喂进来。"""
         if not isinstance(ch, str) or len(ch) != 1:
             return None
-        self.buf.append(ch)
-        if len(self.buf) > self.MAX_BUF:
-            del self.buf[:len(self.buf) - self.MAX_BUF]
-        return self._match()
+        with self._lock:
+            self.buf.append(ch)
+            if len(self.buf) > self.MAX_BUF:
+                del self.buf[:len(self.buf) - self.MAX_BUF]
+            return self._match()
 
     def feed_backspace(self):
         """用户按退格时同步缓冲区，返回 None（退格不会触发）。"""
-        if self.buf:
-            self.buf.pop()
+        with self._lock:
+            if self.buf:
+                self.buf.pop()
         return None
 
     def _match(self):

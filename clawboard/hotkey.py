@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """隐藏消息窗口（热键 + 托盘，独立线程）+ 图标生成。
 
-HiddenWindow 在独立线程创建 message-only 窗口承载 RegisterHotKey 与托盘回调；
+HiddenWindow 在独立线程创建不显示的顶层窗口承载热键、托盘与 Shell 重建广播；
 make_ico 纯 stdlib 生成 32x32 32bpp ICO，不依赖外部资源。
 """
 import ctypes
@@ -13,7 +13,7 @@ from ctypes import wintypes
 from clawboard.config import APP_NAME, ICON_FILE
 from clawboard.win32 import (
     u32, k32, sh32, WNDPROC, WNDCLASS, NOTIFYICONDATA,
-    HWND_MESSAGE, WM_HOTKEY, WM_APP_REG, WM_APP_UNREG, WM_TRAY,
+    WM_HOTKEY, WM_APP_REG, WM_APP_UNREG, WM_TRAY,
     WM_LBUTTONUP, WM_RBUTTONUP, WM_DESTROY,
     NIF_INFO, NIIF_INFO, NIM_ADD, NIM_MODIFY, NIM_DELETE,
     NIF_MESSAGE, NIF_ICON, NIF_TIP, IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE,
@@ -74,7 +74,7 @@ def make_ico(path, size=32):
 
 
 class HiddenWindow(threading.Thread):
-    """独立线程创建 message-only 窗口，承载 RegisterHotKey 与托盘回调"""
+    """独立线程创建隐藏顶层窗口；message-only 窗口收不到 TaskbarCreated 广播。"""
 
     def __init__(self, on_hotkey, on_tray, on_clipboard=None):
         threading.Thread.__init__(self, daemon=True)
@@ -89,15 +89,24 @@ class HiddenWindow(threading.Thread):
         self._proc = None
         self._icon = None
         self._hk_evt = threading.Event()
+        self._stopping = threading.Event()
+        self._taskbar_created = 0
+        self._tray_enabled = False
+        self._tray_lock = threading.RLock()
+        # 类名不能复用：同进程中的第二个实例否则仍会调用第一个实例的 WNDPROC。
+        self._class_name = 'ClawBoardMsgWindow_%x' % id(self)
 
     def wndproc(self, hwnd, msg, wp, lp):
         try:
-            if msg == 0x031D and self.on_clipboard:  # WM_CLIPBOARDUPDATE
+            if self._taskbar_created and msg == self._taskbar_created:
+                with self._tray_lock:
+                    if self._tray_enabled:
+                        self._add_tray()
+                return 0
+            elif msg == 0x031D and self.on_clipboard:  # WM_CLIPBOARDUPDATE
                 self.on_clipboard()
             elif msg == 0x0010:  # WM_CLOSE must be handled by this window's owner.
-                if self.clipboard_listener:
-                    u32.RemoveClipboardFormatListener(hwnd)
-                u32.DestroyWindow(hwnd)
+                self._close_window()
                 return 0
             elif msg == WM_APP_REG:
                 self._do_reg(int(wp), int(lp))
@@ -116,15 +125,22 @@ class HiddenWindow(threading.Thread):
         return u32.DefWindowProcW(hwnd, msg, wp, lp)
 
     def run(self):
+        instance = None
+        registered = False
         try:
+            if self._stopping.is_set():
+                return
+            self._taskbar_created = u32.RegisterWindowMessageW('TaskbarCreated')
             self._proc = WNDPROC(self.wndproc)
             wc = WNDCLASS()
             wc.lpfnWndProc = self._proc
-            wc.lpszClassName = 'ClawBoardMsgWindow'
-            wc.hInstance = k32.GetModuleHandleW(None)
-            u32.RegisterClassW(ctypes.byref(wc))
-            self.hwnd = u32.CreateWindowExW(0, 'ClawBoardMsgWindow', 'ClawBoardMsg',
-                                            0, 0, 0, 0, 0, HWND_MESSAGE,
+            wc.lpszClassName = self._class_name
+            instance = wc.hInstance = k32.GetModuleHandleW(None)
+            registered = bool(u32.RegisterClassW(ctypes.byref(wc)))
+            if not registered:
+                return
+            self.hwnd = u32.CreateWindowExW(0, self._class_name, 'ClawBoardMsg',
+                                            0, 0, 0, 0, 0, None,
                                             None, wc.hInstance, None)
             if self.hwnd and self.on_clipboard:
                 u32.AddClipboardFormatListener.argtypes = [wintypes.HWND]
@@ -132,13 +148,9 @@ class HiddenWindow(threading.Thread):
                 u32.RemoveClipboardFormatListener.argtypes = [wintypes.HWND]
                 u32.RemoveClipboardFormatListener.restype = wintypes.BOOL
                 self.clipboard_listener = bool(u32.AddClipboardFormatListener(self.hwnd))
-        except Exception:
-            traceback.print_exc()
-        finally:
             self.ready.set()
-        if not self.hwnd:
-            return
-        try:
+            if not self.hwnd or self._stopping.is_set():
+                return
             msg = wintypes.MSG()
             while u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
                 # 用 NULL 句柄注册的热键没有目标窗口，必须在循环里直接截获
@@ -148,7 +160,31 @@ class HiddenWindow(threading.Thread):
                 u32.TranslateMessage(ctypes.byref(msg))
                 u32.DispatchMessageW(ctypes.byref(msg))
         except Exception:
-            pass
+            traceback.print_exc()
+        finally:
+            # GetMessage 出错、初始化失败、stop 早于 ready 都走同一条 owner-thread 清理路径。
+            try:
+                self._close_window()
+            finally:
+                try:
+                    if registered:
+                        u32.UnregisterClassW(self._class_name, instance)
+                finally:
+                    self.ready.set()
+
+    def _close_window(self):
+        self._stopping.set()
+        if not self.hwnd:
+            return
+        hwnd = self.hwnd
+        self._do_unreg()
+        self._hk_evt.set()
+        self.tray_del()
+        if self.clipboard_listener:
+            u32.RemoveClipboardFormatListener(hwnd)
+            self.clipboard_listener = False
+        u32.DestroyWindow(hwnd)
+        self.hwnd = None
 
     def _do_reg(self, vk, mod):
         """必须在消息线程内调用，hwnd 传 NULL：热键消息直接进本线程队列"""
@@ -184,13 +220,23 @@ class HiddenWindow(threading.Thread):
         self.hotkey_ok = False
 
     def tray_add(self):
-        if not self.hwnd:
+        with self._tray_lock:
+            if self._stopping.is_set():
+                return False
+            # 记录调用者的启用意图：首次添加也可能恰遇 Explorer 重建而暂时失败。
+            self._tray_enabled = True
+            return self._add_tray()
+
+    def _add_tray(self):
+        if not self.hwnd or self._stopping.is_set():
             return False
         try:
             if not os.path.exists(ICON_FILE):
                 make_ico(ICON_FILE)
-            self._icon = u32.LoadImageW(None, ICON_FILE, IMAGE_ICON, 0, 0,
-                                        LR_LOADFROMFILE | LR_DEFAULTSIZE)
+            # Explorer 重建会丢掉通知区图标，不会使本进程持有的 HICON 失效。
+            if not self._icon:
+                self._icon = u32.LoadImageW(None, ICON_FILE, IMAGE_ICON, 0, 0,
+                                            LR_LOADFROMFILE | LR_DEFAULTSIZE)
             nid = NOTIFYICONDATA()
             nid.cbSize = ctypes.sizeof(nid)
             nid.hWnd = self.hwnd
@@ -222,19 +268,22 @@ class HiddenWindow(threading.Thread):
             return False
 
     def tray_del(self):
-        try:
-            nid = NOTIFYICONDATA()
-            nid.cbSize = ctypes.sizeof(nid)
-            nid.hWnd = self.hwnd
-            nid.uID = 1
-            sh32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
-        except Exception:
-            pass
-        if self._icon:
-            u32.DestroyIcon(self._icon)
-            self._icon = None
+        with self._tray_lock:
+            self._tray_enabled = False
+            try:
+                nid = NOTIFYICONDATA()
+                nid.cbSize = ctypes.sizeof(nid)
+                nid.hWnd = self.hwnd
+                nid.uID = 1
+                sh32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+            except Exception:
+                pass
+            if self._icon:
+                u32.DestroyIcon(self._icon)
+                self._icon = None
 
     def stop(self):
+        self._stopping.set()
         try:
             if self.hwnd:
                 u32.PostMessageW(self.hwnd, 0x0010, 0, 0)

@@ -18,6 +18,11 @@ from clawboard.win32 import (
 
 k32.GlobalFree.argtypes = [ctypes.c_void_p]
 k32.GlobalFree.restype = ctypes.c_void_p
+k32.GlobalSize.argtypes = [ctypes.c_void_p]
+k32.GlobalSize.restype = ctypes.c_size_t
+
+# 这是自写确认元数据，不是 Windows 的隐私/历史排除标记。
+_OWN_WRITE_FORMAT = 'ClawBoard.WriteToken.v1'
 
 
 def clip_seq():
@@ -43,6 +48,69 @@ def clip_read():
             k32.GlobalUnlock(h)
     finally:
         u32.CloseClipboard()
+
+
+def _write_own_marker():
+    """在已有写事务中附加随机 token；失败不影响已写好的正文。"""
+    handle = None
+    transferred = False
+    try:
+        fmt = _clip_fmt_id(_OWN_WRITE_FORMAT)
+        if not fmt:
+            return None
+        token = os.urandom(16)
+        handle = k32.GlobalAlloc(GMEM_MOVEABLE, len(token))
+        if not handle:
+            return None
+        pointer = k32.GlobalLock(handle)
+        if not pointer:
+            return None
+        try:
+            ctypes.memmove(pointer, token, len(token))
+        finally:
+            k32.GlobalUnlock(handle)
+        transferred = bool(u32.SetClipboardData(fmt, handle))
+        return (fmt, token) if transferred else None
+    except Exception:
+        return None
+    finally:
+        if handle and not transferred:
+            try:
+                k32.GlobalFree(handle)
+            except Exception:
+                pass
+
+
+def _ack_own_write(sequence, marker):
+    """只在读锁内核实 token 后接受 CloseClipboard 合成格式后的序列。
+
+    关闭写事务后外部应用可能立刻复制；直接读当前序列会把它误当成自写。
+    无法重新加锁或标记已变时，只确认写事务内取得的安全序列。
+    """
+    opened = False
+    try:
+        if marker and u32.OpenClipboard(None):
+            opened = True
+            fmt, token = marker
+            handle = u32.GetClipboardData(fmt)
+            if handle and k32.GlobalSize(handle) >= len(token):
+                pointer = k32.GlobalLock(handle)
+                if pointer:
+                    try:
+                        if ctypes.string_at(pointer, len(token)) == token:
+                            sequence = clip_seq()
+                    finally:
+                        k32.GlobalUnlock(handle)
+    except Exception:
+        pass
+    finally:
+        if opened:
+            try:
+                u32.CloseClipboard()
+            except Exception:
+                pass
+    runtime.LAST_SEQ = sequence
+    runtime.LAST_WRITE_SEQ = sequence
 
 
 # DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0) 返回文件个数（不取路径）
@@ -109,7 +177,7 @@ def clip_write_files(paths):
     """把一组文件路径写进剪贴板（CF_HDROP）。
 
     与 clip_write 的区别：资源管理器复制文件时**只放 CF_HDROP、不放文本**，
-    所以这里也保持一致只写 CF_HDROP —— 粘贴到聊天窗口是「发送文件」、粘贴到资源管理器
+    所以这里也保持文件格式、不附加文本 —— 粘贴到聊天窗口是「发送文件」、粘贴到资源管理器
     是「复制文件」，而不是粘出一串路径文字。
     """
     paths = [p for p in (paths or []) if p]
@@ -119,7 +187,8 @@ def clip_write_files(paths):
     if not u32.OpenClipboard(None):
         return False
     try:
-        u32.EmptyClipboard()
+        if not u32.EmptyClipboard():
+            return False
         h = k32.GlobalAlloc(GMEM_MOVEABLE, len(raw))
         if not h:
             return False
@@ -132,10 +201,11 @@ def clip_write_files(paths):
         if not u32.SetClipboardData(CF_HDROP, h):
             k32.GlobalFree(h)
             return False
-        runtime.LAST_SEQ = clip_seq()
-        runtime.LAST_WRITE_SEQ = runtime.LAST_SEQ
+        marker = _write_own_marker()
+        sequence = clip_seq()
     finally:
         u32.CloseClipboard()
+    _ack_own_write(sequence, marker)
     return True
 
 
@@ -173,7 +243,8 @@ def clip_write(text):
     if not u32.OpenClipboard(None):
         return False
     try:
-        u32.EmptyClipboard()
+        if not u32.EmptyClipboard():
+            return False
         h = k32.GlobalAlloc(GMEM_MOVEABLE, len(data) + 2)
         if not h:
             return False
@@ -186,10 +257,11 @@ def clip_write(text):
         if not u32.SetClipboardData(CF_UNICODETEXT, h):
             k32.GlobalFree(h)
             return False
-        runtime.LAST_SEQ = clip_seq()
-        runtime.LAST_WRITE_SEQ = runtime.LAST_SEQ
+        marker = _write_own_marker()
+        sequence = clip_seq()
     finally:
         u32.CloseClipboard()
+    _ack_own_write(sequence, marker)
     return True
 
 

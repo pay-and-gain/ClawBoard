@@ -3,7 +3,7 @@
 import ctypes
 from ctypes import wintypes
 
-from clawboard import runtime
+from clawboard.clipboard import _write_own_marker, _ack_own_write, clip_seq
 from clawboard.image import CF_DIB, GMEM_MOVEABLE, MAX_DIB_BYTES
 
 u32 = ctypes.WinDLL('user32', use_last_error=True)
@@ -83,14 +83,13 @@ def write_clipboard_dib(dib):
         transferred = bool(u32.SetClipboardData(CF_DIB, handle))
         if not transferred:
             return False
-        # SetClipboardData transfers ownership on success. Synchronizing the
-        # sequence stops our own image paste being collected as a new copy.
-        runtime.LAST_SEQ = int(u32.GetClipboardSequenceNumber())
-        runtime.LAST_WRITE_SEQ = runtime.LAST_SEQ
-        return True
+        marker = _write_own_marker()
+        sequence = clip_seq()
     except Exception:
         return False
     finally:
         if handle and not transferred:
             k32.GlobalFree(handle)
         u32.CloseClipboard()
+    _ack_own_write(sequence, marker)
+    return True

@@ -27,8 +27,11 @@ class UiMixin:
     # ---------- UI ----------
     def build_ui(self):
         r = self.root
-        for w in list(r.winfo_children()):
-            w.destroy()
+        # 重建主面板时保留独立弹窗及其编辑内容，不能遍历销毁所有 Toplevel。
+        for name in ('bar', 'body', 'grip'):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.destroy()
         self.bar = tk.Frame(r, bg=T['panel'], height=scaled(BAR_H), cursor='fleur')
         self.bar.pack(fill='x')
         self.bar.pack_propagate(False)
@@ -43,7 +46,7 @@ class UiMixin:
                               ('—', self.toggle_collapse, None)):
             # 按钮热区放大：更宽 + 更高（pady），不用瞄准
             b = tk.Label(self.bar, text=txt, bg=T['panel'], fg=T['fg2'], font=FONT,
-                         width=4, pady=7, cursor='hand2')
+                         width=4, pady=scaled(7), cursor='hand2')
             b.pack(side='right')
             b.bind('<Button-1>', lambda e, c=cmd: c())
             b.bind('<Enter>', lambda e, b=b, c=col: b.configure(fg=c or T['fg']))
@@ -60,13 +63,13 @@ class UiMixin:
         self.body = tk.Frame(r, bg=T['bg'])
         self.body.pack(fill='both', expand=True)
 
-        tabs = tk.Frame(self.body, bg=T['bg'], height=32)
+        tabs = tk.Frame(self.body, bg=T['bg'], height=scaled(32))
         tabs.pack(fill='x')
         tabs.pack_propagate(False)
         self.tab_clip = self.mk_tab(tabs, '剪贴板', 'clip')
         self.tab_phr = self.mk_tab(tabs, '常用语', 'phrase')
 
-        self.gbar = tk.Frame(self.body, bg=T['bg'], height=28)
+        self.gbar = tk.Frame(self.body, bg=T['bg'], height=scaled(28))
         self.gname = tk.Label(self.gbar, text='', bg=T['bg'], fg=T['fg'],
                               font=FONT_B, cursor='hand2')
         self.gname.pack(side='left', padx=(8, 2))
@@ -75,7 +78,7 @@ class UiMixin:
 
         self.vlist = VirtualList(self.body, self.on_click_item,
                                  self.on_menu_item, self.on_hover_item)
-        self.vlist.pack(fill='both', expand=True, padx=(6, 0), pady=4)
+        self.vlist.pack(fill='both', expand=True, padx=(scaled(6), 0), pady=scaled(4))
         # 空数据引导卡片：只创建不摆放（place），显示与否由 render() 决定。
         # 用 place 覆盖在 vlist 之上，而不是 pack 进队列 —— 这样不参与 pack 的
         # 空间分配，列表本身（含滚动/选中/多选）的逻辑一行都不用改。
@@ -92,7 +95,7 @@ class UiMixin:
                                      fg=T['fg'], insertbackground=T['fg'], relief='flat',
                                      font=FONT_SM, bd=0, width=8, highlightthickness=1,
                                      highlightbackground=T['line'], highlightcolor=T['acc'])
-        self.search_entry.pack(side='left', padx=6, ipady=3, fill='x', expand=True)
+        self.search_entry.pack(side='left', padx=scaled(6), ipady=scaled(3), fill='x', expand=True)
         # Entry 没有 placeholder，用一层灰字 Label 顶替：空着时提示可以怎么搜，
         # 一输入就消失。Label 会吃掉点击，所以补一个转发焦点
         self.search_ph = tk.Label(self.tool, bg=T['card'], fg=T['fg2'], font=FONT_SM,
@@ -121,7 +124,7 @@ class UiMixin:
         # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
         self.more_btn = tk.Label(self.tool, text='⋯', bg=T['card'], fg=T['fg2'],
                                  font=FONT_B, width=3, cursor='hand2')
-        self.more_btn._pack_args = dict(side='left', padx=2, pady=9)
+        self.more_btn._pack_args = dict(side='left', padx=scaled(2), pady=scaled(9))
         self.more_btn.bind('<Button-1>', self.more_menu)
         self.more_btn.bind('<Enter>',
                            lambda e: (self.more_btn.configure(bg=T['card_h']),
@@ -235,7 +238,7 @@ class UiMixin:
         b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
                      width=3, cursor='hand2')
         # pady=9 垂直居中：TOOL_H 48 - 文字 25 - 9*2 = 5px 余量；参数存一份给 _layout_tool 复原
-        b._pack_args = dict(side='left', padx=2, pady=9)
+        b._pack_args = dict(side='left', padx=scaled(2), pady=scaled(9))
         b._tip_text = tip                 # 悬停提示（可以长）
         b._menu_text = menu_text or tip   # 溢出菜单里的短文案
         b._tip_cmd = cmd
@@ -441,7 +444,9 @@ class UiMixin:
         view_key = (self.tab, self.data.get('gi'), self.search.get().strip())
         reset = getattr(self, '_last_view_key', None) != view_key
         self._last_view_key = view_key
-        self.vlist.set_data(items, sel, kw, reset_scroll=reset)
+        self.vlist.set_data(items, sel, kw, reset_scroll=reset, preserve_selection=waiting)
+        if not waiting and getattr(self, '_dpi_deferred_view', None) is not None:
+            self.restore_dpi_view()
         # 空数据引导：只在剪贴板 Tab、无搜索词、整库为空时显示；列表一旦有内容即自动隐藏。
         # 判定完全基于数据，所以"用户删光数据"后引导会自然回来。
         self._sync_onboard(onboard.should_show(self.tab, self.search.get(), self.data))

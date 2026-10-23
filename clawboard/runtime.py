@@ -13,10 +13,9 @@ NO_SAVE = False      # --bench/--shot/自测置 True：绝不把任何东西写�
 LAST_SEQ = 0         # 剪贴板序列号，由 clipboard.py 在导入时初始化为当前值
 LAST_WRITE_SEQ = None  # Only our successful writes; capture ignores this sequence.
 
-BASE_SCALING = 1.3333333   # 真实 DPI 的 tk scaling（启动时记录，UI 缩放前）。
-                           # 字体缩放 = tk scaling = BASE_SCALING * config.UI_SCALE；
-                           # dpi_scale() 用它算 DPI 系数，绝不读被 UI 缩放改过的实时值
-                           # （否则会双重缩放）。
+BASE_SCALING = 1.3333333   # 所在屏 DPI / 72；启动及跨屏时更新，不包含用户缩放档位。
+                           # tk scaling = BASE_SCALING * config.UI_SCALE；
+                           # dpi_scale() 从 Win32 读取，不反读已缩放的 Tk 值。
 
 TX = None            # F4 变换模块延迟到首次打开变换窗口时再导入
 _seq = [0]

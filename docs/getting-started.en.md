@@ -1,336 +1,144 @@
-# ClawBoard Getting Started
+# Getting started with ClawBoard
 
-**English | [简体中文](getting-started.md)**
+[简体中文](getting-started.md) | **English** · [Back to the project](../README.en.md)
 
-> Go from zero to fluent in 5 minutes — ClawBoard is a floating clipboard & snippets panel for Windows. Nothing you copy ever gets lost again.
+ClawBoard keeps a history of copied content and a panel of reusable phrases. Start with harmless sample text and try one complete copy, find and paste cycle.
 
----
+The current interface uses Chinese labels: **设置** is Settings, **常用语** is Phrases, **关于** is About, and **退出** is Quit.
 
-<details>
-<summary><b>📑 Table of contents (click to expand)</b></summary>
+> This guide describes the **refactor preview in PR #1**. Its internal version remains 2.6.1; it has not been merged into main or released. Published v2.6.1 packages do not include the current IME and permission fixes. Keep trigger expansion disabled in those packages. Use the separate links below for published downloads and preview source.
 
-- [30-second quick start (TL;DR)](#30-second-quick-start-tldr)
-- [Installation](#installation)
-- [5-minute tutorial: recover what you just copied](#5-minute-tutorial-recover-what-you-just-copied)
-- [Core features, one by one](#core-features-one-by-one)
-- [Shortcut reference](#shortcut-reference)
-- [Privacy & security](#privacy--security)
-- [FAQ](#faq)
-- [Going further / next steps](#going-further--next-steps)
+## 1. Choose how to run it
 
-</details>
+**For the published build**, open the [v2.6.1 release](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.6.1). Neither packaged option requires Python.
 
----
+- [ClawBoard-2.6.1-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-portable.zip): extract the whole archive into a writable folder and run `ClawBoard.exe`. Keep the executable beside its data files.
+- [ClawBoard-2.6.1-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.6.1/ClawBoard-2.6.1-setup.exe): follow the setup wizard. A desktop shortcut is optional.
 
-## 30-second quick start (TL;DR)
+**To try the refactor preview**, use Windows 10/11, Git and Python 3.10+ with Tcl/Tk included in the Python installation:
 
-If you only remember three things, remember these three steps:
+```powershell
+git clone --branch refactor/services-and-responsiveness --single-branch https://github.com/pay-and-gain/ClawBoard.git ClawBoard-preview
+cd ClawBoard-preview
+python ClawBoard.py
+```
 
-1. **Launch** — double-click `ClawBoard.exe`. It settles quietly in the bottom-right corner and leaves an icon in the system tray.
-2. **Summon** — press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> from any window to pop up the clipboard panel.
-3. **Paste** — pick an entry with <kbd>↑</kbd> <kbd>↓</kbd>, press <kbd>Enter</kbd>, and the content is pasted straight back into the window you were using.
+The application only needs the Python standard library; there are no pip dependencies to install. Track the preview in [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1). Source runs store data in the source directory by default. Keep an experimental preview separate from your existing clipboard library.
 
-That's it. Everything else is a bonus.
+## 2. Copy and paste your first entry
+
+1. Start ClawBoard. In Notepad or a browser input, type `ClawBoard test ABC`, select it and press **Ctrl+C**.
+2. Click the destination where you want the text, then press **Ctrl+Shift+V**. The panel should appear with your recent copy near the top.
+3. Select it with **↑ / ↓** and press **Enter**, or click the entry. Automatic paste is enabled by default.
+4. Check the actual destination text. If ClawBoard says the content was copied but automatic paste failed, press **Ctrl+V** in the destination yourself. A clipboard-write failure means you need to retry the copy first.
 
 <p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard main window: clipboard history list" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard clipboard history populated with synthetic examples" width="420">
 </p>
 
----
+The close button hides the panel in the tray by default. To exit, use **Ctrl+Q** or the tray's Quit command.
 
-## Installation
+## 3. Find an older copy
 
-Pick any one of the three options. **No installer dependencies, no pip, no network.**
+Press **Ctrl+F** and type a keyword. Multiple terms must all match; prefix a term with `-` to exclude it.
 
-<details open>
-<summary><b>Option 1 · Installer (recommended)</b></summary>
-
-1. Download `ClawBoard-2.6.1-setup.exe` from the [Releases page](../../releases/latest).
-2. Double-click it and click "Next" through the wizard.
-3. It creates Start-menu and desktop shortcuts automatically and ships an uninstaller.
-
-> [!NOTE]
-> When installed into `C:\Program Files`, data is stored under `%APPDATA%\ClawBoard\` (because Program Files is read-only for standard users). See [FAQ](#faq) for details.
-
-</details>
-
-<details>
-<summary><b>Option 2 · Portable (unzip and run)</b></summary>
-
-1. Download `ClawBoard-2.6.1-portable.zip`.
-2. Unzip anywhere (a USB stick, your desktop, D: drive — all fine).
-3. Double-click `ClawBoard.exe`.
-
-> [!TIP]
-> The portable build writes no registry keys and leaves no leftovers. Data lives right next to the exe — **copy the whole folder to move to another machine.**
-
-</details>
-
-<details>
-<summary><b>Option 3 · From source</b></summary>
-
-```bash
-git clone https://github.com/pay-and-gain/ClawBoard.git
-cd ClawBoard
-python ClawBoard.py     # requires Python 3 + tkinter (bundled with Windows)
-```
-
-Zero pip dependencies — it uses only the Python standard library (tkinter + ctypes).
-
-Want a standalone exe:
-
-```bash
-pip install pyinstaller
-pyinstaller packaging/ClawBoard.spec --noconfirm
-# output: dist/ClawBoard.exe; the data file is created next to the exe
-```
-
-</details>
-
-> [!IMPORTANT]
-> **System requirements**: Windows 10 / 11. Rounded corners, acrylic blur and other visual effects degrade to square corners / no blur on Windows 10 — this is expected and does not affect functionality.
-
----
-
-## 5-minute tutorial: recover what you just copied
-
-### First task: find that content you just copied and lost
-
-This is the shortest possible loop. Do it once and you'll get it.
-
-**Step 1 · Get ClawBoard running**
-
-Double-click `ClawBoard.exe` (or the shortcut created by the installer). A slim panel appears in the bottom-right corner and a small icon shows up in the tray — meaning it's already recording your clipboard in the background.
-
-**Step 2 · Copy something**
-
-Open any web page or document, select some text, press <kbd>Ctrl</kbd>+<kbd>C</kbd>. A small toast pops up at the top of the panel (on by default) confirming the capture.
-
-**Step 3 · Summon the panel**
-
-Switch to any window and press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>. The panel pops up, with what you just copied at the **very top** of the list.
-
-**Step 4 · Select and paste**
-
-- Move to that entry with <kbd>↑</kbd> <kbd>↓</kbd> and press <kbd>Enter</kbd>;
-- or simply **click the row** with your mouse.
-
-The content is **pasted automatically back into the window you were using** (ClawBoard simulates a <kbd>Ctrl</kbd>+<kbd>V</kbd>). The panel itself stays put; only the pasted entry blinks a few times as feedback.
-
-✅ **Done.** You've mastered the core loop of ClawBoard: **copy → summon → paste**.
-
-### Now try these (2–3 small tasks covering the core features)
-
-Once you've done the above, try a few of these and you'll know your way around:
-
-- **Task A · Search** — press <kbd>Ctrl</kbd>+<kbd>F</kbd> to focus the search box and type a keyword; the list filters live. Try Chinese, English, or even pinyin: type `zhanghao` or `zh` and it still hits entries containing「账号」.
-- **Task B · Star it** — hover an entry you use often and right-click → star it (or use the frequent-action shortcut). Starred items survive a "clear history".
-- **Task C · Images** — take a screenshot with the Snipping Tool (<kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>); an entry like "Image 1920×1080" appears. Select it and a large preview pops up in the corner.
-
-> [!TIP]
-> Want to go faster? After copying, press <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>Ctrl</kbd>+<kbd>9</kbd> to paste one of the 9 most recent entries directly — no need to even pick from the panel.
-
----
-
-## Core features, one by one
-
-### 📋 Clipboard history
-
-**What it is**: records every piece of text you copy; copying the same thing again just bumps a count instead of creating a duplicate.
-
-**How to use**: nothing to do — just copy. Hover an entry to see when it was copied; right-click for details (three timestamps + source app + size).
-
-**Tips**:
-- The cap is configurable (500 by default, adjustable to 10–5000 in Settings).
-- "Clear history" keeps **starred items** by default, so your hand-picked entries aren't wiped out.
-- Right-click → **Paste as plain text** strips HTML tags and entities — handy when pasting into Notepad.
-
-### 🔍 Advanced search
-
-**What it is**: a command-line-like query syntax to filter by source, time, type, size, state and tag.
-
-**How to use**: <kbd>Ctrl</kbd>+<kbd>F</kbd> to focus the search box, then type directly:
-
-| Syntax | Meaning |
+| Example | Find |
 |---|---|
-| `keyword` | body or name contains it; space-separated words = AND |
-| `-keyword` | exclude |
-| `app:chrome` | source app; supports Chinese and fuzzy matching (`app:hro` works too) |
-| `time:>1h` / `time:<30m` | relative time (s/m/h/d/w) |
-| `time:09:00-12:00` | that time window today |
-| `time:2026-09-01..2026-09-30` | date range |
-| `type:url` | type: text / url / json / multiline |
-| `size:>1mb` / `size:<100` | size filter (b/kb/mb/gb) |
-| `is:fav` / `is:sens` / `is:est` / `is:pin` | starred / contains sensitive / estimated time / pinned |
-| `tag:email` / `tag:邮箱` | filter by content tag |
+| `project address` | Entries containing both terms |
+| `app:chrome` | Copies from a particular source application |
+| `type:url` | Links |
+| `is:fav` | Favorites |
+| `tag:email` | Entries tagged as email content |
+| `time:09:00-12:00` | Records from that time range today |
 
-**Tips**: a typo won't crash anything — the search box turns red and the title bar tells you why. Right-click the search box to see your last 10 searches.
+Chinese content can also be searched by full pinyin or initials: `zhanghao` or `zh` can find “账号”. Not every pronunciation of a polyphonic character is expanded. Right-click an entry to favorite it, view details or delete it.
 
-### 🔤 Pinyin search
+Copied pixels from a screenshot become an image entry. Copying a jpg/png **file** in Explorer records its path instead. A path entry is not a backup of the original file; moving or deleting the file can make that path unusable.
 
-**What it is**: find Chinese content even when you can't recall the characters.
+Startup catch-up can read the current clipboard content available at startup. It cannot recover every copy made while ClawBoard was closed, and rapid copying can lose intermediate states.
 
-**How to use**: type the pinyin directly (full or initials). Searching `zhanghao` or `zh` hits entries containing「账号」.
+## 4. Save a reusable phrase
 
-**Tips**: polyphonic characters are resolved at the **phrase** level —「重庆」correctly becomes `chongqing`,「银行」becomes `yinhang`,「长城」→ `changcheng`,「音乐」→ `yinyue` — so per-character ambiguity won't make them unsearchable.
+Open the phrases tab, select a group and click **＋** at the bottom. Enter a name and the text; the trigger field can stay empty. Click the saved phrase whenever you need to copy or paste it. You can also right-click a history entry and save it as a phrase.
 
-### 🏷 Content tags
+**Optional trigger expansion is limited to a separate standard US keyboard layout in the preview:**
 
-**What it is**: copied content is auto-detected and tagged, shown with a 🏷 marker in the list.
+1. Give a harmless phrase a trigger such as `cbqa`, then enable trigger expansion in Settings.
+2. Press **Win+Space** and select a separate **English (United States) — US** keyboard. If it is not available, leave triggers off and use the phrase list instead.
+3. In an empty, normal-privilege editor, type `cbqa` followed by one space. It should expand to the phrase text. A trigger needs a word boundary before it; it must not follow another letter, digit or underscore directly.
 
-**How to use**: filter with `tag:xxx`. 11 types are detected: email / phone / ID card / bank card / number / date / URL / code / JSON / password / token. Chinese aliases are supported (`tag:邮箱`).
+**Microsoft Pinyin suspends expansion in both Chinese and English modes.** US International, Dvorak and unrecognized layouts are also skipped. Enter and Tab do not expand triggers. Clicks, scrolling, additional typing, shortcuts or a layout change cancel a queued replacement. You can keep your usual input method for normal copying, searching and clicking phrases to paste.
 
-**Tips**: JSON takes priority over code — `{"a":1}` is tagged JSON, not code.
+## 5. Transform and export text
 
-### 🖼 Image clipboard
+Select an entry and press **Ctrl+T** for JSON formatting, encoding, case and line operations. Review the result before copying it, saving it as a new entry or overwriting the original.
 
-**What it is**: screenshots and copied images are recorded, previewed, **and can be pasted back**.
+Use **Ctrl+click** to select several entries, or **Shift** for a range, then press **Ctrl+E**. With no multiple selection, export uses the current results. Choose TXT, CSV, JSON or Markdown. Exports go to the current data directory; a JSON export is not a complete backup of the image folder.
 
-**How to use**:
-- After taking a screenshot, an "Image W×H" entry appears in the panel.
-- While navigating with the keyboard (<kbd>↑</kbd> <kbd>↓</kbd>), a large preview pops up in the screen corner.
-- Click an image entry → paste it back into WeChat / QQ / documents.
+## 6. Locate your data
 
-**Tips**: image files live in the `images/` folder under the data directory. Deleting, clearing, or trimming image entries also cleans up the corresponding PNGs, so no junk accumulates.
+Open **tray menu → About** and check the actual path to `ClawBoard数据.json`. ClawBoard prefers portable storage:
 
-> [!NOTE]
-> Since v2.2.0, images are fully symmetric with text (record / preview / paste). v2.2.2 fixed recording of 24-bit screenshots and top-down DIBs; v2.2.3 fixed file copy (`CF_HDROP`).
+| Situation | Data directory |
+|---|---|
+| The executable's directory is writable | Beside the executable |
+| The executable's directory is not writable, such as Program Files under a normal account | `%APPDATA%\ClawBoard\` |
+| Running from source | The source repository's root directory |
 
-### 💬 Phrases & triggers
+Images are in `images/` under that directory; the diagnostic log is `crash.log`. Installation location and process privileges can affect write access, so use the About dialog's path rather than guessing. Do not run the whole application as administrator just to make automatic paste work.
 
-**What it is**: save text you type often (addresses, reply templates, signatures) as "phrases" and grab them anytime.
+Portable use creates these local files. The optional Start with Windows setting also writes ClawBoard's entry under the current user's `Software\Microsoft\Windows\CurrentVersion\Run`; disabling it removes that entry. The installer creates installation records and shortcuts as well.
 
-**How to use**:
-- **Phrases tab**: group management (switch / create / rename / delete groups); the `＋` button at the bottom adds one (name + trigger + body).
-- **Word split**: the 「拆」 button chops a block of text into many phrases by separator (auto / newline / comma / space / semicolon / custom).
+## Backups, upgrades and moving data
 
-**Trigger quick-paste** (a headline feature):
-1. Give a phrase a short trigger, e.g. `dz` for your address.
-2. Turn on "Trigger quick-paste" in Settings.
-3. Now type `dz` followed by space/Enter in **any app** and it expands to the full address.
+1. Exit ClawBoard with **Ctrl+Q** or the tray menu.
+2. Copy **`ClawBoard数据.json` and the entire `images/` folder** from the actual data directory to your backup location. Keep existing `.bak`, `.bak.1` and `.bak.2` files if useful. Migration backups do not replace regular backups of your own.
+3. For a portable upgrade, replace `ClawBoard.exe` in its existing location and keep the data and images beside it. A new exe in a separate subfolder uses a different data location and can make the history appear missing.
+4. To move or restore data, quit the destination application first, copy the JSON and image folder to its actual data directory, then launch and check the contents. Do not let two instances write to the same library.
 
-**Tips**: triggers require **word boundaries** (the preceding char can't be a letter/digit) to avoid accidental firing; under an IME, switch to **English mode** before typing a trigger.
+Back up before an installer upgrade too, and read the keep/delete-data choice when uninstalling. **This preview's installation and uninstallation flow has not completed real-world validation.** A successfully compiled installer is not evidence that installation was tested.
 
-### 📟 Command palette
+The Python and C implementations support the shared JSON format, but the C version has fewer features. Quit and back up before switching. The preview retaining the 2.6.1 version number does not mean the published release was updated.
 
-**What it is**: a fuzzy-search command launcher, so you don't have to remember where the menus are.
+## 7. Privacy settings
 
-**How to use**: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd>, type a command name, filter fuzzily, and press Enter to run it.
+History and settings are **unencrypted JSON**, and images are PNG files. Display masking only hides text on screen; original data, exports and backups still need protection.
 
-**Tips**: pressing <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> again just focuses the existing palette instead of stacking multiple ones.
+Review these settings for your use:
 
-### 🔧 Text transforms (27 of them)
+- Keep clipboard privacy-marker handling enabled. Only sources that provide those markers can be skipped through that mechanism.
+- Exclude applications or window titles you do not want captured.
+- Keep sensitive display masking enabled. To avoid storing recognized sensitive content, enable the separate skip-sensitive-content option. Skipping is off by default; masking does not mean an entry was excluded from storage.
+- Do not rely on pattern recognition to keep passwords safe. Rules can miss secrets, and email detection has a scan-length limit for long text.
+- Update checks contact GitHub by default and can be disabled in Settings. Local capture, search, transforms and paste remain available. The updater only notifies and links to a download page.
 
-**What it is**: on-the-spot text processing for the selected entry.
+## 8. Troubleshooting
 
-**How to use**: <kbd>Ctrl</kbd>+<kbd>T</kbd> (or right-click → "🔧 Text transform"). The 27 transforms include: strip formatting, remove blank lines, trim leading/trailing whitespace, full-width↔half-width, case, camelCase/PascalCase/snake_case/kebab-case, JSON pretty-print & minify, Base64 encode/decode, URL encode/decode, MD5/SHA1/SHA256, extract URLs, extract numbers, sort lines, dedupe lines, Markdown-to-text, and more.
+**The global shortcut does nothing.** Open Settings from the tray and try `Alt+V` or `Ctrl+Alt+V`. The preview tries alternate combinations; if none can be registered, it falls back to detecting the default `Ctrl+Shift+V`. Follow the actual combination shown in Settings or the status message.
 
-**Tips**: after a transform you get three actions at the bottom — copy to clipboard / save as a new entry (keeping the original) / overwrite the original (its first-copied time is preserved).
+**The destination runs as administrator.** Normal-privilege ClawBoard stops key injection into higher-privilege targets; unknown integrity levels also stop key injection. If copying succeeded, press `Ctrl+V` in the destination yourself. Use the same fallback when a target refuses focus or input.
 
-### 📤 Batch export
+**A trigger does not expand.** Check that you are using the preview, the setting is enabled, the target is outside ClawBoard, and a separate standard US keyboard is selected. Microsoft Pinyin switched to English is still an IME and is skipped. Clicking the phrase remains available.
 
-**What it is**: export the filtered results to a file.
+**The panel is missing.** Try the global show/hide shortcut, then use the tray's Reset position command. Mixed-DPI behavior has been checked for the main panel; this does not imply every already-open dialog adapts identically across displays.
 
-**How to use**: Ctrl+click to multi-select, Shift for ranges, <kbd>Ctrl</kbd>+<kbd>A</kbd> for all, then press <kbd>Ctrl</kbd>+<kbd>E</kbd> (or right-click the search box → "Export current results").
+**Whitespace changed when pasting.** Leading and trailing whitespace is trimmed by default; indentation within the text is retained. Turn off trimming in Settings when edge whitespace must be preserved.
 
-**Tips**: four formats — **TXT / CSV (with BOM, so Excel shows Chinese without garbling) / JSON (full fields, re-importable) / Markdown**. Files are written to the current directory as `导出_<datetime>.<ext>`.
+## 9. Shortcut reference
 
----
-
-## Shortcut reference
+Only the show/hide shortcut is global. The other keys apply inside the panel.
 
 | Shortcut | Action |
 |---|---|
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> | Show / hide the panel globally (configurable to <kbd>Alt</kbd>+<kbd>V</kbd> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>) |
-| <kbd>Ctrl</kbd>+<kbd>1</kbd>…<kbd>Ctrl</kbd>+<kbd>9</kbd> | Quick-paste items 1–9 (row numbers show while Ctrl is held) |
-| <kbd>Ctrl</kbd>+<kbd>0</kbd> | Quick-paste item 10 |
-| <kbd>↑</kbd> <kbd>↓</kbd> | Move the selection |
-| <kbd>Enter</kbd> | Paste the selected entry |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> | Paste as plain text (strips HTML tags & entities) |
-| <kbd>Delete</kbd> | Delete the selected entry |
-| <kbd>Ctrl</kbd>+<kbd>F</kbd> | Focus the search box |
-| <kbd>Ctrl</kbd>+<kbd>T</kbd> | Text transform |
-| <kbd>Ctrl</kbd>+<kbd>E</kbd> | Batch export |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> | Command palette |
-| <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> | Proportional UI scaling (50%–150%) |
-| <kbd>Esc</kbd> | Hide to tray |
-| <kbd>Ctrl</kbd>+<kbd>Q</kbd> | Quit |
-| Double-click title bar | Collapse / expand the panel |
+| `Ctrl+Shift+V` | Show / hide |
+| `↑` / `↓`, `Enter` | Select, then paste |
+| `Ctrl+1`…`Ctrl+9`, `Ctrl+0` | Paste visible entries 1–10 |
+| `Ctrl+F` | Search |
+| `Ctrl+Shift+Enter` | Paste as plain text |
+| `Ctrl+T` / `Ctrl+E` | Text transforms / export |
+| `Ctrl+Shift+P` | Command palette |
+| `Ctrl+=` / `Ctrl+-` | Change user scaling |
+| `Delete` | Delete the selection |
+| `Esc` / `Ctrl+Q` | Hide / quit |
 
----
-
-## Privacy & security
-
-> [!WARNING]
-> **ClawBoard actively skips sensitive content.**
-> - It honors the official Windows "don't record me" flag — password managers (KeePassXC / 1Password / Bitwarden, etc.) set it when placing a password on the clipboard, and ClawBoard respects it and skips the item (far more reliable than guessing with sensitive-word regexes).
-> - **App / title ignore lists**: a few password managers are pre-configured; you can also define your own "ignore these apps" and "ignore windows whose title matches".
-> - **Sensitive-content detection**: ID numbers / bank cards / phone numbers / emails / tokens / password strings are auto-detected, **masked by default** in the list, toggleable to plain text, or can be set to "don't record at all".
-> - Source window titles are **not recorded** by default; logs contain exceptions only and **never the clipboard content itself**.
-
-> [!TIP]
-> **Recommendations**:
-> - If privacy matters to you, keep "honor the Windows don't-record flag" and "mask sensitive content" enabled.
-> - Add your password manager's process name to the ignore list.
-> - Back up the data file regularly (see the FAQ below) and keep the backup encrypted or in a safe place.
-
----
-
-## FAQ
-
-**Q1: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> does nothing — the hotkey is taken. What do I do?**
-Something else probably grabbed it. Go to **Settings** and change the summon hotkey to <kbd>Alt</kbd>+<kbd>V</kbd> or <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>V</kbd>. If the hotkey can't be registered, the app **automatically falls back to polling detection** (falling back to monitoring the default <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>) — it still works, just slightly less instantly.
-
-**Q2: Where is the data stored?**
-In a single UTF-8 file named `ClawBoard数据.json`. The location rule is **portable-first**:
-- Portable build / kept on the desktop / USB stick / D: drive → right next to the exe.
-- Installed into `C:\Program Files` → `%APPDATA%\ClawBoard\` (since Program Files is read-only for standard users).
-
-Images live in `images/` under the data directory; the crash log `crash.log` sits alongside the data file.
-
-**Q3: How do I back up?**
-Just copy `ClawBoard数据.json`. Before each data migration the app auto-backs it up to `.bak`, then `.bak.1` / `.bak.2` — three generations in total. To move machines, just copy the whole portable folder.
-
-**Q4: I copied an image *file* in Explorer — why is a path recorded instead of the image?**
-This is **expected behavior**. Pressing <kbd>Ctrl</kbd>+<kbd>C</kbd> on a jpg/png in Explorer copies the **file path** (Windows clipboard format `CF_HDROP`), not the pixel data — so ClawBoard records the path text (supported since v2.2.3; multiple files are joined with newlines).
-To record the **image itself**, use a screenshot tool, or paste the image into an image-capable app and copy the image content from there.
-
-**Q5: How do I enable auto-start on boot?**
-**Settings** → turn on "Start with Windows". It writes a per-user registry run entry (no admin rights needed) and removes it cleanly when turned off. If you'd rather not touch the registry, click "Open startup folder" in Settings and drag a shortcut into `shell:startup` yourself.
-
-**Q6: It pasted but nothing landed in the target window?**
-Auto-paste relies on the "last foreground window" it recorded. **Elevated (UAC) windows will fail** — in that case the app tells you "Copied, please press <kbd>Ctrl</kbd>+<kbd>V</kbd> manually"; the content is already on the clipboard, so just paste it yourself.
-
-**Q7: The panel won't respond / I can't find it. What now?**
-Check in order: ① press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd> once (on every summon the app pulls a window that drifted off-screen back to the corner); ② right-click the tray icon → "⟲ Can't find the panel? Reset position"; ③ check whether it was dragged into the gap between two monitors.
-
-**Q8: Why does extra whitespace appear at the front when I paste?**
-The clipboard itself is clean. The list preview flattens leading/trailing whitespace and newlines for display, while the pasted output is the **original** — text copied from PDFs/web pages/code blocks often carries leading indentation, so it looks like phantom spaces. By default the app **trims leading/trailing whitespace on paste** (indentation within the body is preserved, code blocks unaffected); turn this off in Settings to keep the original indentation.
-
----
-
-## Going further / next steps
-
-<details>
-<summary><b>Want to dig deeper?</b></summary>
-
-- 📖 [**User Manual**](使用说明.md) (Chinese) — detailed operations manual covering every switch and detail.
-- 🧠 [**Design notes**](DESIGN.en.md) · [中文](制作思路.md) — where requirements came from, method order, tech choices, implementation steps, pitfalls, measured numbers.
-- 🏗 [**Architecture**](架构设计.md) (Chinese) — layers, module split, dependency direction, call flows.
-- 🌐 [**Online docs site**](https://pay-and-gain.github.io/ClawBoard/) — web version, switch between Chinese / English.
-
-</details>
-
-> [!TIP]
-> Want even more?
-> - **[Requirements overview](需求全景.md)** and **[Progress](PROGRESS.md)** (Chinese) capture the full requirement set and development journey.
-> - **[CHANGELOG](../CHANGELOG.md)** has the version-by-version change log.
-> - The **C build** ([`ClawBoardC/`](../ClawBoardC/)) is a pure Win32 implementation (205 KB, ~15 MB memory) that **shares the same data file** as the Python build and can be swapped freely.
-
----
-
-<p align="center">
-  <a href="../README.en.md">← Back to README</a> ·
-  <a href="../CHANGELOG.md">CHANGELOG</a> ·
-  <a href="../LICENSE">MIT License</a>
-</p>
+See the [Windows validation record](WINDOWS_VALIDATION.md) and [current architecture](REFACTOR.md), both in Chinese, for technical boundaries. Release history is in the [changelog](../CHANGELOG.md).

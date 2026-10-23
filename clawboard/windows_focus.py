@@ -71,11 +71,28 @@ def _integrity_of(hwnd):
     except Exception:
         return None
 
+def can_send_input(hwnd):
+    """只有双方完整性级别已知且目标不更高时，才允许自动输入。
+
+    SendInput 的完整计数只表示事件进入系统输入流；发往管理员窗口时，
+    即使返回全部事件也不代表目标收到。权限必须在发键前独立判定。
+    """
+    try:
+        if not int(hwnd or 0):
+            return False
+        source = _pid_integrity(k32.GetCurrentProcessId())
+        target = _integrity_of(hwnd)
+        return (type(source) is int and type(target) is int
+                and 0 <= target <= source <= 0xFFFFFFFF)
+    except Exception:
+        return False
+
+
 def is_elevated_hwnd(hwnd):
     """目标进程完整性级别是否高于本进程（UAC 高权限窗口）。
 
-    UIPI 会静默拦截发往更高完整性进程的 SendMessage / SendInput，WM_PASTE 无效，
-    检测到就得退回「抢焦点 + 模拟 Ctrl+V」（同样可能被拦，但至少有失败提示）。
+    更高完整性目标的自动输入应降级为已复制、提示用户手动 Ctrl+V。
+    不能再用 SendInput 的事件计数把权限拒绝推断为成功投递。
     """
     me = _pid_integrity(k32.GetCurrentProcessId())
     target = _integrity_of(hwnd)

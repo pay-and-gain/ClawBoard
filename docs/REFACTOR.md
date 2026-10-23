@@ -4,6 +4,8 @@
 
 运行产品需要 Windows 和包含 Tcl/Tk 的 Python 3.10+；纯服务与合同测试可以在 Linux 执行。项目背景、性能诊断和视觉建议见 [PROJECT_REVIEW.md](PROJECT_REVIEW.md)。[架构设计.md](架构设计.md) 和 [上下文快照.md](上下文快照.md) 保留早期设计历史，不再作为当前文件清单。
 
+2026-10-23 的本地 Windows 原生验证与尚未覆盖的场景见 [WINDOWS_VALIDATION.md](WINDOWS_VALIDATION.md)。云端 CI、模拟端口、原生编辑器、系统输入法与安装验收分别记录，不互相替代。
+
 ## 模块边界
 
 | 边界 | 模块 | 负责什么 |
@@ -18,7 +20,7 @@
 | Windows 适配器 | `windows_api.py`、`windows_input.py`、`windows_focus.py`、`windows_geometry.py`、`windows_system.py`、`windows_effects.py`、`windows_hooks.py` | ABI 声明与各自系统能力；功能模块不反向导入兼容聚合入口 |
 | 剪贴板适配器 | `clipboard.py`、`image_win32.py`、`win32_snapshot.py`、`hotkey.py` | 原生读写、一次快照、热键/托盘消息和剪贴板变化通知 |
 | Tk 接线 | `tk_bridge.py`、`paste_adapter.py`、`data_adapter.py`、`system.py` | 把服务结果交给主窗口；数据、系统和粘贴的兼容入口 |
-| 界面 | `app.py`、`app_ui.py`、`app_geometry.py`、`app_interact.py`、`widgets.py`、`vlist.py` | 布局、窗口几何和交互；列表复用可见行控件 |
+| 界面 | `app.py`、`app_ui.py`、`app_geometry.py`、`tk_dpi.py`、`app_interact.py`、`widgets.py`、`vlist.py` | 布局、跨屏 DPI、窗口几何和交互；列表复用可见行控件 |
 | 业务弹窗 | `settings_dialog.py`、`transform_dialog.py`、`export_dialog.py` | 设置、异步变换与导出；完整数据不从截断预览控件取回 |
 | 缩略图与数据资源 | `thumbnails.py`、`pinyin*.py` | 有界缩略图缓存、公共拼音聚合层与自动生成的数据分块 |
 
@@ -46,6 +48,12 @@ flowchart TD
 保存使用独立 `SaveService`：单写入者串行处理，正在写入期间合并后续最新快照。调用 `request(data)` 取得容器快照后，worker 只读快照，不读取 App、Tk 或可变界面状态。`flush()` 等待最后接受的写入，失败会抛异常；保存失败不能视为成功退出。应用关闭时刷新数据、取消后续交互任务并关闭结果队列；过期结果不得在窗口销毁后更新 UI。
 
 原生消息窗口使用 `AddClipboardFormatListener` 接收变化，消息线程只投递事件。启用通知时保留较低频轮询兜底；通知不可用时回退轮询。剪贴板采集、图片处理、保存、粘贴与预览各自通过对应服务控制顺序，不应额外启动不受限的“每个事件一个线程”。
+
+普通粘贴与触发词共用同一个有界串行输入队列。触发请求绑定原顶层窗口与焦点控件，准备好剪贴板后再次核对目标、序列与取消状态，才发送完整退格/粘贴批次。键盘和鼠标钩子在同一线程安装/清理；继续输入、点击、滚轮、快捷键和导航操作取消旧触发请求。自动展开使用空格或标点，Enter/Tab 保留目标程序原行为并取消展开。系统接受 `SendInput` 的全部事件仍不等于任意目标程序已消费事件。
+
+触发词自动展开只在焦点线程的独立标准 US 布局（HKL `0x04090409`）启用。微软拼音的“中”和“英”模式、其它布局及查询失败均保留原输入，不准备替换剪贴板、不退格；普通复制粘贴不受此限制。每次输入绑定布局快照，布局改变会清空缓冲并取消排队替换；执行前及实际 `SendInput` 批次前再次检查。不能只检查语言编号，也不能把原始拼音按键数当作提交后的中文字符数。
+
+原生自动发键还要求双方进程的权限级别均可查询，且目标不高于当前进程。较高或未知权限只保留普通复制并提示手动粘贴；触发替换在写入和删除前即取消，不能因 `SendInput` 接收了完整事件数便宣称管理员输入框已收到内容。隐藏热键/托盘承载窗口使用不显示的顶层窗口接收 `TaskbarCreated`；恢复遵循启用意图，复用 HICON，显式删除及退出后不恢复。
 
 ## 数据和采集约定
 
@@ -118,6 +126,9 @@ python tests/_t35.py
 python tests/_t37.py
 python tests/_t42.py
 python tests/_t43.py
+python tests/_t45.py
+python tests/_t46.py
+python tests/_t47.py
 ```
 
 还需按场景运行既有布局、缩放、图片和独立 QA 脚本。原生验证至少覆盖：文本/文件/图片剪贴板闭环、临时占用后重试、全屏置顶、浏览器与管理员窗口粘贴、双屏不同 DPI、热键/托盘、退出前保存失败后的重试。模拟合同不能证明 ctypes ABI、焦点、绘制或系统权限行为正确。

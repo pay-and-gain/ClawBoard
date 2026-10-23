@@ -20,32 +20,72 @@ def _kbd(vk, up=False):
 def send_key(vk, up=False, gap=0.01):
     try:
         inp = _kbd(vk, up)
-        u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        sent = u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) == 1
     except Exception:
-        return
+        return False
     if gap:
         time.sleep(gap)
+    return sent
+
+
+def _send_batch(events):
+    """同一批次不被其它 SendInput 插入；只把完整注入当作成功。"""
+    if not events:
+        return True
+    try:
+        batch = (INPUT * len(events))(*events)
+        return u32.SendInput(len(events), batch, ctypes.sizeof(INPUT)) == len(events)
+    except Exception:
+        return False
 
 def all_keys_up(gap=0.005):
     """发键前先抬起所有还按着的修饰键。
     Ditto SendKeys.cpp:237 的 AllKeysUp：用户按着 Ctrl 唤起面板时，残留的 Ctrl
     会把我们的 Ctrl+V 变成 Ctrl+Ctrl+V，目标程序收到的是裸 V，粘贴就"失灵"了。"""
+    events = []
     for vk in MODIFIER_VKS:
         try:
             if u32.GetAsyncKeyState(vk) & 0x8000:
-                send_key(vk, up=True, gap=gap)
+                events.append(_kbd(vk, up=True))
         except Exception:
-            pass
+            return False
+    sent = _send_batch(events)
+    if events and gap:
+        time.sleep(gap)
+    return sent
 
 def send_ctrl_v():
-    """Ctrl+V。改用 SendInput：一次一个事件、带扫描码，比已废弃的 keybd_event 可靠"""
-    all_keys_up()
-    send_key(VK_CONTROL, gap=0.008)
-    send_key(VK_V, gap=0.012)
-    send_key(VK_V, up=True, gap=0.008)
-    send_key(VK_CONTROL, up=True, gap=0)
+    """Ctrl+V；返回系统是否接受全部事件，不保证目标程序已处理。"""
+    return send_replacement(0)
+
+
+def send_replacement(backspaces, *, guard=None):
+    """触发词删除与粘贴放在一个批次，避免两个注入序列彼此穿插。"""
+    if not all_keys_up():
+        return False
+    events = []
+    for _ in range(max(0, int(backspaces))):
+        events.extend((_kbd(VK_BACK), _kbd(VK_BACK, up=True)))
+    events.extend((_kbd(VK_CONTROL), _kbd(VK_V),
+                   _kbd(VK_V, up=True), _kbd(VK_CONTROL, up=True)))
+    if guard is not None:
+        try:
+            if not guard():
+                return False
+        except Exception:
+            return False
+    sent = _send_batch(events)
+    if not sent:
+        # 部分注入可能留下按住的 Ctrl/V/退格；清理不能把失败改报成功。
+        _send_batch([_kbd(vk, up=True) for vk in (VK_BACK, VK_V, VK_CONTROL)])
+    return sent
 
 def send_backspaces(n, gap=0.018):
     """连发 n 次退格（触发词替换：删掉刚输入的触发词 + 分隔符）。"""
     for _ in range(max(0, int(n))):
-        send_key(VK_BACK, gap=gap)
+        if not _send_batch([_kbd(VK_BACK), _kbd(VK_BACK, up=True)]):
+            send_key(VK_BACK, up=True, gap=0)
+            return False
+        if gap:
+            time.sleep(gap)
+    return True

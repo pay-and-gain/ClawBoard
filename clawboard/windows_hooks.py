@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""全局键盘钩子；安装、消息泵与卸载归同一工作线程，停止后取消旧回调。"""
+"""触发词输入钩子；键鼠安装、消息泵与卸载归同一线程。"""
 import ctypes
 import threading
 from ctypes import wintypes
 
 from clawboard.windows_api import (
     HOOKPROC, KBDLLHOOKSTRUCT, PM_NOREMOVE, VK_BACK, VK_CAPITAL, VK_RETURN, VK_SHIFT,
-    VK_SPACE, VK_TAB, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN, WM_QUIT, k32, u32,
+    VK_SPACE, VK_TAB, VK_CONTROL, VK_MENU, WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
+    WM_QUIT, k32, u32,
 )
 
 # 美式键盘 OEM 键到字符（无 Shift 时）
@@ -18,6 +19,9 @@ _OEM_SHIFT = {0xBC: '<', 0x30: ')', 0x31: '!', 0x32: '@', 0x33: '#', 0x34: '$',
               0x35: '%', 0x36: '^', 0x37: '&', 0x38: '*', 0x39: '(', 0xBE: '>',
               0xBD: '_', 0xBA: ':', 0xBF: '?', 0xDE: '"', 0xDC: '|',
               0xC0: '~', 0xDB: '{', 0xDD: '}', 0xBB: '+'}
+
+WH_MOUSE_LL = 14
+_MOUSE_RESET_MESSAGES = (0x0201, 0x0204, 0x0207, 0x020B, 0x020A, 0x020E)
 
 def vk_to_char(vk, shift, caps):
     """vkCode → 字符（美式键盘简化映射）。返回 '' 表示无法识别。"""
@@ -48,8 +52,8 @@ HOOK_START_TIMEOUT = 1.0
 HOOK_STOP_TIMEOUT = 1.0
 
 
-def start_keyboard_hook(on_char, on_backspace):
-    """启动有消息队列的独立 hook 线程；调用方只限时等待初始化结果。"""
+def start_keyboard_hook(on_char, on_backspace, on_reset=None):
+    """启动输入线程；提供 on_reset 时必须同时监听鼠标，任一失败即全部停用。"""
     global _hook, _hook_cb, _hook_stop, _hook_thread, _hook_tid
     with _hook_lock:
         if _hook_thread is not None and _hook_thread.is_alive():
@@ -61,7 +65,9 @@ def start_keyboard_hook(on_char, on_backspace):
         def run():
             global _hook, _hook_cb, _hook_stop, _hook_thread, _hook_tid
             handle = None
+            mouse_handle = None
             callback = None
+            mouse_callback = None
             try:
                 msg = wintypes.MSG()
                 _hook_tid = k32.GetCurrentThreadId()
@@ -77,7 +83,23 @@ def start_keyboard_hook(on_char, on_backspace):
                         try:
                             kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
                             vk = kb.vkCode
-                            if vk == VK_BACK:
+                            # 自己的 SendInput 不能再喂回触发引擎，否则 Ctrl+V 的 V
+                            # 与自动退格会改变缓冲区，甚至引发递归替换。
+                            injected = bool(kb.flags & 0x12)  # LLKHF_INJECTED / LOWER_IL_INJECTED
+                            shortcut = (bool(kb.flags & 0x20) or any(
+                                u32.GetAsyncKeyState(key) & 0x8000
+                                for key in (VK_CONTROL, VK_MENU, 0x5B, 0x5C)))
+                            if injected:
+                                pass
+                            elif shortcut:
+                                if on_reset:
+                                    on_reset()
+                            elif vk in (VK_TAB, VK_RETURN):
+                                # 原按键仍传给目标；但 Enter 可能提交、Tab 可能移焦点，
+                                # 不能在其生效之后退格替换另一个位置的正文。
+                                if on_reset:
+                                    on_reset()
+                            elif vk == VK_BACK:
                                 on_backspace()
                             else:
                                 shift = bool(u32.GetKeyState(VK_SHIFT) & 0x8000)
@@ -85,6 +107,9 @@ def start_keyboard_hook(on_char, on_backspace):
                                 char = vk_to_char(vk, shift, caps)
                                 if char:
                                     on_char(char)
+                                elif vk not in (VK_SHIFT, 0xA0, 0xA1, VK_CAPITAL):
+                                    if on_reset:
+                                        on_reset()
                         except Exception:
                             # 用户回调失败也必须继续传递按键，不能把系统输入链截断。
                             pass
@@ -94,9 +119,25 @@ def start_keyboard_hook(on_char, on_backspace):
                 handle = u32.SetWindowsHookExW(
                     WH_KEYBOARD_LL, callback, k32.GetModuleHandleW(None), 0)
                 _hook = handle
-                ready.set()
                 if not handle:
                     return
+                if on_reset:
+                    @HOOKPROC
+                    def mouse_callback(nCode, wParam, lParam):
+                        if not stop.is_set() and nCode >= 0 and wParam in _MOUSE_RESET_MESSAGES:
+                            try:
+                                # 同一输入框内点击也会改光标；只看 HWND/鼠标位置
+                                # 无法识别同位置点击，必须取消当前缓冲和排队请求。
+                                on_reset()
+                            except Exception:
+                                pass
+                        return u32.CallNextHookEx(None, nCode, wParam, lParam)
+
+                    mouse_handle = u32.SetWindowsHookExW(
+                        WH_MOUSE_LL, mouse_callback, k32.GetModuleHandleW(None), 0)
+                    if not mouse_handle:
+                        return
+                ready.set()
                 while not stop.is_set():
                     status = u32.GetMessageW(ctypes.byref(msg), None, 0, 0)
                     if status <= 0 or stop.is_set():
@@ -107,11 +148,12 @@ def start_keyboard_hook(on_char, on_backspace):
                 pass
             finally:
                 stop.set()
-                if handle:
-                    try:
-                        u32.UnhookWindowsHookEx(handle)
-                    except Exception:
-                        pass
+                for native_handle in (mouse_handle, handle):
+                    if native_handle:
+                        try:
+                            u32.UnhookWindowsHookEx(native_handle)
+                        except Exception:
+                            pass
                 ready.set()
                 with _hook_lock:
                     if _hook_thread is threading.current_thread():

@@ -23,7 +23,7 @@ def backend(**changes):
                   looks_files=lambda text: False, write_image=lambda data: True,
                   read_image=lambda name: b'png', decode_image=lambda raw: (b'dib', 1, 1),
                   can_message=lambda target: True, message=lambda target: True,
-                  activate=lambda target, **kwargs: True, send_keys=lambda: None,
+                  activate=lambda target, **kwargs: True, send_keys=lambda: True,
                   sequence=lambda: 5, sleep=lambda seconds: None)
     values.update(changes)
     return PasteBackend(**values)

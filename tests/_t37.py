@@ -21,6 +21,8 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.windows_test_guard import acquire_desktop_test_lease
+acquire_desktop_test_lease()
 from clawboard.clipboard import (clip_read, clip_write, clip_read_files,
                                  clip_write_files, build_hdrop,
                                  looks_like_file_list)
