@@ -1,0 +1,109 @@
+{
+  "environment": {
+    "python": "3.12.14",
+    "system": "Linux-6.18.55-x86_64-with-glibc2.41"
+  },
+  "scope": "Synthetic CPU measurements, not Windows GUI frame rate or a user-machine guarantee",
+  "search_500_items_2000_chars": {
+    "old": {
+      "app:chrome": {
+        "cold_ms": 1385.031,
+        "median_ms": 1045.907,
+        "matches": 500
+      },
+      "hello": {
+        "cold_ms": 1112.97,
+        "median_ms": 1944.025,
+        "matches": 500
+      },
+      "zhanghao": {
+        "cold_ms": 1289.758,
+        "median_ms": 1439.979,
+        "matches": 500
+      }
+    },
+    "new": {
+      "app:chrome": {
+        "cold_ms": 0.551,
+        "median_ms": 0.456,
+        "matches": 500
+      },
+      "hello": {
+        "cold_ms": 10.017,
+        "median_ms": 8.031,
+        "matches": 500
+      },
+      "zhanghao": {
+        "cold_ms": 82.53,
+        "median_ms": 79.774,
+        "matches": 500
+      }
+    }
+  },
+  "images": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "old_encode": {
+        "median_ms": 1072.403,
+        "samples_ms": [
+          1072.403
+        ]
+      },
+      "new_encode": {
+        "median_ms": 76.294,
+        "samples_ms": [
+          76.294
+        ]
+      },
+      "old_decode": {
+        "median_ms": 1023.306,
+        "samples_ms": [
+          1023.306
+        ]
+      },
+      "new_decode": {
+        "median_ms": 39.877,
+        "samples_ms": [
+          39.877
+        ]
+      }
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "old_encode": {
+        "median_ms": 3558.481,
+        "samples_ms": [
+          3558.481
+        ]
+      },
+      "new_encode": {
+        "median_ms": 240.74,
+        "samples_ms": [
+          240.74
+        ]
+      },
+      "old_decode": {
+        "median_ms": 3434.482,
+        "samples_ms": [
+          3434.482
+        ]
+      },
+      "new_decode": {
+        "median_ms": 149.805,
+        "samples_ms": [
+          149.805
+        ]
+      }
+    }
+  ],
+  "project_5000_only_10_visible": {
+    "median_ms": 2.468,
+    "samples_ms": [
+      10.932,
+      2.468,
+      1.613
+    ]
+  }
+}

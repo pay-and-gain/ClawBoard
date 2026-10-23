@@ -25,6 +25,8 @@ import time
 from ctypes import wintypes
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.windows_test_guard import acquire_desktop_test_lease
+acquire_desktop_test_lease()
 from clawboard.clipboard import clip_read_files, clip_read, clip_write
 from clawboard.win32 import u32, k32, CF_HDROP, CF_UNICODETEXT, GMEM_MOVEABLE
 

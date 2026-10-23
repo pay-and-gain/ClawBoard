@@ -17,10 +17,13 @@ ClawBoardC/*.vcxproj.user
 ClawBoard数据.json
 ClawBoard数据.json.bak
 ClawBoard数据.json.tmp
+/ClawBoard数据.json*
+/.ClawBoard数据.json.*
 crash.log
 debug.log
 *.log
 导出_*
+/ClawBoard导出_*
 # 运行期图片缓存仅在数据目录（仓库根）下；docs/images/ 是仓库截图，必须入库，
 # 所以这里用根锚定 `/images/` 而不是 `images/`（后者会误伤 docs/images/）。
 /images/

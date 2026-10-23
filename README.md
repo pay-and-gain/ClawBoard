@@ -2,236 +2,118 @@
 
 **简体中文** | [English](README.en.md)
 
-> Windows 悬浮剪贴板 & 常用语面板 —— 零第三方依赖，Python（tkinter + ctypes）与纯 C（Win32）双版本。
+Windows 剪贴板历史与常用语面板。找回复制过的文字、截图和文件路径，搜索后粘贴到正在编辑的位置，也能把重复使用的内容存成常用语。
 
-挂在屏幕一角的轻量剪贴板历史：随手复制的文字、图片都在这里，搜得到、变得了、贴得快，隐私还握在自己手里。
+[下载 v2.7.0](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0) · [新手指南](docs/getting-started.md) · [本次改动 PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) · [Windows 验证记录](docs/WINDOWS_VALIDATION.md)
 
-<p align="center">
-  <a href="../../stargazers"><img src="https://img.shields.io/github/stars/pay-and-gain/ClawBoard?style=social" alt="stars"></a>
-</p>
-
-> 💛 **如果这个工具帮到了你，点个 Star 支持一下吧** —— 你的每一个 Star 都是持续更新的动力。觉得好用也欢迎分享给同事和朋友。
+> **v2.7.0 包含服务重构、输入法防误删、管理员窗口安全降级和主面板跨屏缩放。** 升级前备份数据文件和图片目录。旧 v2.6.1 不包含本轮输入保护，仍使用旧版时请关闭触发词。
 
 <p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 主界面：剪贴板历史列表" width="300">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard 剪贴板历史，使用合成示例内容" width="420">
 </p>
 
-- **首次启动引导** —— 新用户空数据时给出上手卡片：3 步上手 + 快捷键 + 一键「载入示例数据」
-- **剪贴板历史** —— 自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情
-- **补记** —— 程序没运行时复制的内容，启动后自动补记（仅能补回你**最后一次**复制的那条，Windows 剪贴板只保留一份）
-- **快速粘贴** —— `Ctrl+1..9` / `Ctrl+0` 直接粘贴第 1~10 项
-- **隐私保护** —— 遵守 Windows「别记录我」标记、程序 / 标题忽略名单、敏感内容识别与打码
-- **音效反馈** —— 复制 / 粘贴各一个独立开关（默认关），盲操时不用看屏幕也能确认「贴没贴上」
-- **自动更新提示** —— 启动静默检查；发现新版在设置里一键「去下载」——只提示、不打扰
-- **全屏不挡游戏** —— 全屏程序在前台时自动取消置顶、被游戏覆盖；热键呼出面板照常用
-- **多屏自由移动** —— 面板可在多个显示器之间自由拖动、跨屏停靠；靠边收纳与「重置位置」都按面板**所在那块屏**判定（v2.6.1 修复）
+## 下载与开始使用
 
-👉 第一次用？看 [**新手教程**](docs/getting-started.md) —— 30 秒上手，5 分钟摸透全部核心功能。
+运行打包好的程序无需安装 Python。推荐便携包，也可选择安装向导或完整分享包：
 
-## 📥 下载
-
-| 方式 | 文件 | 说明 |
+| 交付 | 入口 | 说明 |
 |---|---|---|
-| **安装包**（推荐） | `ClawBoard-2.6.1-setup.exe` | 双击安装，自动建开始菜单 / 桌面快捷方式，带卸载项 |
-| **绿色版** | `ClawBoard-2.6.1-portable.zip` | 解压即用，不写注册表、不留残留 |
-| **源码** | `Source code (zip/tar.gz)` | Release 页由 GitHub 自动提供；也可 `git clone` |
+| 便携包 | [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip) | 解压后运行 `ClawBoard.exe`，数据与 exe 同层 |
+| 安装包 | [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe) | 安装向导、开始菜单快捷方式和卸载入口 |
+| 完整分享包 | [ClawBoard-2.7.0-windows.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip) | 便携程序、安装包、中英文说明与校验清单，一份文件便于转发 |
 
-👉 全部文件在 [**Releases 页面**](../../releases/latest)。
+1. 启动程序，在其他应用复制一段测试文字。
+2. 回到要输入的位置，按 **Ctrl+Shift+V** 唤起面板。
+3. 选择历史条目，按 **Enter** 或单击条目。若提示已复制但无法自动粘贴，在目标输入框手动按 **Ctrl+V**。
 
-## ✨ 特性
+关闭按钮默认隐藏到托盘；退出请用 **Ctrl+Q** 或托盘菜单的“退出”。更多操作见[新手指南](docs/getting-started.md)。
 
-### 🔍 高级搜索 · 拼音 · 自动标签
+## 可以做什么
 
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/search-highlight.png" alt="高级搜索：ClawBoard type:url，命中词高亮" width="440">
-</p>
-
-- **高级搜索** —— `app:` 来源 / `time:` 时间 / `type:` 类型 / `size:` 大小 / `is:` 状态 / `tag:` 标签 / `-` 排除，多词 AND + 命中高亮
-- **拼音搜索** —— 搜 `zhanghao` 或 `zh` 也能命中「账号」，记不清字照样找得到
-- **内容自动标签** —— 自动识别邮箱 / 手机号 / 数字 / 日期 / 链接 / 代码 / JSON，`tag:` 一键筛选
-
-### 💬 常用语与触发词
+- **找回与整理**：记录文字、图片、文件路径，去重、收藏，按关键词、来源、类型或时间筛选；支持中文拼音搜索。
+- **重复使用**：常用语分组，键盘选择和前十项快捷粘贴；可选的触发词展开有下述布局限制。
+- **处理内容**：文本编码、JSON、大小写和行处理等变换；选中内容可导出为 TXT、CSV、JSON 或 Markdown。
+- **适应桌面**：亮暗主题、用户缩放、折叠和靠边隐藏。主面板会在跨屏稳定落位后适应屏幕 DPI。
 
 <p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/phrases.png" alt="常用语面板与触发词设置" width="460">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/search-highlight.png" alt="搜索筛选合成剪贴板条目" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/phrases.png" alt="按分组管理常用语的界面" width="420">
 </p>
 
-- **常用语** —— 分组管理、拆词（一段文字批量切成多条）、增删改
-- **触发词快速粘贴** —— 给常用语设触发词（`dz` → 地址），任何程序输入即替换
+截图使用示例数据。搜索写法包括 `app:chrome`、`type:url`、`is:fav`、`tag:email`；可组合关键词或用 `-关键词` 排除。拼音搜索不展开所有多音字读法。
 
-### 🖼️ 图片剪贴板
+## 数据、备份与升级
 
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/image-clipboard.png" alt="图片剪贴板：白色条目 + 角落大图预览" width="560">
-</p>
+数据位置取决于程序所在目录是否可写：
 
-- **图片剪贴板** —— 截图 / 复制图片自动记录，选中即在角落弹出大图预览
-- 记录 / 预览 / **粘贴** 与文本完全对称；复制图片*文件*时记录的是**路径**（CF_HDROP）
-
-### 🧰 27 项文本变换 · 批量导出
-
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/transform.png" alt="文本变换窗口：推荐变换 + 原文 / 结果对照" width="520">
-</p>
-
-- **27 项文本变换** —— 编解码、大小写、行处理、哈希（MD5 / SHA1 / SHA256）、JSON 格式化…按内容智能推荐
-- **批量导出** —— TXT / CSV（带 BOM）/ JSON / Markdown
-
-### ⌨️ 命令面板
-
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/command-palette.png" alt="命令面板：模糊过滤命令" width="300">
-</p>
-
-- **`Ctrl+Shift+P` 呼出** —— 输入命令名模糊过滤，回车即执行
-
-### 🎨 外观个性
-
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/theme-compare.png" alt="亮色 / 暗色主题对比" width="300">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/folded-edge.png" alt="展开面板与双击折叠贴边对比" width="320">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/scale-compare.png" alt="界面等比缩放 50% / 100% / 150%" width="330">
-</p>
-
-- **亮 / 暗主题**、**双击折叠贴边**、**界面等比缩放 50%~150%**（`Ctrl+=` / `Ctrl+-`）
-- 还能自定义背景色、靠边自动隐藏、四边四角随意拉伸
-
-### ⚙️ 设置一目了然
-
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-general.png" alt="设置 - 基础" width="300">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-sound.png" alt="设置 - 音效反馈" width="300">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/settings-advanced.png" alt="设置 - 进阶与更新" width="300">
-</p>
-
-- 基础 / 进阶分栏滚动：监听、打码、主题、缩放、忽略名单、长度过滤、音效反馈、检查更新、开机自启一屏可调
-
-## 🚀 快速开始
-
-### 方式一：装安装包
-下载 `ClawBoard-2.6.1-setup.exe` 双击，按提示装完即可（Windows 10 / 11）。
-
-### 方式二：绿色版
-下载 `ClawBoard-2.6.1-portable.zip`，解压到任意目录，双击 `ClawBoard.exe`。
-
-### 方式三：从源码运行
-```bash
-git clone https://github.com/pay-and-gain/ClawBoard.git
-cd ClawBoard
-python ClawBoard.py     # 需要 Python 3 + tkinter（Windows 自带）
-```
-零 pip 依赖。
-
-### 自己打包
-```bash
-pip install pyinstaller
-pyinstaller packaging/ClawBoard.spec --noconfirm
-# 产物在 dist/ClawBoard.exe，数据文件落在 exe 旁边
-```
-安装包（Inno Setup）与绿色版（zip）的脚本见 [`packaging/`](packaging/)。
-
-### C 版（可选）
-[`ClawBoardC/`](ClawBoardC/) 是纯 Win32 + GDI 自绘的 C 实现（约 2500 行，产物 205 KB，内存约 15 MB），
-用 `ClawBoardC/build.bat` 编译（需 MSVC）。两版**共用同一份数据文件**，可互换使用。
-
-## ⌨️ 快捷键
-
-| 按键 | 功能 |
+| 运行位置 | 默认数据位置 |
 |---|---|
-| `Ctrl+Shift+V` | 唤起 / 隐藏面板 |
-| `Ctrl+1..9` / `Ctrl+0` | 直接粘贴第 1~10 项 |
-| `Ctrl+T` / `Ctrl+E` | 文本变换 / 批量导出 |
-| `Ctrl+F` | 聚焦搜索 |
-| `Ctrl+=` / `Ctrl+-` | 界面等比缩放 |
-| `↑` `↓` / `Enter` | 移动 / 粘贴 |
-| `Delete` | 删除选中 |
+| 可写目录中的便携 exe | **exe 同层**的 `ClawBoard数据.json`，图片在同层 `images/` |
+| exe 所在目录不可写，例如普通权限下的 Program Files | `%APPDATA%\ClawBoard\` |
+| 从源码运行 | 源码根目录 |
+
+**在托盘菜单“关于”中确认实际数据文件路径。** 升级或搬迁前先退出程序，备份 `ClawBoard数据.json` 和整个 `images/`，已有 `.bak` 文件也可一起保留。便携升级只替换 exe，数据与 exe 继续同层；不要把新 exe 单独放进子目录。详细步骤见[备份与升级](docs/getting-started.md#备份升级与迁移)。
+
+便携运行仍会生成数据和日志。可选的“开机自启”会写入当前用户的注册表 Run 项；安装版还会创建安装登记及快捷方式，因此不承诺“零注册表写入”或“无残留”。
+
+## 隐私与使用边界
+
+- **数据未加密**：历史与设置存为 JSON，图片存为 PNG。显示打码不等于磁盘加密，备份也应妥善保护。
+- **过滤有边界**：支持剪贴板私密标记、应用/标题忽略名单、敏感显示遮罩和可选的敏感内容跳过；识别规则无法保证拦截所有机密内容。
+- **联网范围**：采集、搜索和变换在本机处理；默认更新检查会访问 GitHub 发布信息，可在设置关闭。更新功能只提示并打开下载页，不自动下载安装或替换程序。
+- **触发词仅支持独立标准 US 键盘布局**：微软拼音的“中”和“英”模式、US International、Dvorak 及未知布局都暂停展开。空格或支持的标点可触发；Enter、Tab、点击、滚轮和继续输入会取消排队替换。中文输入时仍可正常复制、搜索和点击常用语粘贴。
+- **管理员目标需要手动粘贴**：普通权限进程不会向更高权限窗口自动发键；权限无法确认时也停止自动发键。看到“已复制”后，在目标窗口按 Ctrl+V。自动输入不能保证任意应用都接受内容。
+- **记录不是完整审计**：程序关闭或连续快速复制时，无法保证保留每一个中间状态；启动补记只读取当时可取得的当前剪贴板。
+
+已实测浏览器粘贴、中文候选保护、独立 US 触发、管理员手动粘贴、混合 DPI 主面板、真实托盘打开和 Explorer 重启恢复；独立测试目录的静默安装/保留数据卸载、GUI 保存后新进程重载也已通过。5,000 条合成记录完成 15 分钟搜索/滚动负载；交互式安装向导及多日运行未测，完整范围见 [Windows 验证记录](docs/WINDOWS_VALIDATION.md)。
+
+## 常用快捷键
+
+除全局唤起键外，下列按键在 ClawBoard 面板内使用：
+
+| 按键 | 操作 |
+|---|---|
+| `Ctrl+Shift+V` | 全局显示/隐藏；设置中可改为 `Alt+V` 或 `Ctrl+Alt+V` |
+| `Ctrl+F` | 搜索 |
+| `↑` / `↓`、`Enter` | 选择、粘贴 |
+| `Ctrl+1`…`Ctrl+9`、`Ctrl+0` | 粘贴当前列表第 1–10 项 |
+| `Ctrl+Shift+Enter` | 纯文本粘贴 |
+| `Ctrl+T` / `Ctrl+E` | 文本变换 / 导出 |
+| `Ctrl+Shift+P` | 命令面板 |
+| `Ctrl+=` / `Ctrl+-` | 调整用户缩放档位 |
 | `Esc` / `Ctrl+Q` | 隐藏 / 退出 |
 
-## 📖 文档
+## 从源码运行
 
-🌐 **[在线文档](https://pay-and-gain.github.io/ClawBoard/)** —— 网页版，可切换中 / 英文
-
-| 文档 | 内容 |
-|---|---|
-| [**新手教程**](docs/getting-started.md) · [English](docs/getting-started.en.md) | **第一次用？从这里开始**：30 秒上手 + 5 分钟教程 + 核心功能逐个上手 |
-| [制作思路](docs/制作思路.md) · [English](docs/DESIGN.en.md) | **功能说明 + 使用指南 + 设计思路**：需求来源、方法顺序、技术选型、实现步骤、踩坑、实测数据、FAQ |
-| [使用说明](docs/使用说明.md) | 详细操作手册 |
-| [架构设计](docs/架构设计.md) | 分层结构、模块划分、依赖方向、调用流程 |
-| [需求与进度](docs/需求全景.md) · [PROGRESS](docs/PROGRESS.md) | 需求全景与开发过程记录 |
-| [CHANGELOG](CHANGELOG.md) | 逐版本改动记录 |
-
-## 🏗️ 项目结构
-
-```
-ClawBoard.py            入口 + re-export 聚合层
-clawboard/              Python 包（16 个职责模块，四层架构）
-├─ config.py            集中配置 + 数据契约 + AppState
-├─ runtime.py           运行时可变全局（NO_SAVE 等）
-├─ theme.py             主题配色
-├─ classify.py          内容自适应分类
-├─ timefmt.py           时间格式化 + 数据迁移
-├─ win32.py             Win32 声明 + DPI + 单实例
-├─ clipboard.py         剪贴板读写 + 敏感识别
-├─ hotkey.py            热键 + 托盘（隐藏消息窗口）
-├─ widgets.py           通用控件 + 布局/事件 helper
-├─ vlist.py             虚拟滚动列表
-├─ dialogs.py           设置/变换/导出弹窗
-└─ app*.py              主类（继承 6 个 mixin）
-query.py                搜索语法解析器
-transform.py            27 项文本变换
-ClawBoardC/             C 语言版本
-packaging/              打包配置（PyInstaller spec、图标、启动脚本、安装包脚本）
-tests/                  回归测试（16 个测试文件）
-└─ testdata/            测试数据生成器
-docs/                   设计文档 + 截图
+```powershell
+git clone https://github.com/pay-and-gain/ClawBoard.git
+cd ClawBoard
+python ClawBoard.py
 ```
 
-依赖方向（禁止循环 import）：`config`（叶子）→ 领域层 → 系统接入层 → UI 控件层 → UI 编排层 → 入口。
+需要 Windows 10/11、Python 3.10+，安装 Python 时包含 Tcl/Tk。**产品运行时只用标准库，无需 pip 安装依赖。** 若只是使用正式版，请使用上方打包下载。
 
-## 🧪 测试
+开发构建使用额外工具 PyInstaller，它不属于产品运行依赖：
 
-```bash
-python tests/test_core.py        # 搜索语法 + 时间时隙
-python tests/test_refactor.py    # 架构重构回归
-python tests/_t14.py             # 内容自适应 + 卡片样式
-python tests/_t22.py             # 工具条布局
-python tests/_t24.py             # 折叠 / 重复复制
-python tests/_t25.py             # 边缘拉伸
-python tests/_t26.py             # UI 等比缩放
-python tests/_t27.py             # 数据目录选址
-python tests/_t28.py             # 粘贴不整窗闪
-python tests/_t29.py             # 变换推荐 + 频率排序
-python tests/_t30.py             # 命令面板
-python tests/_t31.py             # 触发词引擎
-python tests/_t32.py             # 拼音搜索 + 多音字词组
-python tests/_t33.py             # 图片 DIB↔PNG 往返
-python tests/_t34.py             # 内容自动标签
-python tests/_t35.py             # 文件路径记录 CF_HDROP
+```powershell
+python -m pip install pyinstaller
+python -m PyInstaller packaging/ClawBoard.spec --noconfirm
 ```
 
-共 **16 个测试文件、340+ 项断言**，覆盖布局、几何、数据、交互、搜索、粘贴、图片、文件路径等核心路径。
+输出为 `dist/ClawBoard.exe`；安装包脚本见 [`packaging/`](packaging/)。另有 [C/Win32 实现](ClawBoardC/)，功能范围更小，兼容共享 JSON 格式；请勿让两个实例同时写同一份数据。
 
-## 🗺️ 迭代路线
+## 开发与文档
 
-最近五个版本按「① 快赢 → ② 战略 → ③ 可选」三个优化方向迭代，每个版本在 [Releases](../../releases) 独立保留：
+```powershell
+python tests/_t44.py
+python tests/test_core.py
+```
 
-| 版本 | 优化方向 | 内容 |
-|---|---|---|
-| v2.1.0 | ③ 可选 | 内容自动标签 |
-| v2.0.0 | ② 战略 | 图片剪贴板 |
-| v1.9.0 | ② 战略 | 拼音搜索 |
-| v1.8.0 | ① 快赢 | 触发词快速粘贴 |
-| v1.7.0 | ① 快赢 | 命令面板 |
+真实桌面测试会改动系统剪贴板或激活测试窗口，应按验证文档独立执行。构造 App 的测试必须先指定临时数据/日志路径，再启用 `NO_SAVE`，不能拿真实历史作为测试数据。
 
-更早版本（UI 焕新、粘贴体验、安装版修复等）见 [CHANGELOG](CHANGELOG.md)。
-
-## 🎯 设计取舍
-
-- **零第三方依赖**：界面用自带的 tkinter，系统能力全用 ctypes 直调 Win32 —— 不用联网、不会被库版本坑、复制即跑
-- **文本为主、图片为辅**：文本剪贴板是核心，图片同样支持记录、预览与**粘贴**（v2.2.0 起，零依赖手写 PNG 编解码，DIB↔PNG 双向转换）
-- **数据用 JSON 而非 SQLite**：单文件、易备份、可手改；配版本化迁移与原子写保证安全
-- **双语言实现**：Python 版验证复杂逻辑，C 版验证脱离解释器能压到多小
-
-## 📄 许可
-
-[MIT](LICENSE)
+- [新手指南](docs/getting-started.md) · [English guide](docs/getting-started.en.md)
+- [当前架构与维护约定](docs/REFACTOR.md)
+- [Windows 验证与尚未完成的场景](docs/WINDOWS_VALIDATION.md)
+- [项目审阅与性能对照](docs/PROJECT_REVIEW.md)
+- [重构前后对照](docs/PREVIEW_COMPARISON.md)
+- [更新记录](CHANGELOG.md) · [MIT 许可](LICENSE)

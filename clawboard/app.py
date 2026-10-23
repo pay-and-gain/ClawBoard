@@ -14,6 +14,9 @@ from clawboard.app_services import DataMixin, SystemMixin
 from clawboard.app_ui import UiMixin
 from clawboard.app_geometry import GeometryMixin
 from clawboard.app_interact import InteractionMixin
+from clawboard.tk_bridge import TkApplicationBridge
+from clawboard.viewmodels import ViewProjection
+from clawboard.thumbnails import ThumbnailCache
 
 
 class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin):
@@ -30,6 +33,14 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
 
         self.data = self.load_data()
         self.st = self.data['settings']
+        self.bridge = TkApplicationBridge(self)
+        self.application = self.bridge.application
+        self._projection = ViewProjection()
+        self._thumbnail_cache = ThumbnailCache(self.application.image_store)
+        self._search_job = None
+        self._search_trace = None
+        self._filter_result = None
+        self._filter_pending = None
         self._seq = max([int(x.get('seq') or 0) for x in self.data['clip']] or [0])
         apply_theme(self.st)
         # 等比缩放必须在 build_ui 之前：字体走 tk scaling，布局尺寸走 scaled()
@@ -79,8 +90,11 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         self.setup_update_check()
         self.render()
         self.root.after(120, self.render)
-        self.poll_clip()
+        self.root.after(400, self.poll_clip)
         # 补记「程序未运行时复制的内容」：启动那一刻剪贴板里已有、但序列号没变化的最后一条。
         # 放在 poll_clip 之后（首次 poll 因 seq==基线不会记任何东西），用户不会感到重复。
         self.catchup_clipboard()
         self.poll_bg()          # 前台窗口记录已并入本循环，定时器从 3 个降到 2 个
+        self.bridge.start()
+        if self._store.recovery_required:
+            self.root.after(150, lambda: self.tip('数据读取失败，已启用只读保护；请恢复备份后重启'))

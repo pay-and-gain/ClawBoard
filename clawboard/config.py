@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '2.6.1'
+APP_VER = '2.7.0'
 
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
@@ -56,8 +56,9 @@ def _pick_data_dir():
 BASE_DIR = _pick_data_dir()
 DATA_FILE = os.path.join(BASE_DIR, 'ClawBoard数据.json')
 CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
-# 图标是随程序分发的资源，永远在 exe 旁边，不跟着数据目录跑
-ICON_FILE = os.path.join(_EXE_DIR, 'ClawBoard.ico')
+# onefile resources live in PyInstaller's bundle; installed directories may be
+# read-only, so tray setup must not generate an icon beside Program Files/exe.
+ICON_FILE = os.path.join(getattr(sys, '_MEIPASS', _EXE_DIR), 'ClawBoard.ico')
 
 # 保证 query.py / transform.py 与数据文件同目录可用（frozen 模式下同样如此）。
 if _EXE_DIR not in sys.path:
@@ -94,16 +95,16 @@ SCHEMA_VERSION = 3
 # 1.0 是默认；0.5 即"整体缩小一半"。切换后 rebuild UI 生效。
 UI_SCALE_LEVELS = (0.5, 0.75, 1.0, 1.25, 1.5)
 UI_SCALE = 1.0        # 当前缩放系数（档位切换时更新，rebuild 生效）
+DPI_SCALE = 1.0       # 当前主面板所在屏幕；只在主线程稳定切屏时更新，不存入数据文件。
 
 
 def scaled(base):
     """把 100% 基准下的布局像素尺寸按当前 UI 缩放系数等比缩放。
 
-    只作用于「逻辑布局尺寸」（ITEM_H/TOOL_H/BAR_H/CARD_GAP/RESIZE_ZONE 等）；
-    字体走 tk scaling（见 runtime.BASE_SCALING），DPI 由 dpi_scale 单独处理。
-    两者独立相乘，保证整体等比缩放。
+    布局像素 = 逻辑尺寸 × 所在屏 DPI × 用户档位；字体用相同两系数更新 tk scaling。
+    最小窗口尺寸另从逻辑尺寸换算，不能对 scaled() 的结果再乘 DPI。
     """
-    return max(1, int(base * UI_SCALE))
+    return max(1, int(base * UI_SCALE * DPI_SCALE))
 
 
 def rotate_log_if_needed(path, max_bytes=512 * 1024, keep_bytes=256 * 1024):
@@ -186,6 +187,13 @@ class ClipItemDict(TypedDict, total=False):
     time: str
     kind_auto: str          # 渲染缓存（内存态）
     mask_off: bool          # 内存态
+    pinned: int
+    use_count: int
+    tags: List[str]
+    trigger: str
+    image_path: str
+    image_w: int
+    image_h: int
 
 
 class SettingsDict(TypedDict, total=False):
@@ -262,6 +270,10 @@ class AppState:
     _fx_supported: Optional[tuple] = None  # (圆角是否生效, 毛玻璃是否生效)，启动时探测一次
     _pv_job: Optional[str] = None          # 角落预览的防抖定时器 id
     _preview: Optional[object] = None      # 角落预览浮窗实例
+    _dpi_scale: float = 1.0
+    _dpi_pending: Optional[float] = None
+    _dpi_ready: bool = False              # 首次恢复的 geom 已是物理像素，不再乘一次屏幕比例。
+    _dpi_deferred_view: Optional[dict] = None
     # ---- 置顶状态机（全屏程序前台时面板不再置顶）----
     # 拆分三件事，互不混淆：① 用户意图（toggle_pin 改）；② 全屏抑制（只改实际属性）；
     # ③ 实际写进去的值（去重）。把它们混成一个 attributes 读写，会出现

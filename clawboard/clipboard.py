@@ -16,6 +16,14 @@ from clawboard.win32 import (
     CF_NAME_EXCLUDE, CF_NAME_INCLUDE_HISTORY, shell32,
 )
 
+k32.GlobalFree.argtypes = [ctypes.c_void_p]
+k32.GlobalFree.restype = ctypes.c_void_p
+k32.GlobalSize.argtypes = [ctypes.c_void_p]
+k32.GlobalSize.restype = ctypes.c_size_t
+
+# 这是自写确认元数据，不是 Windows 的隐私/历史排除标记。
+_OWN_WRITE_FORMAT = 'ClawBoard.WriteToken.v1'
+
 
 def clip_seq():
     try:
@@ -40,6 +48,69 @@ def clip_read():
             k32.GlobalUnlock(h)
     finally:
         u32.CloseClipboard()
+
+
+def _write_own_marker():
+    """在已有写事务中附加随机 token；失败不影响已写好的正文。"""
+    handle = None
+    transferred = False
+    try:
+        fmt = _clip_fmt_id(_OWN_WRITE_FORMAT)
+        if not fmt:
+            return None
+        token = os.urandom(16)
+        handle = k32.GlobalAlloc(GMEM_MOVEABLE, len(token))
+        if not handle:
+            return None
+        pointer = k32.GlobalLock(handle)
+        if not pointer:
+            return None
+        try:
+            ctypes.memmove(pointer, token, len(token))
+        finally:
+            k32.GlobalUnlock(handle)
+        transferred = bool(u32.SetClipboardData(fmt, handle))
+        return (fmt, token) if transferred else None
+    except Exception:
+        return None
+    finally:
+        if handle and not transferred:
+            try:
+                k32.GlobalFree(handle)
+            except Exception:
+                pass
+
+
+def _ack_own_write(sequence, marker):
+    """只在读锁内核实 token 后接受 CloseClipboard 合成格式后的序列。
+
+    关闭写事务后外部应用可能立刻复制；直接读当前序列会把它误当成自写。
+    无法重新加锁或标记已变时，只确认写事务内取得的安全序列。
+    """
+    opened = False
+    try:
+        if marker and u32.OpenClipboard(None):
+            opened = True
+            fmt, token = marker
+            handle = u32.GetClipboardData(fmt)
+            if handle and k32.GlobalSize(handle) >= len(token):
+                pointer = k32.GlobalLock(handle)
+                if pointer:
+                    try:
+                        if ctypes.string_at(pointer, len(token)) == token:
+                            sequence = clip_seq()
+                    finally:
+                        k32.GlobalUnlock(handle)
+    except Exception:
+        pass
+    finally:
+        if opened:
+            try:
+                u32.CloseClipboard()
+            except Exception:
+                pass
+    runtime.LAST_SEQ = sequence
+    runtime.LAST_WRITE_SEQ = sequence
 
 
 # DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0) 返回文件个数（不取路径）
@@ -106,7 +177,7 @@ def clip_write_files(paths):
     """把一组文件路径写进剪贴板（CF_HDROP）。
 
     与 clip_write 的区别：资源管理器复制文件时**只放 CF_HDROP、不放文本**，
-    所以这里也保持一致只写 CF_HDROP —— 粘贴到聊天窗口是「发送文件」、粘贴到资源管理器
+    所以这里也保持文件格式、不附加文本 —— 粘贴到聊天窗口是「发送文件」、粘贴到资源管理器
     是「复制文件」，而不是粘出一串路径文字。
     """
     paths = [p for p in (paths or []) if p]
@@ -116,20 +187,25 @@ def clip_write_files(paths):
     if not u32.OpenClipboard(None):
         return False
     try:
-        u32.EmptyClipboard()
+        if not u32.EmptyClipboard():
+            return False
         h = k32.GlobalAlloc(GMEM_MOVEABLE, len(raw))
         if not h:
             return False
         p = k32.GlobalLock(h)
         if not p:
+            k32.GlobalFree(h)
             return False
         ctypes.memmove(p, raw, len(raw))
         k32.GlobalUnlock(h)
         if not u32.SetClipboardData(CF_HDROP, h):
+            k32.GlobalFree(h)
             return False
+        marker = _write_own_marker()
+        sequence = clip_seq()
     finally:
         u32.CloseClipboard()
-    runtime.LAST_SEQ = clip_seq()
+    _ack_own_write(sequence, marker)
     return True
 
 
@@ -167,20 +243,25 @@ def clip_write(text):
     if not u32.OpenClipboard(None):
         return False
     try:
-        u32.EmptyClipboard()
+        if not u32.EmptyClipboard():
+            return False
         h = k32.GlobalAlloc(GMEM_MOVEABLE, len(data) + 2)
         if not h:
             return False
         p = k32.GlobalLock(h)
         if not p:
+            k32.GlobalFree(h)
             return False
         ctypes.memmove(p, data, len(data))
         k32.GlobalUnlock(h)
         if not u32.SetClipboardData(CF_UNICODETEXT, h):
+            k32.GlobalFree(h)
             return False
+        marker = _write_own_marker()
+        sequence = clip_seq()
     finally:
         u32.CloseClipboard()
-    runtime.LAST_SEQ = clip_seq()
+    _ack_own_write(sequence, marker)
     return True
 
 
@@ -231,52 +312,5 @@ def clip_is_private():
 # 导入时把剪贴板序列号缓存初始化为当前值，避免启动后立刻把剪贴板旧内容重复入库。
 runtime.LAST_SEQ = clip_seq()
 
-SENS_PATTERNS = [
-    ('身份证', re.compile(r'(?<!\d)\d{17}[\dXx](?!\d)')),
-    ('银行卡', re.compile(r'(?<!\d)\d{16,19}(?!\d)')),
-    ('手机号', re.compile(r'(?<!\d)1[3-9]\d{9}(?!\d)')),
-    ('邮箱', re.compile(r'[\w.+-]+@[\w-]+\.[\w.]{2,}')),
-    ('Token', re.compile(r'(?:sk-|ghp_|xox[baprs]-|Bearer\s+)[A-Za-z0-9_\-]{8,}')),
-    ('密码', re.compile(r'(?i)(password|passwd|pwd|密码|口令)\s*[:：=]\s*\S{4,}')),
-]
-
-
-# 每条敏感规则可带一个「廉价前置判据」：跑正则前先做 O(n) 的 `in` 预判，命中才跑正则。
-# 为什么必须：email 正则 [\w.+-]+@... 在「长且**不含 @**」的文本上是 O(n²) —— 每个起点都把
-# [\w.+-]+ 贪婪匹配到底、再逐字回溯找 @（实测 60K 字符≈6.6s、200K≈130s）。补记把它搬到了
-# 启动主线程 → 会假死；实时复制同样中招。'@' 缺失时正则必不可能命中，预筛**零功能损失**。
-# 逐条实测：身份证/银行卡/手机号是定长数字+边界（线性），Token/密码是字面前缀（线性），
-# 均无需预筛（见 tests/_t42.py 的耗时回归）。
-_SENS_PREFILTER = {'邮箱': '@'}
-# 含 '@' 的**超长**文本仍是 O(n²)（'@' 只是缩小平方路径的范围、没消除）。超过该长度即跳过
-# email 正则，为最坏耗时兜底。代价见 config.EMAIL_SCAN_MAXLEN 注释（安全相关、非静默）。
-_SENS_MAXLEN = {'邮箱': EMAIL_SCAN_MAXLEN}
-
-
-def scan_sensitive(text):
-    try:
-        text = text or ''
-        out = []
-        for name, pat in SENS_PATTERNS:
-            need = _SENS_PREFILTER.get(name)
-            if need and need not in text:
-                continue
-            cap = _SENS_MAXLEN.get(name, 0)
-            if cap and len(text) > cap:
-                continue
-            if pat.search(text):
-                out.append(name)
-        return out
-    except Exception:
-        return []
-
-
-def mask_text(text, hits):
-    def rep(m):
-        s = m.group(0)
-        return s[:3] + '*' * max(3, len(s) - 5) + s[-2:]
-    out = text
-    for name, pat in SENS_PATTERNS:
-        if name in hits:
-            out = pat.sub(rep, out)
-    return out
+# Compatibility exports; recognition itself has no Win32 dependency.
+from clawboard.privacy import SENS_PATTERNS, scan_sensitive, mask_text

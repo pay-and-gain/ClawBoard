@@ -17,6 +17,7 @@ from clawboard import runtime
 from clawboard.config import (BAR_H, MIN_W, MIN_H, RESIZE_ZONE,
                               UI_SCALE_LEVELS, scaled)
 from clawboard.theme import T, apply_theme
+from clawboard.tk_dpi import DpiMixin
 from clawboard.win32 import (u32, monitors, dpi_scale, visible_ratio,
                              apply_window_effects)
 
@@ -25,7 +26,7 @@ from clawboard.win32 import (u32, monitors, dpi_scale, visible_ratio,
 _NO_POS = 10 ** 6
 
 
-class GeometryMixin:
+class GeometryMixin(DpiMixin):
     # ---------- 窗口外观（圆角 + 毛玻璃）----------
     def apply_effects(self):
         """应用窗口外观开关（圆角 / Acrylic 毛玻璃）。
@@ -52,8 +53,9 @@ class GeometryMixin:
         实时 tk scaling，绝不回写 BASE_SCALING —— 否则 dpi_scale() 双重缩放。
         """
         # frozen 环境下 tk scaling 会延迟到窗口映射后才反映真实 DPI，
-        # 所以 BASE_SCALING 用 system_dpi 推算（= 1.333 × DPI 系数），不读 tk scaling。
-        runtime.BASE_SCALING = 1.3333333 * dpi_scale(self.root)
+        # 所以 BASE_SCALING 从 Win32 窗口 DPI 推算，不读已受用户档位影响的 tk scaling。
+        self._dpi_scale = config.DPI_SCALE = dpi_scale(self.root)
+        runtime.BASE_SCALING = (96 / 72) * self._dpi_scale
         lvl = float(self.st.get('ui_scale') or 1.0)
         if lvl not in UI_SCALE_LEVELS:
             lvl = 1.0
@@ -103,7 +105,7 @@ class GeometryMixin:
         """面板最小**物理**尺寸：按 DPI 换算，保证在 125%/150% 缩放的屏幕上
         也不会小到"正文装不下几个字"（否则就是用户看到的那种"里面没有内容"）；
         再乘 UI 缩放档位 —— 整体缩小时最小尺寸也跟着等比缩小。"""
-        k = dpi_scale(self.root)
+        k = config.DPI_SCALE
         # 必须用 config.UI_SCALE（模块属性），不能 import 快照 ——
         # 快照在 set_ui_scale 更新 config.UI_SCALE 后不会跟着变
         return int(MIN_W * k * config.UI_SCALE), int(MIN_H * k * config.UI_SCALE)
@@ -116,9 +118,9 @@ class GeometryMixin:
             # 折叠态启动时 _restore 还没被赋过值，先把"展开后该回到哪"算好存起来。
             # 漏了这一步的话，第一次点「—」展开会 AttributeError（真实 crash.log 见过）
             self._restore = self._expanded_geometry()
-            w, h, x, y = self.fit_geometry(210, scaled(BAR_H), *(self._saved_pos()))
+            w, h, x, y = self.fit_geometry(scaled(210), scaled(BAR_H), *(self._saved_pos()))
             self.root.geometry('%dx%d+%d+%d' % (w, h, x, y))
-            self.root.minsize(160, scaled(BAR_H))
+            self.root.minsize(scaled(160), scaled(BAR_H))
             self.body.pack_forget()
             return
         mw, mh = self.min_size()
@@ -183,7 +185,7 @@ class GeometryMixin:
     @staticmethod
     def primary_monitor():
         for m in monitors():
-            if m[0] <= 0 <= m[2] and m[1] <= 0 <= m[3]:
+            if m[0] <= 0 < m[2] and m[1] <= 0 < m[3]:
                 return m
         return monitors()[0]
 
@@ -485,7 +487,7 @@ class GeometryMixin:
         cx = self.root.winfo_x() + self.root.winfo_width() // 2
         cy = self.root.winfo_y() + self.root.winfo_height() // 2
         for (l, t, r, b) in monitors():
-            if l <= cx <= r and t <= cy <= b:
+            if l <= cx < r and t <= cy < b:
                 return (l, t, r, b)
         return self.primary_monitor()
 
@@ -521,12 +523,12 @@ class GeometryMixin:
         if self.collapsed:
             self._restore = self.root.geometry()
             self.body.pack_forget()
-            self.root.minsize(160, scaled(BAR_H))   # 先放开最小尺寸，否则折叠不成一条标题栏
+            self.root.minsize(scaled(160), scaled(BAR_H))   # 先放开最小尺寸，否则折叠不成一条标题栏
             if self.st.get('collapse_to_corner', True):
-                x, y = self.corner_pos(210, scaled(BAR_H))     # 贴到右下角
+                x, y = self.corner_pos(scaled(210), scaled(BAR_H))     # 贴到右下角
             else:
                 x, y = self.root.winfo_x(), self.root.winfo_y()
-            self.root.geometry('210x%d+%d+%d' % (scaled(BAR_H), x, y))
+            self.root.geometry('%dx%d+%d+%d' % (scaled(210), scaled(BAR_H), x, y))
         else:
             mw, mh = self.min_size()
             self.root.minsize(mw, mh)

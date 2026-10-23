@@ -1,0 +1,25 @@
+name: Service and compatibility tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  regression:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python modules
+        run: python -m compileall -q clawboard ClawBoard.py query.py transform.py
+      - name: Run isolated regression suite
+        run: python tests/_t44.py

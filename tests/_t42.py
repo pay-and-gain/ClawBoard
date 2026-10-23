@@ -1,570 +1,205 @@
-# -*- coding: utf-8 -*-
-"""补记「程序未运行时复制的内容」回归自测（A 方案 + B 方案落地）。
+"""Windows Tk catch-up regression for the asynchronous application bridge.
 
-覆盖：
-A. 库为空 → 不补读（clip 仍为空、onboard.is_empty_data 仍为 True）—— 保住首次引导卡片
-B. 库非空 + 剪贴板内容与最新一条**不同** → 补 1 条（不多不少）
-C. 库非空 + 剪贴板内容与最新一条**相同** → 不补（去重）
-D. 剪贴板为空 → 不补
-E. listen=False → 不补
-F. 图片：与最新一条图片相同 → 不补；不同 → 补；最新一条不是图片 → 补
-G. 「别记录我」标记（smart_private）/ skip_sensitive → 不补
-H. **不播复制音**：把 sound.play_copy 换成探针，断言调用 0 次（文本与图片两条路径都验）
-I. 重复调用 catchup_clipboard() 不会把同一条补多次
-J. 触发点①「监听」开关由关变开 → 补一次；触发点② 启动流程调用了 catchup_clipboard
-K. tip 文案：未开开机自启时追加建议、已开时不追加
-L. 补记**应用** min_len / max_len 长度过滤（补记是自动行为，必须尊重用户的过滤设置）
-M. manual 路径（拆词/变换存新条目）行为未变：仍跳过长度过滤、不播复制音；
-   常规 ingest（quiet=False）仍播复制音（quiet 未误伤常规路径）
-N. 长文本正则预筛：无 '@' 时**根本不调用** email 正则（行为断言）；含 '@' 的超长文本被
-   上界跳过；60K/200K 耗时 < 1s（优化前 60K≈6.6s / 200K≈130s）
-O. 数据不污染：真实 ClawBoard数据.json sha256 前后一致、无新增 .bak
-
-为什么全程 stub 剪贴板：本机剪贴板会被外部进程锁定（OpenClipboard → ERROR_ACCESS_DENIED，
-_t35/_t37 已知环境问题），直接读真剪贴板会不稳定；补记逻辑只依赖「读到的内容」，用 stub
-喂入受控内容即可完整覆盖分支。
-
-数据安全：import 业务模块前把 app_services.DATA_FILE、timefmt.DATA_FILE、以及
-app_services.BASE_DIR（图片落盘目录）**三个**都指向临时目录，并置 runtime.NO_SAVE /
-C.NO_SAVE = True。
+Synthetic snapshots only. Temporary config and NO_SAVE precede app imports.
 """
-import ctypes
-import glob
 import hashlib
-import inspect
 import os
+from pathlib import Path
+import struct
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
 
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(2)   # 与产品一致的 DPI 感知
-except Exception:
-    pass
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from tools.windows_test_guard import acquire_desktop_test_lease
+acquire_desktop_test_lease()
+TEMP = tempfile.TemporaryDirectory(prefix='cb-catchup-')
+from clawboard import config, runtime
+config.BASE_DIR = TEMP.name
+config.DATA_FILE = str(Path(TEMP.name) / 'ClawBoard数据.json')
+config.CRASH_LOG = str(Path(TEMP.name) / 'crash.log')
+runtime.NO_SAVE = True
+runtime.LAST_WRITE_SEQ = -1
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-# ---- 重定向落盘目标（必须在 import 业务模块之前）----
-TMP_DIR = tempfile.mkdtemp(prefix='cb_t42_')
-TMP_DATA = os.path.join(TMP_DIR, 'ClawBoard数据.json')
-
-import clawboard.app_services as S            # noqa: E402
-S.DATA_FILE = TMP_DATA
-S.CRASH_LOG = os.path.join(TMP_DIR, 'crash.log')
-S.BASE_DIR = TMP_DIR                          # 图片落盘也走临时目录，绝不污染真实 images/
-
-import clawboard.timefmt as TF                # noqa: E402
-TF.DATA_FILE = TMP_DATA                       # 与 app_services 同步，避免 backup_data 复制真实存档
-
-from clawboard import runtime as RT           # noqa: E402
-RT.NO_SAVE = True
-
-from clawboard import onboard                 # noqa: E402
-from clawboard.onboard import is_empty_data   # noqa: E402
-import clawboard.clipboard as CB              # noqa: E402
-import clawboard.tag as TG                    # noqa: E402
-from clawboard.config import EMAIL_SCAN_MAXLEN  # noqa: E402
-
-OK = True
-LOG = []
-
-
-def check(name, cond, extra=''):
-    global OK
-    if not cond:
-        OK = False
-    LOG.append('%s  %s%s' % ('OK  ' if cond else 'FAIL', name,
-                             ('  ' + extra) if extra else ''))
-
-
-def section(t):
-    LOG.append('')
-    LOG.append('== %s ==' % t)
-
-
-REAL_DATA = os.path.join(ROOT, 'ClawBoard数据.json')
-
-
-def file_hash(p):
-    try:
-        with open(p, 'rb') as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except Exception:
-        return None
-
-
-def sidecars():
-    return sorted(os.path.basename(p) for p in glob.glob(REAL_DATA + '*'))
-
-
-HASH_BEFORE = file_hash(REAL_DATA)             # 期望 == 5c21d32f...4079
-FILES_BEFORE = sidecars()
-
-# ============================================================
-# 剪贴板 stub：用受控内容驱动补记逻辑，不动真剪贴板
-# ============================================================
-# kind: 'empty'（初始值，保证构造期 poll_clip 即便偶发触发也读不到东西）
-#       'text' / 'image'
-CLIP = {'kind': 'empty', 'text': None, 'private': False, 'image': None, 'files': []}
-
-
-def _stub_clip_is_private():
-    return bool(CLIP['private'])
-
-
-def _stub_has_image():
-    return CLIP['kind'] == 'image'
-
-
-def _stub_clip_read():
-    return CLIP['text'] if CLIP['kind'] == 'text' else None
-
-
-def _stub_clip_read_files():
-    return list(CLIP['files'] or [])
-
-
-def _stub_read_dib():
-    return (b'DIBMARK' if CLIP['kind'] == 'image' else None)
-
-
-def _stub_dib_to_png(dib):
-    # CLIP['image'] 预先放好 (png 字节, 宽, 高)
-    return CLIP['image']
-
-
-def _stub_capture_source(*a, **k):
-    # 固定来源，避免 ingest 因 src=='unknown' 另起后台补抓线程
-    return ('probe.exe', 0)
-
-
-S.clip_is_private = _stub_clip_is_private
-S.clipboard_has_image = _stub_has_image
-S.clip_read = _stub_clip_read
-S.clip_read_files = _stub_clip_read_files
-S.read_clipboard_dib = _stub_read_dib
-S.dib_to_png = _stub_dib_to_png
-S.capture_source = _stub_capture_source
-# 固定剪贴板序列号 → 轮询永远看不到"变化"，不会在测试间隙偷偷入库
-RT.LAST_SEQ = 987654321
-S.clip_seq = lambda: 987654321
-
-import tkinter as tk          # noqa: E402
-import ClawBoard as C         # noqa: E402
-
+import tkinter as tk
+import ClawBoard as C
 C.NO_SAVE = True
-
-root = tk.Tk()
-root.geometry('420x560+80+80')
-app = C.ClawBoard(root)
-if app.collapsed:
-    app.collapsed = False
-    app.st['collapsed'] = False
-    app.body.pack(fill='both', expand=True)
-    app.root.minsize(*app.min_size())
-root.update()
+from clawboard.services import CaptureResult, ClipboardSnapshot
+from clawboard.image import dib_to_png
+from clawboard.onboard import is_empty_data
+from clawboard.privacy import scan_sensitive
+from clawboard.tag import detect_tags
 
 
-def item(text, **kw):
-    d = {'id': 'it_%d' % id(text), 'text': text, 'created_at': 1000, 'updated_at': 1000,
-         'seq': 1, 'content_type': 'text', 'copy_count': 1, 'fav': 0, 'is_estimated': 0}
-    d.update(kw)
-    return d
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
 
 
-def set_lib(items):
-    """设置剪贴板库（groups 置空，避免影响 is_empty_data 判定）。"""
-    app.data['clip'] = list(items)
-    app.data['groups'] = [{'name': '默认', 'items': []}]
+REAL_DATA = [ROOT / 'ClawBoard数据.json',
+             Path.home() / 'Desktop' / 'cut' / 'ClawBoard数据.json',
+             Path(os.environ['APPDATA']) / 'ClawBoard' / 'ClawBoard数据.json']
+BEFORE = {path: digest(path) for path in REAL_DATA}
 
 
-def reset_clip(kind='empty', text=None, private=False, image=None, files=None):
-    CLIP['kind'] = kind
-    CLIP['text'] = text
-    CLIP['private'] = private
-    CLIP['image'] = image
-    CLIP['files'] = files or []
+class CatchupTests(unittest.TestCase):
+    def setUp(self):
+        self.seq = 1000
+        self.sample = CaptureResult('empty')
+        self.patches = [
+            patch('clawboard.tk_bridge.clip_seq', lambda: self.seq),
+            patch('clawboard.tk_bridge.read_snapshot', lambda *a, **k: self.sample),
+            patch.object(C.ClawBoard, 'setup_system',
+                         lambda app: setattr(app, 'hw', SimpleNamespace(clipboard_listener=False))),
+        ]
+        for p in self.patches:
+            p.start()
+        self.root = tk.Tk()
+        self.app = C.ClawBoard(self.root)
+        self.app.st.update(listen=True, smart_private=True, skip_sensitive=False,
+                           sound_copy=True, show_toast=False)
+        self.played = patch('clawboard.sound.play_copy').start()
+        self.addCleanup(patch.stopall)
+        self.root.update()
+        self.seed('existing')
+
+    def tearDown(self):
+        try:
+            self.wait()
+            self.app.bridge.close()
+        finally:
+            for timer in self.root.tk.splitlist(self.root.tk.call('after', 'info')):
+                self.root.after_cancel(timer)
+            self.root.destroy()
+            for p in reversed(self.patches):
+                p.stop()
+        self.assertFalse(Path(config.DATA_FILE).exists())
+        self.assertEqual({p: digest(p) for p in REAL_DATA}, BEFORE)
+
+    def seed(self, text=None):
+        self.app.data['clip'] = [] if text is None else [dict(
+            id='seed', text=text, seq=1, created_at=1000, updated_at=1000,
+            content_type='text', copy_count=1, fav=0)]
+        self.app.data['groups'] = [{'name': '默认', 'items': []}]
+
+    def wait(self):
+        end = time.monotonic() + 3
+        while self.app.application.pending and time.monotonic() < end:
+            self.root.update()
+            self.app.application.drain()
+            time.sleep(.002)
+        self.assertFalse(self.app.application.pending, 'capture did not settle')
+
+    def sample_text(self, text):
+        self.seq += 1
+        self.sample = CaptureResult('captured', ClipboardSnapshot(
+            self.seq, 'text', text=text, source_app='synthetic.exe'))
+
+    def catchup(self, text):
+        self.sample_text(text)
+        accepted = self.app.catchup_clipboard()
+        self.wait()
+        return accepted
+
+    def test_empty_library_preserves_first_run(self):
+        self.seed()
+        self.assertFalse(self.catchup('new copy'))
+        self.assertTrue(is_empty_data(self.app.data))
+
+    def test_new_text_once_and_quiet(self):
+        self.assertTrue(self.catchup('new copy'))
+        self.assertEqual(len(self.app.data['clip']), 2)
+        self.assertEqual(self.app.data['clip'][0]['text'], 'new copy')
+        self.assertTrue(self.app.catchup_clipboard())
+        self.wait()
+        self.assertEqual(len(self.app.data['clip']), 2)
+        self.played.assert_not_called()
+
+    def test_duplicate_empty_private_and_sensitive(self):
+        self.catchup('existing')
+        self.assertEqual(len(self.app.data['clip']), 1)
+        for status in ('empty', 'private'):
+            self.seq += 1
+            self.sample = CaptureResult(status)
+            self.app.catchup_clipboard()
+            self.wait()
+            self.assertEqual(len(self.app.data['clip']), 1)
+        self.app.st['skip_sensitive'] = True
+        self.catchup('phone 13800138000')
+        self.assertEqual(len(self.app.data['clip']), 1)
+
+    def test_disabled_and_resume(self):
+        self.app.st['listen'] = False
+        self.assertFalse(self.catchup('while paused'))
+        self.app.toggle_listen()
+        self.wait()
+        self.assertTrue(self.app.st['listen'])
+        self.assertEqual(self.app.data['clip'][0]['text'], 'while paused')
+
+    def test_length_filters_and_manual_override(self):
+        self.app.st['min_len'] = 5
+        self.catchup('ab')
+        self.assertEqual(len(self.app.data['clip']), 1)
+        self.catchup('abcdef')
+        self.assertEqual(len(self.app.data['clip']), 2)
+        self.app.st['max_len'] = 3
+        self.catchup('another long copy')
+        self.assertEqual(len(self.app.data['clip']), 2)
+        self.assertTrue(self.app.ingest('ab', manual=True))
+        self.assertEqual(self.app.data['clip'][0]['text'], 'ab')
+        self.played.assert_not_called()
+
+    def test_image_catchup_deduplicates_and_no_save_blocks_files(self):
+        dib = struct.pack('<IiiHHIIiiII', 40, 1, 1, 1, 32, 0, 4, 0, 0, 0, 0)
+        dib += bytes((10, 20, 30, 255))
+        png, _, _ = dib_to_png(dib)
+        image_dir = Path(TEMP.name) / 'images'
+        image_dir.mkdir(exist_ok=True)
+        (image_dir / 'fixture.png').write_bytes(png)
+        self.seed('[图片]')
+        self.app.data['clip'][0].update(content_type='image', image_path='fixture.png')
+        self.seq += 1
+        self.sample = CaptureResult('captured', ClipboardSnapshot(
+            self.seq, 'image', payload=dib, source_app='synthetic.exe'))
+        self.app.catchup_clipboard()
+        self.wait()
+        self.assertEqual(len(self.app.data['clip']), 1)
+        self.seed('text before image')
+        self.app.catchup_clipboard()
+        self.wait()
+        self.assertEqual(len(self.app.data['clip']), 2)
+        self.assertEqual(self.app.data['clip'][0]['content_type'], 'image')
+        self.assertNotIn('image_path', self.app.data['clip'][0])
+        self.assertEqual(sorted(p.name for p in image_dir.iterdir()), ['fixture.png'])
+        self.played.assert_not_called()
+
+    def test_manual_and_regular_sound(self):
+        self.app.ingest('manual synthetic', manual=True)
+        self.played.assert_not_called()
+        self.app.ingest('regular synthetic')
+        self.played.assert_called_once()
+
+    def test_long_text_and_email_recognition(self):
+        for size in (60000, 200000):
+            start = time.perf_counter()
+            scan_sensitive('a' * size)
+            detect_tags('a' * size)
+            self.assertLess(time.perf_counter() - start, 1)
+        self.assertIn('邮箱', scan_sensitive('alice@example.com'))
+        self.assertIn('email', detect_tags('alice@example.com'))
+
+    def test_catchup_tip_autostart(self):
+        with patch('clawboard.system.get_autostart', return_value=(False, '')):
+            self.assertIn('开机自启', self.app._catchup_tip())
+        with patch('clawboard.system.get_autostart', return_value=(True, '')):
+            self.assertNotIn('开机自启', self.app._catchup_tip())
 
 
-# 基线状态：默认监听开、smart_private 开、skip_sensitive 关
-app.st['listen'] = True
-app.st['smart_private'] = True
-app.st['skip_sensitive'] = False
-app.st['sound_copy'] = False
-
-# ============================================================
-# A. 库为空 → 不补读
-# ============================================================
-section('A. 库为空 → 不补读（保住首次引导）')
-set_lib([])
-reset_clip('text', text='程序没运行时复制的内容')
-r = app.catchup_clipboard()
-check('库为空 → 不补', r is False, 'got=%r' % r)
-check('库为空 → clip 仍为空', app.data['clip'] == [])
-check('库为空 → onboard.is_empty_data 仍为 True', is_empty_data(app.data) is True)
-
-# ============================================================
-# B. 库非空 + 与最新一条不同 → 补 1 条
-# ============================================================
-section('B. 库非空 + 不同 → 补 1 条')
-set_lib([item('已存在的内容')])
-reset_clip('text', text='关程序期间新复制的内容')
-n0 = len(app.data['clip'])
-r = app.catchup_clipboard()
-check('返回 True', r is True, 'got=%r' % r)
-check('恰好补 1 条', len(app.data['clip']) == n0 + 1,
-      'n0=%d n1=%d' % (n0, len(app.data['clip'])))
-check('补的是新内容且在首位', app.data['clip'][0]['text'] == '关程序期间新复制的内容')
-
-# ============================================================
-# C. 库非空 + 与最新一条相同 → 不补
-# ============================================================
-section('C. 与最新一条相同 → 不补（去重）')
-set_lib([item('同一条内容')])
-reset_clip('text', text='同一条内容')
-r = app.catchup_clipboard()
-check('相同 → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-
-# ============================================================
-# D. 剪贴板为空 → 不补
-# ============================================================
-section('D. 剪贴板为空 → 不补')
-set_lib([item('x')])
-reset_clip('empty')
-r = app.catchup_clipboard()
-check('空剪贴板 → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-
-# ============================================================
-# E. listen=False → 不补
-# ============================================================
-section('E. listen=False → 不补')
-set_lib([item('x')])
-reset_clip('text', text='监听关闭期间复制的内容')
-app.st['listen'] = False
-r = app.catchup_clipboard()
-check('listen=False → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-app.st['listen'] = True
-
-# ============================================================
-# F. 图片：相同 → 不补；不同 → 补；最新一条不是图片 → 补
-# ============================================================
-section('F. 图片去重')
-img_dir = os.path.join(TMP_DIR, 'images')
-os.makedirs(img_dir, exist_ok=True)
-PNG_A = b'\x89PNG\r\n\x1a\nA' + b'a' * 32
-PNG_B = b'\x89PNG\r\n\x1a\nB' + b'b' * 32
-with open(os.path.join(img_dir, 'imgA.png'), 'wb') as f:
-    f.write(PNG_A)
-
-# F1. 与最新一条图片相同 → 不补
-set_lib([item('[图片]', content_type='image', image_path='imgA.png')])
-reset_clip('image', image=(PNG_A, 10, 10))
-r = app.catchup_clipboard()
-check('图片与最新一条相同 → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-
-# F2. 与最新一条图片不同 → 补
-set_lib([item('[图片]', content_type='image', image_path='imgA.png')])
-reset_clip('image', image=(PNG_B, 10, 10))
-r = app.catchup_clipboard()
-check('图片不同 → 补', r is True, 'got=%r' % r)
-check('补 1 张图片且在首位',
-      len(app.data['clip']) == 2 and app.data['clip'][0]['content_type'] == 'image')
-check('补的图片文件已落盘（临时目录）',
-      os.path.exists(os.path.join(img_dir, app.data['clip'][0]['image_path'])))
-
-# F3. 最新一条不是图片 → 补
-set_lib([item('一段普通文本')])
-reset_clip('image', image=(PNG_B, 10, 10))
-r = app.catchup_clipboard()
-check('最新一条不是图片 → 补', r is True, 'got=%r' % r)
-check('补的是图片且在首位',
-      len(app.data['clip']) == 2 and app.data['clip'][0]['content_type'] == 'image')
-
-# ============================================================
-# G. smart_private / skip_sensitive → 不补
-# ============================================================
-section('G. smart_private / skip_sensitive → 不补')
-set_lib([item('x')])
-reset_clip('text', text='带「别记录我」标记的内容', private=True)
-r = app.catchup_clipboard()
-check('smart_private → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-
-app.st['skip_sensitive'] = True
-set_lib([item('x')])
-reset_clip('text', text='我的手机号 13800138000', private=False)
-r = app.catchup_clipboard()
-check('skip_sensitive → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-app.st['skip_sensitive'] = False
-
-# ============================================================
-# H. 不播复制音（探针断言 0 次）
-# ============================================================
-section('H. 补记不播复制音')
-_played = {'n': 0}
-_orig_play = S.sound.play_copy
-S.sound.play_copy = lambda: _played.__setitem__('n', _played['n'] + 1)
-try:
-    app.st['sound_copy'] = True         # 开关打开，若补记误播就会被抓到
-    # 文本路径
-    set_lib([item('x')])
-    reset_clip('text', text='补记文本')
-    app.catchup_clipboard()
-    # 图片路径
-    set_lib([item('x')])
-    reset_clip('image', image=(PNG_B, 6, 6))
-    app.catchup_clipboard()
-finally:
-    S.sound.play_copy = _orig_play
-    app.st['sound_copy'] = False
-check('文本+图片补记均不播复制音（调用 0 次）', _played['n'] == 0,
-      '实际 %d' % _played['n'])
-
-# ============================================================
-# I. 重复调用不会补多次
-# ============================================================
-section('I. 重复调用不重复补')
-set_lib([item('第一条')])
-reset_clip('text', text='第二条')
-r1 = app.catchup_clipboard()
-r2 = app.catchup_clipboard()
-r3 = app.catchup_clipboard()
-check('首次补记成功', r1 is True)
-check('再次调用返回 False', r2 is False and r3 is False)
-check('只补了一条（总数 2）', len(app.data['clip']) == 2,
-      'got=%d' % len(app.data['clip']))
-check('首位是补记的“第二条”', app.data['clip'][0]['text'] == '第二条')
-
-# ============================================================
-# J. 触发点
-# ============================================================
-section('J. 两个触发点')
-# 触发点①：监听由关变开
-set_lib([item('已有')])
-app.st['listen'] = True
-app.toggle_listen()                     # -> False（关）
-reset_clip('text', text='关闭监听期间复制的内容')
-app.toggle_listen()                     # -> True（开，应触发补记）
-check('重开监听 → 补记关闭期间的内容',
-      any(x.get('text') == '关闭监听期间复制的内容' for x in app.data['clip']))
-check('重开后 listen=True', app.st['listen'] is True)
-
-# 触发点②：启动流程里调用了 catchup_clipboard
-_src = inspect.getsource(C.ClawBoard.__init__)
-check('启动流程调用 catchup_clipboard', 'catchup_clipboard' in _src)
-check('启动流程里 catchup 在 poll_clip 之后',
-      _src.index('catchup_clipboard') > _src.index('self.poll_clip()'),
-      'app.py __init__ 顺序')
-
-# ============================================================
-# K. tip 文案随「开机自启」状态变化
-# ============================================================
-section('K. tip 文案')
-_orig_ga = S.get_autostart
-try:
-    S.get_autostart = lambda: (False, '')
-    t_off = app._catchup_tip()
-    S.get_autostart = lambda: (True, r'"py" "ClawBoard.py"')
-    t_on = app._catchup_tip()
-finally:
-    S.get_autostart = _orig_ga
-check('补记 tip 说明来源', '已补记程序未运行时复制的内容' in t_off)
-check('未开开机自启 → 追加建议', '开机自启' in t_off, 'tip=%r' % t_off)
-check('已开开机自启 → 不追加建议', '开机自启' not in t_on, 'tip=%r' % t_on)
-
-# ============================================================
-# L. 补记应用长度过滤（min_len / max_len）—— 补记是自动行为，必须尊重过滤设置
-# ============================================================
-section('L. 补记应用长度过滤')
-check('ingest 有独立 quiet 参数', 'quiet' in inspect.signature(app.ingest).parameters)
-app.st['skip_sensitive'] = False
-
-# L1. 短于 min_len → 不补
-app.st['min_len'] = 5
-app.st['max_len'] = 0
-set_lib([item('已有')])
-reset_clip('text', text='ab')          # 2 字符 < 5
-r = app.catchup_clipboard()
-check('短于 min_len → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-
-# L2. 达到 min_len → 补
-app.st['min_len'] = 5
-set_lib([item('已有')])
-reset_clip('text', text='abcdef')      # 6 字符 >= 5
-r = app.catchup_clipboard()
-check('达到 min_len → 补', r is True and len(app.data['clip']) == 2,
-      'r=%r n=%d' % (r, len(app.data['clip'])))
-
-# L3. 长于 max_len → 不补
-app.st['min_len'] = 0
-app.st['max_len'] = 3
-set_lib([item('已有')])
-reset_clip('text', text='abcdef')      # 6 字符 > 3
-r = app.catchup_clipboard()
-check('长于 max_len → 不补', r is False, 'got=%r' % r)
-check('条数不变', len(app.data['clip']) == 1)
-
-# 复位为默认（min_len=1 / max_len=0）
-app.st['min_len'] = 1
-app.st['max_len'] = 0
-
-# ============================================================
-# M. manual 路径（拆词/变换存新条目）行为未变
-# ============================================================
-section('M. manual 路径行为未变')
-_played2 = {'n': 0}
-_orig_play2 = S.sound.play_copy
-S.sound.play_copy = lambda: _played2.__setitem__('n', _played2['n'] + 1)
-try:
-    app.st['sound_copy'] = True
-    app.st['min_len'] = 100            # 正常 ingest 会把 3 字符内容过滤掉
-    set_lib([item('已有')])
-    ok = app.ingest('短内容', manual=True)     # manual 跳过过滤 → 应入库
-finally:
-    S.sound.play_copy = _orig_play2
-    app.st['sound_copy'] = False
-    app.st['min_len'] = 1
-check('manual=True 仍跳过长度过滤 → 入库', ok is True and len(app.data['clip']) == 2,
-      'ok=%r n=%d' % (ok, len(app.data['clip'])))
-check('manual=True 不播复制音', _played2['n'] == 0, '实际 %d' % _played2['n'])
-
-# 普通 ingest（manual=False, quiet=False）在有 sound_copy 时仍播复制音（确认未误伤）
-_played3 = {'n': 0}
-_orig_play3 = S.sound.play_copy
-S.sound.play_copy = lambda: _played3.__setitem__('n', _played3['n'] + 1)
-try:
-    app.st['sound_copy'] = True
-    set_lib([item('已有')])
-    app.ingest('正常复制内容')          # 常规路径
-finally:
-    S.sound.play_copy = _orig_play3
-    app.st['sound_copy'] = False
-check('常规 ingest 仍播复制音（quiet 未误伤常规路径）', _played3['n'] == 1,
-      '实际 %d' % _played3['n'])
-
-# ============================================================
-# N. 长文本正则预筛（行为断言 + 耗时上界）
-# ============================================================
-section('N. 长文本正则预筛')
-
-
-class _Probe:
-    """替身正则：只记录被调用次数、永不匹配 —— 用来断言"预筛是否真的挡住了调用"。"""
-
-    def __init__(self):
-        self.calls = 0
-        self.pattern = 'PROBE'          # 兼容 dict(...) / .pattern 读取
-
-    def search(self, s):
-        self.calls += 1
-        return None
-
-
-def _timed(fn, *a):
-    t0 = time.perf_counter()
-    fn(*a)
-    return time.perf_counter() - t0
-
-
-# --- scan_sensitive：无 '@' 时不得调用 email 正则；有 '@' 才调用 ---
-_orig_sens = list(CB.SENS_PATTERNS)
-_p1 = _Probe()
-CB.SENS_PATTERNS = [(n, (_p1 if n == '邮箱' else p)) for n, p in _orig_sens]
-try:
-    CB.scan_sensitive('a' * 2000)               # 无 @
-    c_no_at = _p1.calls
-    CB.scan_sensitive('a' * 2000 + '@')         # 有 @（且长度在上界内）
-    c_at = _p1.calls
-finally:
-    CB.SENS_PATTERNS = _orig_sens
-check('scan_sensitive：无 @ 不调用 email 正则', c_no_at == 0, 'calls=%d' % c_no_at)
-check('scan_sensitive：有 @ 才调用 email 正则', c_at >= 1, 'calls=%d' % c_at)
-
-# --- scan_sensitive：含 '@' 但超长 → 上界跳过，不调用 email 正则 ---
-_p2 = _Probe()
-CB.SENS_PATTERNS = [(n, (_p2 if n == '邮箱' else p)) for n, p in _orig_sens]
-try:
-    CB.scan_sensitive('@' + 'a' * (EMAIL_SCAN_MAXLEN + 10))
-    c_over = _p2.calls
-    CB.scan_sensitive('@' + 'a' * (EMAIL_SCAN_MAXLEN - 10))   # 上界内 → 调用
-    c_under = _p2.calls
-finally:
-    CB.SENS_PATTERNS = _orig_sens
-check('scan_sensitive：含 @ 但超上界 → 跳过 email 正则', c_over == 0, 'calls=%d' % c_over)
-check('scan_sensitive：上界内仍调用 email 正则', c_under >= 1, 'calls=%d' % c_under)
-
-# --- detect_tags：同款预筛 ---
-_orig_tag = list(TG._TAG_PATTERNS)
-_p3 = _Probe()
-TG._TAG_PATTERNS = [(n, (_p3 if n == 'email' else p)) for n, p in _orig_tag]
-try:
-    TG.detect_tags('a' * 2000)                  # 无 @
-    d_no_at = _p3.calls
-    TG.detect_tags('a' * 2000 + '@')            # 有 @
-    d_at = _p3.calls
-finally:
-    TG._TAG_PATTERNS = _orig_tag
-check('detect_tags：无 @ 不调用 email 正则', d_no_at == 0, 'calls=%d' % d_no_at)
-check('detect_tags：有 @ 才调用 email 正则', d_at >= 1, 'calls=%d' % d_at)
-
-# --- 行为未破坏：正常邮箱仍能被识别 ---
-check('scan_sensitive 仍命中正常邮箱',
-      '邮箱' in CB.scan_sensitive('联系 alice@example.com 谢谢'))
-check('detect_tags 仍命中正常邮箱',
-      'email' in TG.detect_tags('联系 alice@example.com 谢谢'))
-
-# --- 耗时上界（宽松兜底断言；优化前 60K≈6.6s、200K≈130s）---
-_b1 = 'a' * 60000
-_b2 = 'a' * 200000
-_t1s = _timed(CB.scan_sensitive, _b1)
-_t1t = _timed(TG.detect_tags, _b1)
-_t2s = _timed(CB.scan_sensitive, _b2)
-_t2t = _timed(TG.detect_tags, _b2)
-check('scan_sensitive(60K) < 1s', _t1s < 1.0, 't=%.3fs' % _t1s)
-check('detect_tags(60K) < 1s', _t1t < 1.0, 't=%.3fs' % _t1t)
-check('scan_sensitive(200K) < 1s', _t2s < 1.0, 't=%.3fs' % _t2s)
-check('detect_tags(200K) < 1s', _t2t < 1.0, 't=%.3fs' % _t2t)
-
-# ============================================================
-# O. 数据不污染
-# ============================================================
-section('O. 数据不污染')
-check('真实数据 sha256 未变',
-      HASH_BEFORE == file_hash(REAL_DATA) ==
-      '5c21d32f5c8a5173646c7b0927a0a2149d6f2db5b6b35758f5e12c8150314079',
-      'before=%s after=%s' % (HASH_BEFORE, file_hash(REAL_DATA)))
-check('真实目录无新增 .bak', sidecars() == FILES_BEFORE,
-      'before=%s after=%s' % (FILES_BEFORE, sidecars()))
-check('临时数据文件未被写入（NO_SAVE 生效）', not os.path.exists(TMP_DATA))
-
-# 收尾：销毁 GUI（不走 quit_app，避免真实落盘）
-try:
-    app.hw.unreg_hotkey()
-    app.hw.tray_del()
-    app.hw.stop()
-except Exception:
-    pass
-try:
-    root.destroy()
-except Exception:
-    pass
-
-try:
-    import shutil
-    shutil.rmtree(TMP_DIR, ignore_errors=True)
-except Exception:
-    pass
-
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_t42.out')
-with open(out, 'w', encoding='utf-8') as f:
-    f.write('\n'.join(LOG) + '\n\n' + ('全部通过\n' if OK else '有失败项\n'))
-print('\n'.join(LOG), flush=True)
-print('全部通过' if OK else '有失败项', flush=True)
-os._exit(0)
+if __name__ == '__main__':
+    try:
+        unittest.main()
+    finally:
+        TEMP.cleanup()
