@@ -11,6 +11,7 @@ import time
 
 NO_SAVE = False      # --bench/--shot/自测置 True：绝不把任何东西写回存档
 LAST_SEQ = 0         # 剪贴板序列号，由 clipboard.py 在导入时初始化为当前值
+LAST_WRITE_SEQ = None  # Only our successful writes; capture ignores this sequence.
 
 BASE_SCALING = 1.3333333   # 真实 DPI 的 tk scaling（启动时记录，UI 缩放前）。
                            # 字体缩放 = tk scaling = BASE_SCALING * config.UI_SCALE；

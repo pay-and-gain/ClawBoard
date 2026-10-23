@@ -24,6 +24,9 @@ class VirtualList(tk.Frame):
         self.kw = ''
         self.pool = {}
         self.wids = {}
+        self._free = []       # 离屏行暂存，滚动时复用同一批 Tk 控件
+        self._pending_top = None
+        self._scrollregion = None
         self._vw = 0
         self._last_w = -1
         self._maxc = 0
@@ -73,31 +76,51 @@ class VirtualList(tk.Frame):
                 pass
             self._empty = None
 
-    def set_data(self, items, sel, kw):
+    def set_data(self, items, sel, kw, reset_scroll=False):
+        """替换视图数据；库更新保留阅读位置，用户换搜索/Tab 时显式回顶部。"""
+        top = max(0.0, self.canvas.canvasy(0))
+        row_h = scaled(ITEM_H)
+        old_index = min(len(self.items) - 1, int(top // row_h))
+        anchor = (self.items[old_index].get('id')
+                  if self.items and top > 0 else None)
         self.items = items
         self.sel = sel
         self.kw = kw
-        self.clear_pool()
-        self.canvas.yview_moveto(0)
+        ids = {item.get('id') for item in items}
+        self.multi.intersection_update(ids)
+        if reset_scroll:
+            self._pending_top = 0.0
+        elif anchor is not None:
+            new_index = next((i for i, item in enumerate(items)
+                              if item.get('id') == anchor), None)
+            self._pending_top = (new_index * row_h + top % row_h
+                                 if new_index is not None else top)
+        else:
+            self._pending_top = top
         self.update_view()
 
     def clear_pool(self):
+        """显式重建/清空时释放控件；普通数据刷新和滚动不走销毁路径。"""
         for i in list(self.pool):
             self._drop(i)
+        for frame, wid in self._free:
+            self.canvas.delete(wid)
+            frame.destroy()
+        self._free.clear()
 
     def _drop(self, i):
-        w = self.pool.pop(i, None)
+        frame = self.pool.pop(i, None)
         wid = self.wids.pop(i, None)
-        try:
-            if wid:
-                self.canvas.delete(wid)
-        except Exception:
-            pass
-        try:
-            if w:
-                w.destroy()
-        except Exception:
-            pass
+        if wid is not None:
+            self.canvas.delete(wid)
+        if frame is not None:
+            frame.destroy()
+
+    def _recycle(self, i):
+        frame = self.pool.pop(i)
+        wid = self.wids.pop(i)
+        self.canvas.itemconfigure(wid, state='hidden')
+        self._free.append((frame, wid))
 
     def _wheel(self, e):
         """滚轮滚动。delta/120 直接取整会让触控板（delta=40/±1）永远为 0 滚不动，
@@ -144,45 +167,66 @@ class VirtualList(tk.Frame):
         n = len(self.items)
         w = max(60, self.canvas.winfo_width())
         self._vw = w
-        if self._last_w != w:
-            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * scaled(ITEM_H))))
-            self._last_w = w
-        else:
-            self.canvas.configure(scrollregion=(0, 0, w, max(1, n * scaled(ITEM_H))))
+        total = max(1, n * scaled(ITEM_H))
+        region = (0, 0, w, total)
+        if self._scrollregion != region:
+            self.canvas.configure(scrollregion=region)
+            self._scrollregion = region
+        h = max(scaled(ITEM_H), self.canvas.winfo_height())
+        if self._pending_top is not None:
+            top = min(max(0.0, total - h), max(0.0, self._pending_top))
+            self.canvas.yview_moveto(top / total)
+            self._pending_top = None
         if n == 0:
-            self.clear_pool()
+            for i in list(self.pool):
+                self._recycle(i)
+            self._trim_spare(max(2, int(h // scaled(ITEM_H)) + 2))
             self._show_empty()
             return
         self._hide_empty()
-        h = max(scaled(ITEM_H), self.canvas.winfo_height())
-        top = self.canvas.canvasy(0)
-        start = max(0, int(top // scaled(ITEM_H)))
+        top = max(0.0, self.canvas.canvasy(0))
+        start = min(n - 1, max(0, int(top // scaled(ITEM_H))))
         end = min(n, int((top + h) // scaled(ITEM_H)) + 2)
         for i in list(self.pool):
             if i < start or i >= end:
-                self._drop(i)
+                self._recycle(i)
         for i in range(start, end):
-            f = self.pool.get(i)
-            if f is None:
-                f = self._mk_item(i)
-                self.pool[i] = f
-                self.wids[i] = self.canvas.create_window(
-                    (0, i * scaled(ITEM_H) + scaled(CARD_GAP) // 2), window=f, anchor='nw',
-                    width=w, height=scaled(ITEM_H) - scaled(CARD_GAP))
-            else:
-                self.canvas.coords(self.wids[i], 0, i * scaled(ITEM_H) + scaled(CARD_GAP) // 2)
-                if f._vw != w:
-                    self.canvas.itemconfig(self.wids[i], width=w)
-                    f._vw = w
-            f._idx = i
-            self._layout(f, w)          # 宽度变了就重排：窄窗口下给正文让位
-            self._fill(f, i)
+            frame = self.pool.get(i)
+            if frame is None:
+                if self._free:
+                    frame, wid = self._free.pop()
+                    self.canvas.itemconfigure(wid, state='normal')
+                else:
+                    frame = self._mk_item(i)
+                    wid = self.canvas.create_window(
+                        (0, 0), window=frame, anchor='nw', width=w,
+                        height=scaled(ITEM_H) - scaled(CARD_GAP))
+                self.pool[i] = frame
+                self.wids[i] = wid
+            self.canvas.coords(self.wids[i], 0,
+                               i * scaled(ITEM_H) + scaled(CARD_GAP) // 2)
+            if frame._vw != w:
+                self.canvas.itemconfigure(self.wids[i], width=w)
+                frame._vw = w
+            frame._idx = i
+            self._layout(frame, w)
+            self._fill(frame, i)
+        # 拉小窗口后不无限保留过去的大视口，但留一屏备用，反向滚动无需重建。
+        self._trim_spare(max(2, end - start))
+
+    def _trim_spare(self, limit):
+        while len(self._free) > limit:
+            frame, wid = self._free.pop()
+            self.canvas.delete(wid)
+            frame.destroy()
 
     def _mk_item(self, i):
         f = tk.Frame(self.canvas, bg=T['card'], height=scaled(ITEM_H) - scaled(CARD_GAP), cursor='hand2')
         f.pack_propagate(False)
         f._idx = i
         f._vw = 0
+        f._fill_key = None
+        f._paint_color = None
         f._lw = None      # 上次布局用的宽度（见 _layout）
         f._numw = 0       # 当前序号列宽度，0 表示被让位给正文了
         # 序号列：按住 Ctrl 时显示 1..9/0，提示「Ctrl+数字直接粘贴」（Ditto QListCtrl.cpp:610）
@@ -212,6 +256,9 @@ class VirtualList(tk.Frame):
         return f
 
     def _paint(self, f, c):
+        if getattr(f, '_paint_color', None) == c:
+            return
+        f._paint_color = c
         f.configure(bg=c)
         f._row.configure(bg=c)
         f._num.configure(bg=c)
@@ -310,6 +357,13 @@ class VirtualList(tk.Frame):
             c = T['card']
         self._paint(f, c)
         body = it.get('disp') or it.get('text', '')
+        key = (it.get('id'), body, it.get('sub'), it.get('badge'),
+               it.get('kind_auto'), it.get('kind'), self.kw, self._vw,
+               self.show_num, i if self.show_num else None,
+               T['fg'], T['fg2'], T['acc'])
+        if getattr(f, '_fill_key', None) == key:
+            return
+        f._fill_key = key
         w = self._vw or 300
         maxc = max(8, int(w / 7.2))
         if self._maxc != maxc:

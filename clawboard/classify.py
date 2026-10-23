@@ -72,7 +72,7 @@ def guess_lang(s):
     return 'code'
 
 
-def classify(text):
+def classify(text, *, check_paths=True):
     """返回 (kind, meta)。kind ∈ url / email / color / path / json / code / multiline / text
     纯函数、可单测；UI 只是它的消费者。"""
     s = (text or '').strip()
@@ -85,7 +85,7 @@ def classify(text):
     if len(core) < 4096:
         p = os.path.expanduser(core)
         if (core.startswith(('/', '~', './', '../')) or os.path.isabs(core)) \
-                and os.path.exists(p):
+                and (not check_paths or os.path.exists(p)):
             return 'path', {'basename': os.path.basename(core.rstrip('/')) or core}
     # 2. 单行串才可能是 url / email / 色值（要求整串无空白，能挡掉绝大多数误判）
     if ' ' not in s and '\n' not in s:

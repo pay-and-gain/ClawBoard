@@ -19,6 +19,8 @@
 #include <string.h>
 #include <wchar.h>
 #include <time.h>
+#include <io.h>
+#include "storage_compat.h"
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -59,20 +61,22 @@
 static wchar_t *u8(const char *s) {
     int n; wchar_t *w;
     if (!s) return NULL;
-    n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+    n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0);
+    if (n <= 0) return NULL;
     w = (wchar_t *)malloc(sizeof(wchar_t) * (n + 1));
     if (!w) return NULL;
-    MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n);
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n);
     return w;
 }
 
 static char *u16(const wchar_t *w) {
     int n; char *s;
     if (!w) return NULL;
-    n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, NULL, 0, NULL, NULL);
+    if (n <= 0) return NULL;
     s = (char *)malloc(n + 1);
     if (!s) return NULL;
-    WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL);
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, s, n, NULL, NULL);
     return s;
 }
 
@@ -125,6 +129,7 @@ static void oneline(const wchar_t *src, wchar_t *dst, int cap) {
 typedef struct {
     wchar_t *text;
     wchar_t *name;          /* 常用语名称 */
+    char *storage_json;     /* 原始记录，保留 Python/未来版本的扩展字段 */
     long long created_at, updated_at, last_used_at;
     int seq, copy_count, fav, is_est, sens;
     wchar_t *app;           /* 来源进程名 */
@@ -139,6 +144,7 @@ typedef struct {
 typedef struct {
     wchar_t *name;
     ItemArray items;
+    char *storage_json;
 } Group;
 
 typedef struct {
@@ -181,14 +187,14 @@ static void ia_push(ItemArray *a, Item it) {
 static void ia_erase(ItemArray *a, int idx) {
     int i;
     if (idx < 0 || idx >= a->n) return;
-    free(a->v[idx].text); free(a->v[idx].name); free(a->v[idx].app);
+    free(a->v[idx].text); free(a->v[idx].name); free(a->v[idx].app); free(a->v[idx].storage_json);
     for (i = idx; i < a->n - 1; i++) a->v[i] = a->v[i + 1];
     a->n--;
 }
 
 static void ia_clear(ItemArray *a) {
     int i;
-    for (i = 0; i < a->n; i++) { free(a->v[i].text); free(a->v[i].name); free(a->v[i].app); }
+    for (i = 0; i < a->n; i++) { free(a->v[i].text); free(a->v[i].name); free(a->v[i].app); free(a->v[i].storage_json); }
     free(a->v); ia_init(a);
 }
 
@@ -197,356 +203,317 @@ static ItemArray *cur_pool(void) {
     return &g.groups[g.gi].items;
 }
 
-/* ==========================================================================
- * 3. 迷你 JSON（解析 + 写出），供持久化使用
- * ========================================================================== */
-typedef enum { JNULL, JBOOL, JNUM, JSTR, JARR, JOBJ } JType;
-typedef struct JV JV;
-struct JV {
-    JType t; double num; int b; wchar_t *str;
-    JV **arr; int n;
-    char **keys; JV **vals; int nk;
-};
+/* The compatibility core stores opaque JSON fragments; the Win32 adapter owns
+ * paths, UTF conversion, and atomic replacement. Unsupported metadata survives
+ * a C edit unchanged rather than being reconstructed from the smaller C model. */
+static char *storage_template = NULL;
+static int storage_read_only = 0, storage_warning_shown = 0;
+static unsigned long storage_id_counter = 0;
+static int storage_max_items = MAX_ITEMS;
+static wchar_t storage_test_path[MAX_PATH] = L"";
 
-static JV *jv_new(JType t) {
-    JV *v = (JV *)calloc(1, sizeof(JV));
-    if (v) v->t = t;
-    return v;
-}
-
-static void jv_free(JV *v) {
-    int i;
-    if (!v) return;
-    if (v->str) free(v->str);
-    for (i = 0; i < v->n; i++) jv_free(v->arr[i]);
-    free(v->arr);
-    for (i = 0; i < v->nk; i++) { free(v->keys[i]); jv_free(v->vals[i]); }
-    free(v->keys); free(v->vals);
-    free(v);
-}
-
-typedef struct { const char *p; } JP;
-
-static void jp_ws(JP *s) {
-    while (*s->p && (unsigned char)*s->p <= ' ') s->p++;
-}
-
-static JV *jp_val(JP *s);
-
-static wchar_t *jp_str(JP *s) {
-    char buf[4096]; int n = 0;
-    if (*s->p != '"') { return NULL; }
-    s->p++;
-    while (*s->p && *s->p != '"') {
-        char c = *s->p;
-        if (c == '\\') {
-            s->p++;
-            c = *s->p++;
-            switch (c) {
-            case 'n': buf[n++] = '\n'; break;
-            case 't': buf[n++] = '\t'; break;
-            case 'r': buf[n++] = '\r'; break;
-            case 'b': buf[n++] = '\b'; break;
-            case 'f': buf[n++] = '\f'; break;
-            case 'u': {
-                wchar_t wc = 0; int k;
-                for (k = 0; k < 4; k++) {
-                    char h = *s->p++; int d;
-                    if (h >= '0' && h <= '9') d = h - '0';
-                    else if (h >= 'a' && h <= 'f') d = h - 'a' + 10;
-                    else if (h >= 'A' && h <= 'F') d = h - 'A' + 10;
-                    else d = 0;
-                    wc = (wchar_t)((wc << 4) | d);
-                }
-                { char tb[8]; int tn = WideCharToMultiByte(CP_UTF8, 0, &wc, 1, tb, 8, NULL, NULL);
-                  memcpy(buf + n, tb, tn); n += tn; }
-                break; }
-            default: buf[n++] = c;
-            }
-        } else buf[n++] = c;
-        s->p++;
-        if (n > 4000) break;
+static void storage_warning(const wchar_t *message) {
+    if (!storage_warning_shown) {
+        storage_warning_shown = 1;
+        MessageBoxW(g.hwnd, message, APP_NAME, MB_OK | MB_ICONWARNING);
     }
-    if (*s->p == '"') s->p++;
-    buf[n] = 0;
-    return u8(buf);
 }
 
-static JV *jp_val(JP *s) {
-    JV *v;
-    jp_ws(s);
-    if (!*s->p) return NULL;
-    if (*s->p == '{') {
-        v = jv_new(JOBJ); s->p++; jp_ws(s);
-        if (*s->p == '}') { s->p++; return v; }
-        while (*s->p) {
-            wchar_t *k; JV *val;
-            jp_ws(s);
-            if (*s->p != '"') break;
-            k = jp_str(s);
-            jp_ws(s);
-            if (*s->p == ':') s->p++;
-            val = jp_val(s);
-            v->keys = (char **)realloc(v->keys, sizeof(char *) * (v->nk + 1));
-            v->vals = (JV **)realloc(v->vals, sizeof(JV *) * (v->nk + 1));
-            v->keys[v->nk] = k ? u16(k) : NULL; free(k);
-            v->vals[v->nk] = val;
-            v->nk++;
-            jp_ws(s);
-            if (*s->p == ',') { s->p++; continue; }
-            if (*s->p == '}') { s->p++; }
-            break;
-        }
-        return v;
-    }
-    if (*s->p == '[') {
-        v = jv_new(JARR); s->p++; jp_ws(s);
-        if (*s->p == ']') { s->p++; return v; }
-        while (*s->p) {
-            JV *e = jp_val(s);
-            v->arr = (JV **)realloc(v->arr, sizeof(JV *) * (v->n + 1));
-            v->arr[v->n++] = e;
-            jp_ws(s);
-            if (*s->p == ',') { s->p++; continue; }
-            if (*s->p == ']') { s->p++; }
-            break;
-        }
-        return v;
-    }
-    if (*s->p == '"') { v = jv_new(JSTR); v->str = jp_str(s); return v; }
-    if (!strncmp(s->p, "true", 4)) { v = jv_new(JBOOL); v->b = 1; s->p += 4; return v; }
-    if (!strncmp(s->p, "false", 5)) { v = jv_new(JBOOL); v->b = 0; s->p += 5; return v; }
-    if (!strncmp(s->p, "null", 4)) { v = jv_new(JNULL); s->p += 4; return v; }
-    v = jv_new(JNUM); v->num = strtod(s->p, (char **)&s->p); return v;
-}
-
-static JV *jget(JV *o, const char *key) {
-    int i;
-    if (!o || o->t != JOBJ) return NULL;
-    for (i = 0; i < o->nk; i++)
-        if (o->keys[i] && !strcmp(o->keys[i], key)) return o->vals[i];
-    return NULL;
-}
-
-static const wchar_t *jstr(JV *o, const char *key, const wchar_t *def) {
-    JV *v = jget(o, key);
-    return (v && v->t == JSTR && v->str) ? v->str : def;
-}
-
-static long long jnum(JV *o, const char *key, long long def) {
-    JV *v = jget(o, key);
-    return (v && v->t == JNUM) ? (long long)v->num : def;
-}
-
-static int jint(JV *o, const char *key, int def) {
-    JV *v = jget(o, key);
-    return (v && v->t == JNUM) ? (int)v->num : def;
-}
-
-/* ==========================================================================
- * 4. 持久化
- * ========================================================================== */
 static wchar_t *data_path(void) {
     static wchar_t buf[MAX_PATH];
-    wchar_t dir[MAX_PATH];
-    GetModuleFileNameW(NULL, dir, MAX_PATH);
+    wchar_t dir[MAX_PATH], probe[MAX_PATH], appdata[MAX_PATH];
+    DWORD n;
+    if (storage_test_path[0]) return storage_test_path;
+    if (buf[0]) return buf;
+    n = GetModuleFileNameW(NULL, dir, MAX_PATH);
+    if (!n || n >= MAX_PATH) return buf;
     { wchar_t *slash = wcsrchr(dir, L'\\'); if (slash) *slash = 0; }
+    /* Match Python's portable-first location and its Program Files fallback. */
+    if (GetTempFileNameW(dir, L"cb", 0, probe)) DeleteFileW(probe);
+    else {
+        n = GetEnvironmentVariableW(L"APPDATA", appdata, MAX_PATH);
+        if (!n || n >= MAX_PATH) return buf;
+        swprintf_s(dir, MAX_PATH, L"%s\\ClawBoard", appdata);
+        if (!CreateDirectoryW(dir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) return buf;
+    }
     swprintf_s(buf, MAX_PATH, L"%s\\ClawBoard数据.json", dir);
     return buf;
 }
 
-static void json_esc(const wchar_t *s, char **out, size_t *cap, size_t *len) {
-    char *b = *out; size_t c = *cap, l = *len;
-    size_t i;
-    for (i = 0; s && s[i]; i++) {
-        wchar_t ch = s[i];
-        char tmp[16]; int tn = 0;
-        if (ch == L'"' || ch == L'\\') { tmp[tn++] = '\\'; tmp[tn++] = (char)ch; }
-        else if (ch == L'\n') { memcpy(tmp, "\\n", 2); tn = 2; }
-        else if (ch == L'\r') { memcpy(tmp, "\\r", 2); tn = 2; }
-        else if (ch == L'\t') { memcpy(tmp, "\\t", 2); tn = 2; }
-        else {
-            tn = WideCharToMultiByte(CP_UTF8, 0, &ch, 1, tmp, 16, NULL, NULL);
-        }
-        if (l + tn + 1 > c) { c = (l + tn + 1) * 2; b = (char *)realloc(b, c); }
-        memcpy(b + l, tmp, tn); l += tn;
+static wchar_t *storage_text(SCValue object, const char *name, const wchar_t *fallback) {
+    SCValue value; char *decoded; wchar_t *result;
+    if (!sc_member(object, name, &value)) return wcsdup2(fallback);
+    decoded = sc_decode(value);
+    if (!decoded) { storage_read_only = 1; return wcsdup2(fallback); }
+    result = u8(decoded); free(decoded);
+    if (!result) { storage_read_only = 1; return wcsdup2(fallback); }
+    return result;
+}
+
+static long long storage_number(SCValue object, const char *name, long long fallback) {
+    SCValue value;
+    return sc_member(object, name, &value) ? sc_integer(value, fallback) : fallback;
+}
+
+static char *storage_quote_wide(const wchar_t *text) {
+    char *utf8 = u16(text ? text : L"");
+    char *quoted = utf8 ? sc_quote(utf8) : NULL;
+    free(utf8); return quoted;
+}
+
+static char *storage_item(Item *item, int phrase) {
+    SCField fields[16]; size_t count = 0;
+    SCValue original, ignored;
+    char *text = storage_quote_wide(item->text), *name = NULL;
+    char *app = storage_quote_wide(item->app ? item->app : L"unknown"), *result;
+    char created[32], updated[32], used[32], seq[24], copies[24], fav[8], estimated[8], size[32];
+    char identifier[96]; char *quoted_id = NULL, *utf8;
+    const char *type = sc_type_json(item->ctype);
+    if (!text || !app || !sc_parse(item->storage_json ? item->storage_json : "{}", &original)) goto failed;
+    snprintf(created, sizeof(created), "%lld", item->created_at);
+    snprintf(updated, sizeof(updated), "%lld", item->updated_at);
+    snprintf(used, sizeof(used), "%lld", item->last_used_at);
+    snprintf(seq, sizeof(seq), "%d", item->seq);
+    snprintf(copies, sizeof(copies), "%d", item->copy_count > 0 ? item->copy_count : 1);
+    snprintf(fav, sizeof(fav), "%d", !!item->fav);
+    snprintf(estimated, sizeof(estimated), "%d", !!item->is_est);
+    fields[count++] = sc_field("text", text);
+    fields[count++] = sc_field("created_at", created);
+    if (!(sc_member(original, "updated_at", &ignored) && ignored.type == SC_NULL &&
+          item->updated_at == item->created_at)) {
+        fields[count++] = sc_field("updated_at", updated);
     }
-    *out = b; *cap = c; *len = l;
+    if (item->last_used_at > 0) fields[count++] = sc_field("last_used_at", used);
+    fields[count++] = sc_field("seq", seq);
+    fields[count++] = sc_field("copy_count", copies);
+    fields[count++] = sc_field("fav", fav);
+    fields[count++] = sc_field("is_estimated", estimated);
+    fields[count++] = sc_field("source_app", app);
+    /* An image/other future type is opaque to this subset; keep its type and
+     * payload metadata instead of degrading it to plain text during a save. */
+    if (type) {
+        utf8 = u16(item->text ? item->text : L"");
+        if (!utf8) goto failed;
+        snprintf(size, sizeof(size), "%llu", (unsigned long long)strlen(utf8)); free(utf8);
+        fields[count++] = sc_field("content_type", type);
+        fields[count++] = sc_field("content_size", size);
+    }
+    if (phrase) {
+        name = storage_quote_wide(item->name ? item->name : L"");
+        if (!name) goto failed;
+        fields[count++] = sc_field("name", name);
+    }
+    if (!sc_member(original, "id", &ignored)) {
+        snprintf(identifier, sizeof(identifier), "c-%lld-%lu", now_ms(), ++storage_id_counter);
+        quoted_id = sc_quote(identifier);
+        if (!quoted_id) goto failed;
+        fields[count++] = sc_field("id", quoted_id);
+    }
+    result = sc_patch(item->storage_json, fields, count);
+    free(text); free(app); free(name); free(quoted_id);
+    return result;
+failed:
+    free(text); free(app); free(name); free(quoted_id); return NULL;
+}
+
+static char *storage_items(ItemArray *items, int phrase) {
+    SCBuffer buffer = {0}; int i;
+    sc_append(&buffer, "[", 1);
+    for (i = 0; i < items->n; ++i) {
+        char *serialized = storage_item(&items->v[i], phrase);
+        if (!serialized) { free(buffer.data); return NULL; }
+        if (i) sc_append(&buffer, ",", 1);
+        sc_append(&buffer, serialized, strlen(serialized));
+        free(items->v[i].storage_json); items->v[i].storage_json = serialized;
+    }
+    sc_append(&buffer, "]", 1);
+    return sc_take(&buffer);
+}
+
+static char *storage_groups(void) {
+    SCBuffer buffer = {0}; int i;
+    sc_append(&buffer, "[", 1);
+    for (i = 0; i < g.ngroups; ++i) {
+        char *items = storage_items(&g.groups[i].items, 1);
+        char *name = storage_quote_wide(g.groups[i].name), *serialized = NULL;
+        SCField fields[2];
+        if (items && name) {
+            fields[0] = sc_field("name", name); fields[1] = sc_field("items", items);
+            serialized = sc_patch(g.groups[i].storage_json, fields, 2);
+        }
+        free(items); free(name);
+        if (!serialized) { free(buffer.data); return NULL; }
+        if (i) sc_append(&buffer, ",", 1);
+        sc_append(&buffer, serialized, strlen(serialized));
+        free(g.groups[i].storage_json); g.groups[i].storage_json = serialized;
+    }
+    sc_append(&buffer, "]", 1);
+    return sc_take(&buffer);
 }
 
 static void save_data(void) {
-    char *b = NULL; size_t cap = 0, len = 0;
-    int i, k;
-    FILE *f;
-    const char *head = "{\n \"schema_version\": 3,\n \"clip\": [\n";
-    const wchar_t *tmp = data_path();
-    wchar_t tmpw[MAX_PATH];
-    swprintf_s(tmpw, MAX_PATH, L"%s.tmp", data_path());
-
-    b = (char *)malloc(65536); cap = 65536; len = 0;
-    memcpy(b, head, strlen(head)); len += strlen(head);
-
-    for (i = 0; i < g.clip.n; i++) {
-        Item *it = &g.clip.v[i];
-        char line[512];
-        int tl;
-        char *tb = b; size_t tc = cap, tl2 = len;
-        tl = snprintf(line, sizeof(line),
-                      "  {\"id\":\"%d\",\"created_at\":%lld,\"updated_at\":%lld,",
-                      i, it->created_at, it->updated_at);
-        if (tl2 + tl + 1 > tc) { tc = (tl2 + tl + 1) * 2; tb = (char *)realloc(tb, tc); }
-        memcpy(tb + tl2, line, tl); tl2 += tl;
-        b = tb; cap = tc; len = tl2;
-        { const char *s = "\"text\":\""; size_t sl = strlen(s);
-          if (len + sl + 1 > cap) { cap = (len + sl + 1) * 2; b = (char *)realloc(b, cap); }
-          memcpy(b + len, s, sl); len += sl; }
-        json_esc(it->text, &b, &cap, &len);
-        { const char *s = "\",\"source_app\":\""; size_t sl = strlen(s);
-          if (len + sl + 1 > cap) { cap = (len + sl + 1) * 2; b = (char *)realloc(b, cap); }
-          memcpy(b + len, s, sl); len += sl; }
-        json_esc(it->app ? it->app : L"unknown", &b, &cap, &len);
-        { char line2[256]; int l2 = snprintf(line2, sizeof(line2),
-              "\",\"content_type\":%d,\"content_size\":%d,\"copy_count\":%d,"
-              "\"fav\":%d,\"is_estimated\":%d,\"seq\":%d}%s\n",
-              it->ctype, (int)it->size, it->copy_count, it->fav, it->is_est, it->seq,
-              (i == g.clip.n - 1) ? "" : ",");
-          if (len + l2 + 1 > cap) { cap = (len + l2 + 1) * 2; b = (char *)realloc(b, cap); }
-          memcpy(b + len, line2, l2); len += l2; }
+    SCValue original, settings_value;
+    SCField fields[5], settings_fields[4];
+    char *clip = NULL, *groups = NULL, *settings_base = NULL, *settings = NULL, *serialized = NULL;
+    char version[32], group_index[24];
+    wchar_t temporary[MAX_PATH]; FILE *file = NULL; int ok = 0;
+    if (storage_read_only) {
+        storage_warning(L"数据处于只读保护，C 版没有覆盖原文件。请先用 Python 版恢复备份。");
+        return;
     }
-    { const char *s = " ],\n \"groups\": [\n"; size_t sl = strlen(s);
-      if (len + sl + 1 > cap) { cap = (len + sl + 1) * 2; b = (char *)realloc(b, cap); }
-      memcpy(b + len, s, sl); len += sl; }
-
-    for (k = 0; k < g.ngroups; k++) {
-        char line[512]; int tl;
-        char *tb = b; size_t tc = cap, tl2 = len;
-        tl = snprintf(line, sizeof(line), "  {\"name\":\"");
-        if (tl2 + tl + 1 > tc) { tc = (tl2 + tl + 1) * 2; tb = (char *)realloc(tb, tc); }
-        memcpy(tb + tl2, line, tl); tl2 += tl;
-        b = tb; cap = tc; len = tl2;
-        json_esc(g.groups[k].name, &b, &cap, &len);
-        { const char *s = "\",\"items\":[\n"; size_t sl = strlen(s);
-          if (len + sl + 1 > cap) { cap = (len + sl + 1) * 2; b = (char *)realloc(b, cap); }
-          memcpy(b + len, s, sl); len += sl; }
-        for (i = 0; i < g.groups[k].items.n; i++) {
-            Item *it = &g.groups[k].items.v[i];
-            char l3[256]; int n3;
-            const char *s1 = "   {\"name\":\""; size_t sl1 = strlen(s1);
-            if (len + sl1 + 1 > cap) { cap = (len + sl1 + 1) * 2; b = (char *)realloc(b, cap); }
-            memcpy(b + len, s1, sl1); len += sl1;
-            json_esc(it->name ? it->name : L"", &b, &cap, &len);
-            { const char *s2 = "\",\"text\":\""; size_t sl2 = strlen(s2);
-              if (len + sl2 + 1 > cap) { cap = (len + sl2 + 1) * 2; b = (char *)realloc(b, cap); }
-              memcpy(b + len, s2, sl2); len += sl2; }
-            json_esc(it->text, &b, &cap, &len);
-            n3 = snprintf(l3, sizeof(l3), "\"}%s\n", (i == g.groups[k].items.n - 1) ? "" : ",");
-            if (len + n3 + 1 > cap) { cap = (len + n3 + 1) * 2; b = (char *)realloc(b, cap); }
-            memcpy(b + len, l3, n3); len += n3;
-        }
-        { const char *s = "  ]}"; size_t sl = strlen(s);
-          if (len + sl + 2 > cap) { cap = (len + sl + 2) * 2; b = (char *)realloc(b, cap); }
-          memcpy(b + len, s, sl); len += sl;
-          b[len++] = (k == g.ngroups - 1) ? '\n' : ','; b[len++] = '\n'; }
-    }
-    { const char *s = " ],\n \"gi\": 0\n}\n"; size_t sl = strlen(s);
-      if (len + sl + 1 > cap) { cap = (len + sl + 1) * 2; b = (char *)realloc(b, cap); }
-      memcpy(b + len, s, sl); len += sl; }
-    b[len] = 0;
-
-    f = _wfopen(tmpw, L"wb");
-    if (f) {
-        fwrite(b, 1, len, f);
-        fclose(f);
-        _wremove(data_path());
-        _wrename(tmpw, data_path());
-    }
-    free(b);
+    if (!data_path()[0] || !sc_parse(storage_template ? storage_template : "{}", &original)) goto done;
+    clip = storage_items(&g.clip, 0); groups = storage_groups();
+    if (!clip || !groups) goto done;
+    if (sc_member(original, "settings", &settings_value)) settings_base = sc_copy(settings_value);
+    settings_fields[0] = sc_field("listen", g.listen ? "true" : "false");
+    settings_fields[1] = sc_field("autopaste", g.autopaste ? "true" : "false");
+    settings_fields[2] = sc_field("mask_sensitive", g.mask_sens ? "true" : "false");
+    settings_fields[3] = sc_field("show_time", g.show_time ? "true" : "false");
+    settings = sc_patch(settings_base, settings_fields, 4);
+    if (!settings) goto done;
+    { long long schema = storage_number(original, "schema_version", 3);
+      snprintf(version, sizeof(version), "%lld", schema < 3 ? 3 : schema); }
+    snprintf(group_index, sizeof(group_index), "%d", g.gi);
+    fields[0] = sc_field("clip", clip); fields[1] = sc_field("groups", groups);
+    fields[2] = sc_field("settings", settings); fields[3] = sc_field("gi", group_index);
+    fields[4] = sc_field("schema_version", version);
+    serialized = sc_patch(storage_template, fields, 5);
+    if (!serialized) goto done;
+    swprintf_s(temporary, MAX_PATH, L"%s.tmp-%lu", data_path(), GetCurrentProcessId());
+    file = _wfopen(temporary, L"wb");
+    if (!file) goto done;
+    ok = fwrite(serialized, 1, strlen(serialized), file) == strlen(serialized);
+    if (fflush(file) || _commit(_fileno(file))) ok = 0;
+    if (fclose(file)) ok = 0;
+    file = NULL;
+    if (ok) ok = MoveFileExW(temporary, data_path(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    if (!ok) DeleteFileW(temporary);
+    if (ok) { free(storage_template); storage_template = serialized; serialized = NULL; }
+done:
+    if (file) fclose(file);
+    free(clip); free(groups); free(settings_base); free(settings); free(serialized);
+    if (!ok) storage_warning(L"保存失败，原数据文件已保留。请检查数据目录权限或可用空间。");
 }
 
-static long long parse_time_field(JV *o, const char *key) {
-    JV *v = jget(o, key);
-    if (!v) return 0;
-    if (v->t == JNUM) return (long long)v->num;
-    return 0;
+static void storage_default_group(void) {
+    g.groups = (Group *)calloc(1, sizeof(Group));
+    if (!g.groups) { storage_read_only = 1; return; }
+    g.ngroups = 1; g.gi = 0;
+    g.groups[0].name = wcsdup2(L"默认"); ia_init(&g.groups[0].items);
+}
+
+static int storage_load_item(SCValue object, Item *item, int index, int phrase) {
+    SCValue value;
+    if (object.type != SC_OBJECT || !sc_member(object, "text", &value) || value.type != SC_STRING) {
+        storage_read_only = 1; return 0;
+    }
+    memset(item, 0, sizeof(*item));
+    item->storage_json = sc_copy(object);
+    item->text = storage_text(object, "text", L"");
+    item->app = storage_text(object, "source_app", L"unknown");
+    if (phrase) item->name = storage_text(object, "name", L"");
+    item->created_at = storage_number(object, "created_at", 0);
+    item->updated_at = storage_number(object, "updated_at", item->created_at);
+    item->last_used_at = storage_number(object, "last_used_at", 0);
+    item->seq = (int)storage_number(object, "seq", index);
+    item->copy_count = (int)storage_number(object, "copy_count", 1);
+    item->fav = (int)storage_number(object, "fav", 0);
+    item->is_est = (int)storage_number(object, "is_estimated", 0);
+    item->ctype = sc_member(object, "content_type", &value) ? sc_content_type(value) : 0;
+    item->size = (size_t)storage_number(object, "content_size", 0);
+    if (!item->created_at) { item->created_at = now_ms() - (long long)index * 1000; item->is_est = 1; }
+    if (!item->updated_at) item->updated_at = item->created_at;
+    if (!item->storage_json || !item->text || !item->app || (phrase && !item->name)) {
+        free(item->storage_json); free(item->text); free(item->app); free(item->name);
+        storage_read_only = 1; return 0;
+    }
+    if (!item->size) item->size = wcslen(item->text) * 2;
+    return 1;
 }
 
 static void load_data(void) {
-    FILE *f = _wfopen(data_path(), L"rb");
-    char *buf = NULL; long sz = 0;
-    JP p; JV *root; JV *arr; int i;
-    if (!f) {
-        /* 首次运行：建一个默认分组 */
-        g.groups = (Group *)calloc(1, sizeof(Group));
-        g.ngroups = 1; g.gi = 0;
-        g.groups[0].name = wcsdup2(L"默认");
-        ia_init(&g.groups[0].items);
+    FILE *file; char *buffer = NULL; long size;
+    SCValue root, clips, groups, group, items, item, key, settings, setting;
+    SCIterator iterator, group_iterator, item_iterator;
+    int index = 0;
+    free(storage_template); storage_template = NULL;
+    storage_read_only = 0;
+    errno = 0;
+    file = data_path()[0] ? _wfopen(data_path(), L"rb") : NULL;
+    if (!file) {
+        if (!data_path()[0] || errno != ENOENT) storage_read_only = 1;
+        storage_default_group();
+        if (storage_read_only) storage_warning(L"数据文件无法读取，已启用只读保护；原文件未改动。");
         return;
     }
-    fseek(f, 0, SEEK_END); sz = ftell(f); fseek(f, 0, SEEK_SET);
-    buf = (char *)malloc(sz + 1);
-    if (!buf) { fclose(f); return; }
-    fread(buf, 1, sz, f); buf[sz] = 0; fclose(f);
-
-    p.p = buf;
-    root = jp_val(&p);
-    if (!root) { free(buf); return; }
-
-    arr = jget(root, "clip");
-    if (arr && arr->t == JARR) {
-        for (i = 0; i < arr->n; i++) {
-            JV *o = arr->arr[i]; Item it;
-            if (!o || o->t != JOBJ) continue;
-            memset(&it, 0, sizeof(it));
-            it.text = wcsdup2(jstr(o, "text", L""));
-            it.app = wcsdup2(jstr(o, "source_app", L"unknown"));
-            it.created_at = parse_time_field(o, "created_at");
-            it.updated_at = parse_time_field(o, "updated_at");
-            it.last_used_at = parse_time_field(o, "last_used_at");
-            it.seq = jint(o, "seq", i);
-            it.copy_count = jint(o, "copy_count", 1);
-            it.fav = jint(o, "fav", 0);
-            it.is_est = jint(o, "is_estimated", 0);
-            it.ctype = jint(o, "content_type", 0);
-            it.size = (size_t)jint(o, "content_size", 0);
-            if (!it.created_at) { it.created_at = now_ms() - (long long)i * 1000; it.is_est = 1; }
-            if (!it.size) it.size = wcslen(it.text) * 2;
-            ia_push(&g.clip, it);
+    if (fseek(file, 0, SEEK_END) || (size = ftell(file)) < 0 || fseek(file, 0, SEEK_SET)) goto invalid;
+    buffer = (char *)malloc((size_t)size + 1);
+    if (!buffer || fread(buffer, 1, (size_t)size, file) != (size_t)size) goto invalid;
+    buffer[size] = 0; fclose(file); file = NULL;
+    if (memchr(buffer, 0, (size_t)size) || !sc_parse(buffer, &root) || root.type != SC_OBJECT) goto invalid;
+    storage_template = buffer; buffer = NULL;
+    if (sc_member(root, "settings", &settings)) {
+        if (settings.type != SC_OBJECT) { storage_read_only = 1; }
+        else {
+            if (sc_member(settings, "listen", &setting)) g.listen = sc_boolean(setting, g.listen);
+            if (sc_member(settings, "autopaste", &setting)) g.autopaste = sc_boolean(setting, g.autopaste);
+            if (sc_member(settings, "mask_sensitive", &setting)) g.mask_sens = sc_boolean(setting, g.mask_sens);
+            if (sc_member(settings, "show_time", &setting)) g.show_time = sc_boolean(setting, g.show_time);
+            { long long limit = storage_number(settings, "max_items", MAX_ITEMS);
+              storage_max_items = limit < 10 ? 10 : (limit > 5000 ? 5000 : (int)limit); }
         }
     }
-    arr = jget(root, "groups");
-    if (arr && arr->t == JARR && arr->n > 0) {
-        int k;
-        g.ngroups = arr->n;
-        g.groups = (Group *)calloc(g.ngroups, sizeof(Group));
-        for (k = 0; k < arr->n; k++) {
-            JV *go = arr->arr[k];
-            JV *items;
-            g.groups[k].name = wcsdup2(jstr(go, "name", L"默认"));
-            ia_init(&g.groups[k].items);
-            items = jget(go, "items");
-            if (items && items->t == JARR) {
-                for (i = 0; i < items->n; i++) {
-                    JV *o = items->arr[i]; Item it;
-                    if (!o || o->t != JOBJ) continue;
-                    memset(&it, 0, sizeof(it));
-                    it.text = wcsdup2(jstr(o, "text", L""));
-                    it.name = wcsdup2(jstr(o, "name", L""));
-                    it.created_at = parse_time_field(o, "created_at");
-                    if (!it.created_at) it.created_at = now_ms();
-                    it.size = wcslen(it.text) * 2;
-                    ia_push(&g.groups[k].items, it);
+    if (sc_member(root, "clip", &clips)) {
+        if (clips.type != SC_ARRAY) storage_read_only = 1;
+        else {
+            sc_iter(clips, &iterator);
+            while (sc_next(&iterator, &key, &item) > 0) {
+                Item loaded;
+                if (storage_load_item(item, &loaded, ++index, 0)) ia_push(&g.clip, loaded);
+            }
+        }
+    }
+    if (sc_member(root, "groups", &groups)) {
+        if (groups.type != SC_ARRAY) storage_read_only = 1;
+        else {
+            sc_iter(groups, &group_iterator);
+            while (sc_next(&group_iterator, &key, &group) > 0) {
+                Group *expanded;
+                if (group.type != SC_OBJECT) { storage_read_only = 1; continue; }
+                expanded = (Group *)realloc(g.groups, sizeof(Group) * (g.ngroups + 1));
+                if (!expanded) { storage_read_only = 1; break; }
+                g.groups = expanded;
+                { Group *loaded = &g.groups[g.ngroups++];
+                  memset(loaded, 0, sizeof(*loaded));
+                  loaded->name = storage_text(group, "name", L"默认");
+                  loaded->storage_json = sc_copy(group);
+                  if (!loaded->name || !loaded->storage_json) { storage_read_only = 1; break; }
+                  if (sc_member(group, "items", &items)) {
+                      if (items.type != SC_ARRAY) storage_read_only = 1;
+                      else {
+                          sc_iter(items, &item_iterator);
+                          while (sc_next(&item_iterator, &key, &item) > 0) {
+                              Item entry;
+                              if (storage_load_item(item, &entry, ++index, 1)) ia_push(&loaded->items, entry);
+                          }
+                      }
+                  }
                 }
             }
         }
-    } else {
-        g.groups = (Group *)calloc(1, sizeof(Group));
-        g.ngroups = 1;
-        g.groups[0].name = wcsdup2(L"默认");
-        ia_init(&g.groups[0].items);
     }
-    jv_free(root);
-    free(buf);
+    if (!g.ngroups) storage_default_group();
+    g.gi = (int)storage_number(root, "gi", 0);
+    if (g.gi < 0 || g.gi >= g.ngroups) g.gi = 0;
+    if (storage_read_only) storage_warning(L"部分数据无法完整读取，已启用只读保护，避免覆盖未知或损坏内容。");
+    return;
+invalid:
+    if (file) fclose(file);
+    free(buffer); storage_read_only = 1;
+    storage_default_group();
+    storage_warning(L"数据文件无效或读取失败，已启用只读保护；原文件未改动。");
 }
+
 
 /* ==========================================================================
  * 5. 剪贴板
@@ -657,7 +624,11 @@ static void ingest(const wchar_t *text) {
         for (i = g.clip.n - 1; i > 0; i--) g.clip.v[i] = g.clip.v[i - 1];
         g.clip.v[0] = tmp;
     }
-    while (g.clip.n > MAX_ITEMS) ia_erase(&g.clip, g.clip.n - 1);
+    /* Python retains favorites beyond the cap; C must not silently trim a
+     * larger configured history or erase the other edition's protected rows. */
+    for (i = g.clip.n - 1; i >= storage_max_items; --i) {
+        if (!g.clip.v[i].fav) ia_erase(&g.clip, i);
+    }
 }
 
 /* ==========================================================================
@@ -2038,6 +2009,7 @@ static void group_menu(int x, int y) {
             Group *ng = (Group *)realloc(g.groups, sizeof(Group) * (g.ngroups + 1));
             if (ng) {
                 g.groups = ng; g.ngroups++;
+                g.groups[g.ngroups - 1].storage_json = NULL;
                 g.groups[g.ngroups - 1].name = wcsdup2(name);
                 ia_init(&g.groups[g.ngroups - 1].items);
                 g.gi = g.ngroups - 1;
@@ -2059,6 +2031,7 @@ static void group_menu(int x, int y) {
             int k;
             ia_clear(&g.groups[g.gi].items);
             free(g.groups[g.gi].name);
+            free(g.groups[g.gi].storage_json);
             for (k = g.gi; k < g.ngroups - 1; k++) g.groups[k] = g.groups[k + 1];
             g.ngroups--;
             if (g.gi >= g.ngroups) g.gi = g.ngroups - 1;
@@ -2420,6 +2393,13 @@ static void selftest(void) {
     FILE *f = _wfopen(L"ClawBoardC_selftest.txt", L"w, ccs=UTF-8");
     wchar_t *r, *r2;
     if (!f) return;
+    /* Persistence tests must never replace the user's shared clipboard file. */
+    { wchar_t directory[MAX_PATH];
+      DWORD length = GetTempPathW(MAX_PATH, directory);
+      if (!length || length >= MAX_PATH || !GetTempFileNameW(directory, L"cbt", 0, storage_test_path)) {
+          fclose(f); return;
+      }
+    }
 
     memset(&g, 0, sizeof(g));
     ia_init(&g.clip);
@@ -2490,9 +2470,9 @@ static void selftest(void) {
     {
         int before = g.clip.n;
         int i;
-        for (i = 0; i < g.clip.n; i++) { free(g.clip.v[i].text); free(g.clip.v[i].app); }
+        for (i = 0; i < g.clip.n; i++) { free(g.clip.v[i].text); free(g.clip.v[i].app); free(g.clip.v[i].name); free(g.clip.v[i].storage_json); }
         free(g.clip.v); ia_init(&g.clip);
-        for (i = 0; i < g.ngroups; i++) { ia_clear(&g.groups[i].items); free(g.groups[i].name); }
+        for (i = 0; i < g.ngroups; i++) { ia_clear(&g.groups[i].items); free(g.groups[i].name); free(g.groups[i].storage_json); }
         free(g.groups); g.groups = NULL; g.ngroups = 0;
         load_data();
         fwprintf(f, L"[dbg] before=%d after=%d\n", before, g.clip.n);
@@ -2503,6 +2483,7 @@ static void selftest(void) {
 
     fwprintf(f, L"\n通过 %d 项，失败 %d 项\n", pass_cnt, fail_cnt);
     fclose(f);
+    DeleteFileW(storage_test_path); storage_test_path[0] = 0;
 }
 
 /* ==========================================================================
@@ -2528,7 +2509,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
     if (cmd && wcsstr(cmd, L"--selftest")) { selftest(); return 0; }
 
     /* 单实例互斥 */
-    mutex = CreateMutexW(NULL, TRUE, L"ClawBoardC_SingleInstance");
+    mutex = CreateMutexW(NULL, TRUE, L"ClawBoard_SingleInstance_Mutex");
+    if (!mutex) {
+        MessageBoxW(NULL, L"无法确认共享数据的单实例锁，已取消启动以保护历史文件。", APP_NAME, MB_OK | MB_ICONWARNING);
+        return 1;
+    }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND exist = FindWindowW(APP_CLASS, APP_NAME);
         if (exist) { ShowWindow(exist, SW_RESTORE); SetForegroundWindow(exist); }
@@ -2536,7 +2521,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show) {
     }
 
     memset(&g, 0, sizeof(g));
-    g.listen = 1; g.autopaste = 1; g.show_time = 0;
+    g.listen = 1; g.autopaste = 1; g.mask_sens = 1; g.show_time = 0;
     ia_init(&g.clip);
 
     register_classes(hInst);

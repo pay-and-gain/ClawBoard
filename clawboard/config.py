@@ -56,8 +56,9 @@ def _pick_data_dir():
 BASE_DIR = _pick_data_dir()
 DATA_FILE = os.path.join(BASE_DIR, 'ClawBoard数据.json')
 CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
-# 图标是随程序分发的资源，永远在 exe 旁边，不跟着数据目录跑
-ICON_FILE = os.path.join(_EXE_DIR, 'ClawBoard.ico')
+# onefile resources live in PyInstaller's bundle; installed directories may be
+# read-only, so tray setup must not generate an icon beside Program Files/exe.
+ICON_FILE = os.path.join(getattr(sys, '_MEIPASS', _EXE_DIR), 'ClawBoard.ico')
 
 # 保证 query.py / transform.py 与数据文件同目录可用（frozen 模式下同样如此）。
 if _EXE_DIR not in sys.path:
@@ -186,6 +187,13 @@ class ClipItemDict(TypedDict, total=False):
     time: str
     kind_auto: str          # 渲染缓存（内存态）
     mask_off: bool          # 内存态
+    pinned: int
+    use_count: int
+    tags: List[str]
+    trigger: str
+    image_path: str
+    image_w: int
+    image_h: int
 
 
 class SettingsDict(TypedDict, total=False):

@@ -118,7 +118,7 @@ Download `ClawBoard-2.6.1-portable.zip`, unzip anywhere, run `ClawBoard.exe`.
 ```bash
 git clone https://github.com/pay-and-gain/ClawBoard.git
 cd ClawBoard
-python ClawBoard.py     # requires Python 3 + tkinter (bundled with Windows)
+python ClawBoard.py     # Windows, Python 3.10+ with Tcl/Tk installed
 ```
 No pip dependencies.
 
@@ -156,7 +156,9 @@ built via `ClawBoardC/build.bat` (requires MSVC). Both builds **share the same d
 | [**Getting Started**](docs/getting-started.en.md) · [中文](docs/getting-started.md) | **New here? Start here**: 30-second quick start + 5-minute tutorial + core features one by one |
 | [Design notes](docs/DESIGN.en.md) · [中文](docs/制作思路.md) | **Features + usage guide + design thinking**: where requirements came from, method order, tech choices, implementation steps, pitfalls, measured numbers, FAQ |
 | [User manual](docs/使用说明.md) (Chinese) | Detailed operations manual |
-| [Architecture](docs/架构设计.md) (Chinese) | Layers, module split, dependency direction, call flows |
+| [Current architecture](docs/REFACTOR.md) (Chinese) | Services, thread boundaries, storage protection, compatibility and regression commands |
+| [Project review](docs/PROJECT_REVIEW.md) (Chinese) | Performance diagnosis, design trade-offs, issues and UI/icon recommendations |
+| [Earlier architecture](docs/架构设计.md) (Chinese) | Historical v1.5 plan for splitting the original script |
 | [Requirements & progress](docs/需求全景.md) · [PROGRESS](docs/PROGRESS.md) (Chinese) | Requirement overview and development log |
 | [CHANGELOG](CHANGELOG.md) | Version-by-version changes |
 
@@ -164,35 +166,52 @@ built via `ClawBoardC/build.bat` (requires MSVC). Both builds **share the same d
 
 ```
 ClawBoard.py            entry point + re-export aggregation layer
-clawboard/              Python package (16 responsibility modules, 4 layers)
-├─ config.py            centralized config + data contracts + AppState
-├─ runtime.py           runtime mutable globals (NO_SAVE etc.)
-├─ theme.py             color themes
-├─ classify.py          content-type classification
-├─ timefmt.py           time formatting + data migration
-├─ win32.py             Win32 declarations + DPI + single instance
-├─ clipboard.py         clipboard read/write + sensitive detection
-├─ hotkey.py            hotkey + tray (hidden message window)
-├─ widgets.py           shared widgets + layout/event helpers
-├─ vlist.py             virtualized scrolling list
-├─ dialogs.py           settings / transform / export dialogs
-└─ app*.py              main class (inherits 6 mixins)
-query.py                search syntax parser
+clawboard/              independent services + Windows / Tk adapters
+├─ application.py       capture, persistence and shutdown orchestration
+├─ models.py            data normalization and legacy C enum compatibility
+├─ history.py           history edits and derived metadata
+├─ search.py            query parser, lazy pinyin and bounded cache
+├─ privacy.py           sensitive-content and display policy
+├─ storage.py / media.py JSON and image-file storage
+├─ dispatch.py / tasks.py owner-thread delivery and bounded workers
+├─ services.py          clipboard acknowledgement and serialized saves
+├─ image.py             independently testable image codecs
+├─ windows_*.py         ABI, focus, geometry, input, system and hooks
+├─ win32_snapshot.py    immutable clipboard snapshots
+├─ tk_bridge.py         application results delivered to the Tk thread
+├─ viewmodels.py / vlist.py lazy row projection and reusable row pool
+├─ *_dialog.py          settings, transform and export UI
+└─ app*.py              compatible main-window and interaction adapters
+query.py                compatible public search API
 transform.py            27 text transforms
-ClawBoardC/             C implementation
+ClawBoardC/             C implementation and shared-JSON field preservation
 packaging/              build config (PyInstaller spec, icon, launcher, installer script)
-tests/                  regression tests (16 test files)
+tests/                  pure logic, adapter contracts and Windows desktop regressions
 └─ testdata/            test data generator
 docs/                   design docs + screenshots
 ```
 
-Dependency direction (no circular imports): `config` (leaf) → domain → system integration → UI widgets → UI orchestration → entry point.
+Domain logic does not import Tk or Win32. The application controller uses injected storage and system ports;
+the composition root connects the concrete adapters. Legacy `query.py`, `app_services.py`, `dialogs.py`
+and `win32.py` imports remain available. The source refactor keeps version **2.6.1**;
+the download section refers to published artifacts, and refactoring does not publish a new installer.
 
 ## 🧪 Tests
 
 ```bash
+python tests/_t44.py             # service-refactor suite; adds native compatibility on Windows
 python tests/test_core.py        # search syntax + time slots
-python tests/test_refactor.py    # architecture refactor regression
+```
+
+`_t44.py` collects `test_*.py`, including pure service tests and composition contracts with simulated
+system/UI ports. Linux skips the native Windows import check. Passing simulations does not validate
+the Windows ABI, focus transfer or rendered desktop behavior.
+
+Run the following desktop regressions on Windows after closing other ClawBoard instances.
+Use temporary data and `NO_SAVE` as required by each script:
+
+```bash
+python tests/test_refactor.py    # native re-export compatibility
 python tests/_t14.py             # content classification + card styles
 python tests/_t22.py             # toolbar layout
 python tests/_t24.py             # collapse / duplicate capture
@@ -207,9 +226,14 @@ python tests/_t32.py             # pinyin search + polyphonic phrases
 python tests/_t33.py             # image DIB↔PNG round-trip
 python tests/_t34.py             # auto-tagging
 python tests/_t35.py             # file-path capture via CF_HDROP
+python tests/_t37.py             # native file clipboard round trip
+python tests/_t42.py             # startup catch-up
+python tests/_t43.py             # multiple-monitor geometry
 ```
 
-**16 test files, 340+ assertions** in total, covering layout, geometry, data, interaction, search, paste, images and file paths.
+Use the current run's output for passed/skipped counts. Mixed-DPI monitors, real clipboard contention,
+browser/elevated-window paste, tray behavior and installers still require native Windows validation.
+See [REFACTOR.md](docs/REFACTOR.md) for the verification boundaries and maintenance rules.
 
 ## 🗺️ Roadmap
 

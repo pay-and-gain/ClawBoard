@@ -540,12 +540,29 @@ class ContentPreview:
         bar.pack(side='right', fill='y', padx=(4, 0))
         self.txt.configure(yscrollcommand=bar.set)
         self.txt.pack(side='left', fill='both', expand=True)
-        self.txt.insert('1.0', text or '')
-        self.txt.configure(state='disabled')
+        self._preview_text = text or ''
+        self._preview_offset = 0
+        self._insert_job = None
+        self._append_text_chunk()
         self.txt.bind('<MouseWheel>', self._wheel)
         x, y = self._pos()
         self.win.geometry('%dx%d+%d+%d' % (self.W, self.H, x, y))
         self._fade_in(0.0)
+
+    def _append_text_chunk(self):
+        self._insert_job = None
+        try:
+            self.txt.configure(state='normal')
+            chunk = self._preview_text[self._preview_offset:self._preview_offset + 16384]
+            self.txt.insert('end', chunk)
+            self._preview_offset += len(chunk)
+            self.txt.configure(state='disabled')
+            if self._preview_offset < len(self._preview_text):
+                self._insert_job = self.win.after(8, self._append_text_chunk)
+            else:
+                self._preview_text = ''
+        except tk.TclError:
+            self._preview_text = ''
 
     def _wheel(self, e):
         try:
@@ -572,6 +589,9 @@ class ContentPreview:
 
     def close(self):
         try:
+            if getattr(self, '_insert_job', None):
+                self.win.after_cancel(self._insert_job)
+                self._insert_job = None
             self.win.destroy()
         except Exception:
             pass
@@ -583,7 +603,7 @@ class ImagePreview:
     W, H = 460, 340
     GAP = 12
 
-    def __init__(self, app, image_path, meta=''):
+    def __init__(self, app, image_path=None, meta='', *, data=None):
         self.app = app
         self.win = tk.Toplevel(app.root)
         self.win.overrideredirect(True)
@@ -599,7 +619,7 @@ class ImagePreview:
         if meta:
             tk.Label(head, text=meta, bg=T['panel'], fg=T['fg2'],
                      font=FONT_SM).pack(side='right')
-        self.img = tk.PhotoImage(file=image_path)
+        self.img = tk.PhotoImage(data=data) if data is not None else tk.PhotoImage(file=image_path)
         while self.img.width() > self.W or self.img.height() > self.H:
             self.img = self.img.subsample(2, 2)
         tk.Label(box, image=self.img, bg=T['card']).pack(fill='both', expand=True,
@@ -631,5 +651,3 @@ class ImagePreview:
             self.win.destroy()
         except Exception:
             pass
-
-

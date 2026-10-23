@@ -118,7 +118,7 @@
 ```bash
 git clone https://github.com/pay-and-gain/ClawBoard.git
 cd ClawBoard
-python ClawBoard.py     # 需要 Python 3 + tkinter（Windows 自带）
+python ClawBoard.py     # Windows，Python 3.10+，安装时包含 Tcl/Tk
 ```
 零 pip 依赖。
 
@@ -156,7 +156,9 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 | [**新手教程**](docs/getting-started.md) · [English](docs/getting-started.en.md) | **第一次用？从这里开始**：30 秒上手 + 5 分钟教程 + 核心功能逐个上手 |
 | [制作思路](docs/制作思路.md) · [English](docs/DESIGN.en.md) | **功能说明 + 使用指南 + 设计思路**：需求来源、方法顺序、技术选型、实现步骤、踩坑、实测数据、FAQ |
 | [使用说明](docs/使用说明.md) | 详细操作手册 |
-| [架构设计](docs/架构设计.md) | 分层结构、模块划分、依赖方向、调用流程 |
+| [当前架构与维护约定](docs/REFACTOR.md) | 独立服务、线程边界、存储保护、兼容入口与回归方法 |
+| [项目解析与优化设计](docs/PROJECT_REVIEW.md) | 性能诊断、设计取舍、问题分析与 UI / 图标建议 |
+| [早期架构设计](docs/架构设计.md) | v1.5 单文件拆包的历史方案 |
 | [需求与进度](docs/需求全景.md) · [PROGRESS](docs/PROGRESS.md) | 需求全景与开发过程记录 |
 | [CHANGELOG](CHANGELOG.md) | 逐版本改动记录 |
 
@@ -164,35 +166,49 @@ pyinstaller packaging/ClawBoard.spec --noconfirm
 
 ```
 ClawBoard.py            入口 + re-export 聚合层
-clawboard/              Python 包（16 个职责模块，四层架构）
-├─ config.py            集中配置 + 数据契约 + AppState
-├─ runtime.py           运行时可变全局（NO_SAVE 等）
-├─ theme.py             主题配色
-├─ classify.py          内容自适应分类
-├─ timefmt.py           时间格式化 + 数据迁移
-├─ win32.py             Win32 声明 + DPI + 单实例
-├─ clipboard.py         剪贴板读写 + 敏感识别
-├─ hotkey.py            热键 + 托盘（隐藏消息窗口）
-├─ widgets.py           通用控件 + 布局/事件 helper
-├─ vlist.py             虚拟滚动列表
-├─ dialogs.py           设置/变换/导出弹窗
-└─ app*.py              主类（继承 6 个 mixin）
-query.py                搜索语法解析器
+clawboard/              独立服务 + Windows / Tk 适配器
+├─ application.py       应用控制器：提交采集结果、保存与关闭
+├─ models.py            数据契约归一化与旧 C 枚举兼容
+├─ history.py           入库、编辑与派生元数据更新
+├─ search.py            查询解析、惰性拼音与有界缓存
+├─ privacy.py           敏感识别和统一显示策略
+├─ storage.py / media.py JSON 与图片文件存储
+├─ dispatch.py / tasks.py 主线程结果队列与受限后台任务
+├─ services.py          剪贴板序列确认与串行保存服务
+├─ image.py             可独立测试的图片编解码
+├─ windows_*.py         ABI 声明、焦点、几何、输入、系统与钩子
+├─ win32_snapshot.py    一次性读取剪贴板快照
+├─ tk_bridge.py         将应用结果接到 Tk 主线程
+├─ viewmodels.py / vlist.py 惰性展示投影与复用行池
+├─ *_dialog.py          设置、变换与导出界面
+└─ app*.py              兼容的主窗口与交互适配层
+query.py                搜索公共 API 兼容入口
 transform.py            27 项文本变换
-ClawBoardC/             C 语言版本
+ClawBoardC/             C 语言版本与共享 JSON 字段保留逻辑
 packaging/              打包配置（PyInstaller spec、图标、启动脚本、安装包脚本）
-tests/                  回归测试（16 个测试文件）
+tests/                  纯逻辑、适配器合同与 Windows 桌面回归
 └─ testdata/            测试数据生成器
 docs/                   设计文档 + 截图
 ```
 
-依赖方向（禁止循环 import）：`config`（叶子）→ 领域层 → 系统接入层 → UI 控件层 → UI 编排层 → 入口。
+领域逻辑不依赖 Tk 或 Win32；应用控制器通过注入的存储和系统接口工作，组合根负责装配。
+旧的 `query.py`、`app_services.py`、`dialogs.py` 和 `win32.py` 保留兼容导出。
+这轮源码重构仍使用版本号 **2.6.1**；下载区对应已发布产物，重构本身不自动发布安装包。
 
 ## 🧪 测试
 
 ```bash
+python tests/_t44.py             # 服务重构汇总入口；Windows 上同时加载原生兼容测试
 python tests/test_core.py        # 搜索语法 + 时间时隙
-python tests/test_refactor.py    # 架构重构回归
+```
+
+`_t44.py` 汇总 `test_*.py`，包含纯服务测试以及用模拟系统/界面端口验证的装配合同。
+Linux 上会跳过需要 Windows 原生导入的兼容入口；模拟通过不代表 Win32 ABI、焦点或桌面效果已验证。
+
+Windows 桌面另跑以下回归，运行前退出其他 ClawBoard 实例，并按脚本要求使用临时数据目录与 `NO_SAVE`：
+
+```bash
+python tests/test_refactor.py    # 原生 re-export 兼容
 python tests/_t14.py             # 内容自适应 + 卡片样式
 python tests/_t22.py             # 工具条布局
 python tests/_t24.py             # 折叠 / 重复复制
@@ -207,9 +223,13 @@ python tests/_t32.py             # 拼音搜索 + 多音字词组
 python tests/_t33.py             # 图片 DIB↔PNG 往返
 python tests/_t34.py             # 内容自动标签
 python tests/_t35.py             # 文件路径记录 CF_HDROP
+python tests/_t37.py             # 文件剪贴板读写闭环
+python tests/_t42.py             # 启动补记
+python tests/_t43.py             # 多屏几何
 ```
 
-共 **16 个测试文件、340+ 项断言**，覆盖布局、几何、数据、交互、搜索、粘贴、图片、文件路径等核心路径。
+实际通过与跳过数量以当次输出为准。双屏不同 DPI、真实剪贴板争用、浏览器/管理员窗口粘贴、
+托盘和安装包仍需 Windows 真机验证；完整边界与测试方法见 [REFACTOR.md](docs/REFACTOR.md)。
 
 ## 🗺️ 迭代路线
 

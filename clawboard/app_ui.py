@@ -33,7 +33,7 @@ class UiMixin:
         self.bar.pack(fill='x')
         self.bar.pack_propagate(False)
         # 标题占满剩余宽度：整条标题栏（除了右边三个按钮）都是双击折叠的热区
-        self.title_lb = tk.Label(self.bar, text='⚡ ' + APP_NAME, bg=T['panel'],
+        self.title_lb = tk.Label(self.bar, text=self._default_title(), bg=T['panel'],
                                  fg=T['acc'], font=FONT_TITLE, anchor='w')
         # 按钮必须先 pack：pack 按调用顺序分配空间，标题带 expand=True 后 pack 的话
         # 会把按钮挤成 1px（和之前滚动条被挤成 1px 是同一个坑）
@@ -98,8 +98,9 @@ class UiMixin:
         self.search_ph = tk.Label(self.tool, bg=T['card'], fg=T['fg2'], font=FONT_SM,
                                   anchor='w', text='搜索…')
         self.search_ph.bind('<Button-1>', lambda e: self.search_entry.focus_set())
-        self.search.trace_add('write', lambda *a: self._sync_ph())
-        self.search_entry.bind('<KeyRelease>', lambda e: self.render())
+        if self._search_trace:
+            self.search.trace_remove('write', self._search_trace)
+        self._search_trace = self.search.trace_add('write', self._search_changed)
         self.search_entry.bind('<Escape>', lambda e: self.hide())
         self.search_entry.bind('<Return>', self.on_search_return)
         self.search_entry.bind('<Button-3>', lambda e: self.search_menu(e))
@@ -257,7 +258,11 @@ class UiMixin:
         except Exception:
             t = t[:18]
         self.title_lb.configure(text='⚡ ' + t)
-        self.root.after(2500, lambda: self.title_lb.configure(text='⚡ ' + APP_NAME))
+        self.root.after(2500, lambda: self.title_lb.configure(text=self._default_title()))
+
+    def _default_title(self):
+        readonly = bool(getattr(getattr(self, '_store', None), 'recovery_required', False))
+        return '⚡ ' + APP_NAME + (' · 只读保护' if readonly else '')
 
     def confirm(self, text, on_yes):
         Dialog(self.root, '确认', [('', text, True)],
@@ -326,79 +331,88 @@ class UiMixin:
     # ---------- 渲染 ----------
     def visible_items(self):
         q = self.search.get().strip()
-        out = []
         pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
-        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
+        selection = self.sel_clip if self.tab == 'clip' else self.sel_phrase
         self.search_err = ''
-        kw = ''
+        keyword = ''
         if q:
-            pool, cond = Q.match(q, pool)
-            if cond['errors']:
-                self.search_err = cond['errors'][0]
-            # 搜索态按「固定 → 使用次数 → 最近使用」排序；
-            # 默认浏览（q 为空）保持插入顺序不动。
-            pool = sorted(pool, key=lambda it: (
-                -(it.get('pinned') or 0),
-                -(it.get('use_count') or 0),
-                -(it.get('last_used_at') or it.get('created_at') or 0),
-            ))
-            kw = cond['terms'][0] if cond['terms'] else ''
-        for it in pool:
-            text = it['text']
-            name = it.get('name') or ''
-            hits = it.get('sens') or []
-            k = it.get('kind_auto')
-            if not k:
-                # 老记录（判定功能是后加的）补算一次并写回内存，之后不再重算
-                k = classify(text)[0]
-                it['kind_auto'] = k
-            disp = text
-            is_img = (it.get('content_type') == 'image')
-            if is_img:
-                k = 'image'
-                disp = '图片 %s×%s' % (it.get('image_w'), it.get('image_h'))
-            elif hits and self.st['mask_sensitive'] and not it.get('mask_off'):
-                disp = mask_text(text, hits)
-            size = int(it.get('content_size') or 0)
-            if self.tab == 'phrase':
-                sub = name or preview(text, 28)
-                badge = human_size(byte_size(text))
-            elif is_img:
-                sub = '%s · 图片' % (it.get('source_app') or 'unknown')
-                badge = '%s×%s' % (it.get('image_w'), it.get('image_h'))
+            application = getattr(self, 'application', None)
+            if application is None:
+                pool, condition = Q.match(q, pool)
             else:
-                parts = []
-                if self.st['show_time']:
-                    parts.append(rel_time(it.get('created_at'), it.get('is_estimated')))
-                parts.append(it.get('source_app') or 'unknown')
-                nl = text.count('\n')
-                if nl:
-                    parts.append('+%d 行' % nl)     # PasteBar 的 "+N lines" 角标
-                if int(it.get('copy_count') or 1) > 1:
-                    parts.append('×%d' % it['copy_count'])
-                if hits:
-                    parts.append('⚠' + '/'.join(hits))
-                tags = it.get('tags') or []
-                if tags:
-                    parts.append('🏷' + '/'.join(TAG_LABELS.get(t, t)
-                                                for t in tags[:3]))
-                sub = ' · '.join(parts)
-                badge = '%s %s' % (kind_icon(k), human_size(size))
-            if it.get('fav'):
-                disp = '★ ' + disp
-            if it.get('pinned'):
-                disp = '📌 ' + disp
-            out.append({'id': it['id'], 'disp': disp, 'text': text, 'sub': sub,
-                        'badge': badge, 'kind': self.tab, 'sens': hits, 'kind_auto': k,
-                        'created_at': it.get('created_at'),
-                        'est': it.get('is_estimated'),
-                        'app': it.get('source_app') or 'unknown',
-                        'image_path': it.get('image_path'),
-                        # 图片条目要带上尺寸：角落大图预览的标题「W×H」直接读这两个字段，
-                        # 漏了它们会让预览头显示成「None×None」。
-                        'image_w': it.get('image_w'),
-                        'image_h': it.get('image_h')})
-        return out, sel, kw
+                key = (q, self.tab, self.data.get('gi'), application.data_revision)
+                cached = getattr(self, '_filter_result', None)
+                if cached and cached[0] == key:
+                    pool, condition = cached[1]
+                else:
+                    if getattr(self, '_filter_pending', None) != key:
+                        self._start_filter(key, pool)
+                    pool, condition = [], {'terms': [], 'errors': []}
+            if condition['errors']:
+                self.search_err = condition['errors'][0]
+            pool = sorted(pool, key=lambda item: (
+                -(item.get('pinned') or 0), -(item.get('use_count') or 0),
+                -(item.get('last_used_at') or item.get('created_at') or 0)))
+            keyword = condition['terms'][0] if condition['terms'] else ''
+        projection = getattr(self, '_projection', None)
+        if projection is None:
+            from clawboard.viewmodels import ViewProjection
+            self._projection = projection = ViewProjection()
+        return projection.project(pool, self.tab, self.st), selection, keyword
+
+
+    def _start_filter(self, key, pool):
+        from copy import deepcopy
+        snapshot = deepcopy(pool)
+        self._filter_pending = key
+        def accept(result):
+            if self._filter_pending != key:
+                return
+            self._filter_pending = None
+            current = (self.search.get().strip(), self.tab, self.data.get('gi'),
+                       self.application.data_revision)
+            if current == key:
+                self._filter_result = (key, result)
+            self.render()
+        def failed(error):
+            self._filter_pending = None
+            self.note('搜索失败：' + type(error).__name__)
+            self.tip('搜索未完成，请缩小范围后重试')
+        submitted = self.application.tasks.submit(self.application.search.match, key[0], snapshot,
+                                                key='filter', on_result=accept, on_error=failed)
+        if submitted is None:
+            self._filter_pending = None
+            self.root.after(150, self.render)
+
+
+    def _search_changed(self, *_):
+        self._sync_ph()
+        if self._search_job:
+            self.root.after_cancel(self._search_job)
+        self._search_job = self.root.after(120, self._finish_search_change)
+
+
+    def _finish_search_change(self):
+        self._search_job = None
+        self.render()
+
+    def ensure_current_results(self):
+        """An action must never use rows from an earlier debounced query."""
+        query = self.search.get().strip()
+        view = (self.tab, self.data.get('gi'), query)
+        ready = getattr(self, '_last_view_key', None) == view
+        if query:
+            key = (query, self.tab, self.data.get('gi'), self.application.data_revision)
+            cached = self._filter_result
+            ready = ready and not self._filter_pending and bool(cached and cached[0] == key)
+        if ready:
+            return True
+        if self._search_job:
+            self.root.after_cancel(self._search_job)
+            self._search_job = None
+        self.render()
+        self.tip('搜索结果更新中，请稍后再试')
+        return False
 
     def render(self):
         for t in (self.tab_clip, self.tab_phr):
@@ -421,8 +435,13 @@ class UiMixin:
         if self.search_err:
             self.tip('语法：' + self.search_err)
         # 常用语 Tab 空着时给针对性提示，而不是复述剪贴板那套"复制点什么"
-        self.vlist.set_empty_text('还没有常用语，点 ＋ 新建' if self.tab == 'phrase' else None)
-        self.vlist.set_data(items, sel, kw)
+        waiting = bool(self.search.get().strip() and self._filter_pending)
+        self.vlist.set_empty_text('搜索中…' if waiting else
+                                 ('还没有常用语，点 ＋ 新建' if self.tab == 'phrase' else None))
+        view_key = (self.tab, self.data.get('gi'), self.search.get().strip())
+        reset = getattr(self, '_last_view_key', None) != view_key
+        self._last_view_key = view_key
+        self.vlist.set_data(items, sel, kw, reset_scroll=reset)
         # 空数据引导：只在剪贴板 Tab、无搜索词、整库为空时显示；列表一旦有内容即自动隐藏。
         # 判定完全基于数据，所以"用户删光数据"后引导会自然回来。
         self._sync_onboard(onboard.should_show(self.tab, self.search.get(), self.data))
@@ -461,6 +480,7 @@ class UiMixin:
         # 让 _seq 跟上示例里的最大 seq，否则之后 ingest 可能分配出重复 seq
         self._seq = max([self._seq] +
                         [int(x.get('seq') or 0) for x in self.data['clip']])
+        self.application.history.sequence = max(self.application.history.sequence, self._seq)
         self.sel_clip = items[0]['id'] if items else None
         self.tab = 'clip'
         self.save(True)

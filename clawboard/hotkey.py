@@ -76,10 +76,12 @@ def make_ico(path, size=32):
 class HiddenWindow(threading.Thread):
     """独立线程创建 message-only 窗口，承载 RegisterHotKey 与托盘回调"""
 
-    def __init__(self, on_hotkey, on_tray):
+    def __init__(self, on_hotkey, on_tray, on_clipboard=None):
         threading.Thread.__init__(self, daemon=True)
         self.on_hotkey = on_hotkey
         self.on_tray = on_tray
+        self.on_clipboard = on_clipboard
+        self.clipboard_listener = False
         self.hwnd = None
         self.ready = threading.Event()
         self.hotkey_id = 1
@@ -90,7 +92,14 @@ class HiddenWindow(threading.Thread):
 
     def wndproc(self, hwnd, msg, wp, lp):
         try:
-            if msg == WM_APP_REG:
+            if msg == 0x031D and self.on_clipboard:  # WM_CLIPBOARDUPDATE
+                self.on_clipboard()
+            elif msg == 0x0010:  # WM_CLOSE must be handled by this window's owner.
+                if self.clipboard_listener:
+                    u32.RemoveClipboardFormatListener(hwnd)
+                u32.DestroyWindow(hwnd)
+                return 0
+            elif msg == WM_APP_REG:
                 self._do_reg(int(wp), int(lp))
             elif msg == WM_APP_UNREG:
                 self._do_unreg()
@@ -117,6 +126,12 @@ class HiddenWindow(threading.Thread):
             self.hwnd = u32.CreateWindowExW(0, 'ClawBoardMsgWindow', 'ClawBoardMsg',
                                             0, 0, 0, 0, 0, HWND_MESSAGE,
                                             None, wc.hInstance, None)
+            if self.hwnd and self.on_clipboard:
+                u32.AddClipboardFormatListener.argtypes = [wintypes.HWND]
+                u32.AddClipboardFormatListener.restype = wintypes.BOOL
+                u32.RemoveClipboardFormatListener.argtypes = [wintypes.HWND]
+                u32.RemoveClipboardFormatListener.restype = wintypes.BOOL
+                self.clipboard_listener = bool(u32.AddClipboardFormatListener(self.hwnd))
         except Exception:
             traceback.print_exc()
         finally:
@@ -222,6 +237,6 @@ class HiddenWindow(threading.Thread):
     def stop(self):
         try:
             if self.hwnd:
-                u32.PostQuitMessage(0)
+                u32.PostMessageW(self.hwnd, 0x0010, 0, 0)
         except Exception:
             pass

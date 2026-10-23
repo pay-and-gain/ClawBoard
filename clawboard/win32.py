@@ -1,1042 +1,220 @@
 # -*- coding: utf-8 -*-
-"""Win32 ctypes 声明 + 系统原语 + 单实例 + 开机自启。
+"""兼容入口；Win32 适配器按职责分离，旧导出与测试替换点保持有效。
 
-唯一承载点：
-- 坑③ DPI 声明：init_dpi_awareness()，读窗口坐标/测量前必须调用。
-- 单实例互斥、进程/窗口/显示器/内存统计、发键/前台切换、开机自启都在本模块。
+DLL/ABI 声明只在 windows_api；各功能模块不反向导入本入口。
+属性通过定义模块读取，键盘 hook 的可变状态始终只有一份。
 """
 import ctypes
 import os
 import sys
 import time
+import threading
+import types
 import winreg
 from ctypes import wintypes
 
 from clawboard.config import APP_NAME, BASE_DIR
-
-u32 = ctypes.WinDLL('user32', use_last_error=True)
-k32 = ctypes.WinDLL('kernel32', use_last_error=True)
-psapi = ctypes.WinDLL('psapi')
-advapi = ctypes.WinDLL('advapi32', use_last_error=True)
-
-CF_UNICODETEXT = 13
-CF_HDROP = 15                 # 资源管理器按 Ctrl+C 复制文件时的格式（HDROP 句柄列表）
-GMEM_MOVEABLE = 0x0002
-HWND_MESSAGE = wintypes.HWND(-3)
-WM_HOTKEY = 0x0312
-WM_USER = 0x0400
-WM_TRAY = WM_USER + 1
-WM_LBUTTONUP = 0x0202
-WM_RBUTTONUP = 0x0205
-WM_DESTROY = 0x0002
-WM_APP_REG = WM_USER + 2      # 请求注册热键（必须在消息线程内执行）
-WM_APP_UNREG = WM_USER + 3
-NIF_INFO = 0x00000010
-NIIF_INFO = 0x00000001
-MOD_ALT, MOD_CONTROL, MOD_SHIFT = 0x0001, 0x0002, 0x0004
-VK_V = 0x56
-VK_CONTROL = 0x11
-VK_SHIFT, VK_MENU = 0x10, 0x12          # Shift / Alt
-INPUT_KEYBOARD = 1
-KEYEVENTF_KEYUP = 0x0002
-# Windows 官方的「别把我记进剪贴板历史」标记，KeePassXC / 1Password / Bitwarden 都会设置它。
-# 取自 Ditto src/Clip.cpp:364 与 :400（ExcludeClipboardContentFromMonitorProcessing、
-# CanIncludeInClipboardHistory=0）——这是剪贴板工具该守的礼貌，比任何敏感词正则都准。
-CF_NAME_EXCLUDE = 'ExcludeClipboardContentFromMonitorProcessing'
-CF_NAME_INCLUDE_HISTORY = 'CanIncludeInClipboardHistory'
-NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
-NIF_MESSAGE, NIF_ICON, NIF_TIP = 0x1, 0x2, 0x4
-IMAGE_ICON = 1
-LR_LOADFROMFILE = 0x0010
-LR_DEFAULTSIZE = 0x0040
-
-LRESULT = ctypes.c_ssize_t
-WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, wintypes.UINT,
-                             wintypes.WPARAM, wintypes.LPARAM)
-
-u32.GetClipboardSequenceNumber.restype = wintypes.DWORD
-u32.GetClipboardSequenceNumber.argtypes = []
-u32.OpenClipboard.argtypes = [wintypes.HWND]
-u32.OpenClipboard.restype = wintypes.BOOL
-u32.CloseClipboard.restype = wintypes.BOOL
-u32.EmptyClipboard.restype = wintypes.BOOL
-u32.GetClipboardData.argtypes = [wintypes.UINT]
-u32.GetClipboardData.restype = wintypes.HANDLE
-u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
-u32.SetClipboardData.restype = wintypes.HANDLE
-u32.GetForegroundWindow.restype = wintypes.HWND
-u32.SetForegroundWindow.argtypes = [wintypes.HWND]
-u32.SetForegroundWindow.restype = wintypes.BOOL
-u32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
-u32.ShowWindow.restype = wintypes.BOOL
-u32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
-u32.FindWindowW.restype = wintypes.HWND
-u32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
-u32.RegisterHotKey.restype = wintypes.BOOL
-u32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
-u32.UnregisterHotKey.restype = wintypes.BOOL
-u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-u32.PostMessageW.restype = wintypes.BOOL
-u32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-u32.GetCursorPos.restype = wintypes.BOOL
-
-MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
-                                     ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
-u32.EnumDisplayMonitors.argtypes = [wintypes.HANDLE, ctypes.c_void_p,
-                                   MONITORENUMPROC, wintypes.LPARAM]
-u32.EnumDisplayMonitors.restype = wintypes.BOOL
-k32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
-k32.CreateMutexW.restype = wintypes.HANDLE
-u32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR,
-                                wintypes.DWORD, ctypes.c_int, ctypes.c_int,
-                                ctypes.c_int, ctypes.c_int, wintypes.HWND,
-                                wintypes.HMENU, wintypes.HINSTANCE, ctypes.c_void_p]
-u32.CreateWindowExW.restype = wintypes.HWND
-u32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-u32.DefWindowProcW.restype = LRESULT
-u32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND,
-                            wintypes.UINT, wintypes.UINT]
-u32.GetMessageW.restype = wintypes.BOOL
-u32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
-u32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
-u32.PostQuitMessage.argtypes = [ctypes.c_int]
-u32.LoadImageW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT,
-                           ctypes.c_int, ctypes.c_int, wintypes.UINT]
-u32.LoadImageW.restype = wintypes.HANDLE
-u32.DestroyIcon.argtypes = [wintypes.HICON]
-u32.DestroyIcon.restype = wintypes.BOOL
-sh32 = ctypes.WinDLL('shell32', use_last_error=True)
-sh32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.c_void_p]
-sh32.Shell_NotifyIconW.restype = wintypes.BOOL
-# shell32 的别名，供「读取 CF_HDROP 文件路径」使用。
-# 坑③同类：DragQueryFileW 的第一个参数 HDROP 是 64 位句柄，且返回 c_uint（文件数/字符数），
-# 不声明 argtypes/restype 会被 ctypes 按 c_int 截断 64 位句柄（本项目此前 GetClipboardData /
-# GlobalSize 就栽在这里），所以这里必须显式声明。
-shell32 = sh32
-shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT,
-                                   wintypes.LPWSTR, wintypes.UINT]
-shell32.DragQueryFileW.restype = wintypes.UINT
-u32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte, wintypes.DWORD, ctypes.c_ulong]
-u32.RegisterClipboardFormatW.argtypes = [wintypes.LPCWSTR]
-u32.RegisterClipboardFormatW.restype = wintypes.UINT
-u32.IsClipboardFormatAvailable.argtypes = [wintypes.UINT]
-u32.IsClipboardFormatAvailable.restype = wintypes.BOOL
-u32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-u32.GetAsyncKeyState.restype = ctypes.c_short
-u32.SendInput.argtypes = [wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
-u32.SendInput.restype = wintypes.UINT
-u32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
-u32.MapVirtualKeyW.restype = wintypes.UINT
-u32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
-u32.AttachThreadInput.restype = wintypes.BOOL
-u32.BringWindowToTop.argtypes = [wintypes.HWND]
-u32.BringWindowToTop.restype = wintypes.BOOL
-u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
-u32.GetWindowThreadProcessId.restype = wintypes.DWORD
-k32.GetCurrentThreadId.restype = wintypes.DWORD
-
-k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
-k32.GlobalAlloc.restype = wintypes.HANDLE
-k32.GlobalLock.argtypes = [wintypes.HANDLE]
-k32.GlobalLock.restype = ctypes.c_void_p
-k32.GlobalUnlock.argtypes = [wintypes.HANDLE]
-k32.GlobalUnlock.restype = wintypes.BOOL
-k32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
-k32.GetModuleHandleW.restype = wintypes.HMODULE
-k32.GetCurrentProcess.restype = wintypes.HANDLE
-k32.GetProcessTimes.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
-                                ctypes.POINTER(wintypes.FILETIME),
-                                ctypes.POINTER(wintypes.FILETIME),
-                                ctypes.POINTER(wintypes.FILETIME)]
-k32.GetProcessTimes.restype = wintypes.BOOL
-k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-k32.OpenProcess.restype = wintypes.HANDLE
-k32.CloseHandle.argtypes = [wintypes.HANDLE]
-k32.CloseHandle.restype = wintypes.BOOL
-k32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
-                                           wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-k32.QueryFullProcessImageNameW.restype = wintypes.BOOL
-u32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-u32.GetWindowTextW.restype = ctypes.c_int
-
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-TITLE_BAD_WORDS = ('密码', '银行卡', '登录', 'password', 'bank')
-
-
-class WNDCLASS(ctypes.Structure):
-    _fields_ = [('style', wintypes.UINT), ('lpfnWndProc', WNDPROC),
-                ('cbClsExtra', ctypes.c_int), ('cbWndExtra', ctypes.c_int),
-                ('hInstance', wintypes.HINSTANCE), ('hIcon', wintypes.HICON),
-                ('hCursor', wintypes.HANDLE), ('hbrBackground', wintypes.HANDLE),
-                ('lpszMenuName', wintypes.LPCWSTR), ('lpszClassName', wintypes.LPCWSTR)]
-
-
-u32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASS)]
-u32.RegisterClassW.restype = wintypes.ATOM
-
-
-class NOTIFYICONDATA(ctypes.Structure):
-    _fields_ = [('cbSize', wintypes.DWORD), ('hWnd', wintypes.HWND), ('uID', wintypes.UINT),
-                ('uFlags', wintypes.UINT), ('uCallbackMessage', wintypes.UINT),
-                ('hIcon', wintypes.HICON), ('szTip', wintypes.WCHAR * 128),
-                ('dwState', wintypes.DWORD), ('dwStateMask', wintypes.DWORD),
-                ('szInfo', wintypes.WCHAR * 256), ('uTimeout', wintypes.UINT),
-                ('uVersion', wintypes.UINT), ('szInfoTitle', wintypes.WCHAR * 64),
-                ('dwInfoFlags', wintypes.DWORD), ('guidItem', ctypes.c_byte * 16),
-                ('hBalloonIcon', wintypes.HICON)]
-
-
-class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-    _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD),
-                ('PeakWorkingSetSize', ctypes.c_size_t), ('WorkingSetSize', ctypes.c_size_t),
-                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-                ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                ('PagefileUsage', ctypes.c_size_t), ('PeakPagefileUsage', ctypes.c_size_t)]
-
-
-psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE,
-                                       ctypes.POINTER(PROCESS_MEMORY_COUNTERS),
-                                       wintypes.DWORD]
-psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
-
-
-def mem_mb():
-    c = PROCESS_MEMORY_COUNTERS()
-    c.cb = ctypes.sizeof(c)
-    if psapi.GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(c), c.cb):
-        return c.WorkingSetSize / 1048576.0
-    return -1.0
-
-
-def cpu_ms():
-    a, b, c, d = (wintypes.FILETIME(), wintypes.FILETIME(),
-                  wintypes.FILETIME(), wintypes.FILETIME())
-    if k32.GetProcessTimes(k32.GetCurrentProcess(), ctypes.byref(a),
-                           ctypes.byref(b), ctypes.byref(c), ctypes.byref(d)):
-        t = ((c.dwHighDateTime << 32) + c.dwLowDateTime +
-             (d.dwHighDateTime << 32) + d.dwLowDateTime)
-        return t / 10000.0
-    return -1.0
-
-
-# ---- 发按键：SendInput + 扫描码（取自 Ditto src/SendKeys.cpp:237 / :326）----
-
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [('wVk', wintypes.WORD), ('wScan', wintypes.WORD),
-                ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD),
-                ('dwExtraInfo', ctypes.c_void_p)]
-
-
-class MOUSEINPUT(ctypes.Structure):
-    """必须原样写出来：INPUT 是联合体，大小取最大成员（64 位下 MOUSEINPUT=32 字节）。
-    少写了它、用 byte*24 顶替，sizeof(INPUT) 就是 32 而不是 40，SendInput 会直接失败。"""
-    _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG),
-                ('mouseData', wintypes.DWORD), ('dwFlags', wintypes.DWORD),
-                ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_void_p)]
-
-
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [('uMsg', wintypes.DWORD), ('wParamL', wintypes.WORD),
-                ('wParamH', wintypes.WORD)]
-
-
-class _INPUTUNION(ctypes.Union):
-    _fields_ = [('ki', KEYBDINPUT), ('mi', MOUSEINPUT), ('hi', HARDWAREINPUT)]
-
-
-class INPUT(ctypes.Structure):
-    _fields_ = [('type', wintypes.DWORD), ('u', _INPUTUNION)]
-
-
-def _kbd(vk, up=False):
-    inp = INPUT()
-    inp.type = INPUT_KEYBOARD
-    inp.u.ki.wVk = vk
-    inp.u.ki.wScan = u32.MapVirtualKeyW(vk, 0)      # 带扫描码，兼容性更好
-    inp.u.ki.dwFlags = KEYEVENTF_KEYUP if up else 0
-    return inp
-
-
-def send_key(vk, up=False, gap=0.01):
-    try:
-        inp = _kbd(vk, up)
-        u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
-    except Exception:
-        return
-    if gap:
-        time.sleep(gap)
-
-
-MODIFIER_VKS = (VK_CONTROL, VK_SHIFT, VK_MENU, 0x5B, 0x5C)   # Ctrl/Shift/Alt/LWin/RWin
-
-
-def all_keys_up(gap=0.005):
-    """发键前先抬起所有还按着的修饰键。
-    Ditto SendKeys.cpp:237 的 AllKeysUp：用户按着 Ctrl 唤起面板时，残留的 Ctrl
-    会把我们的 Ctrl+V 变成 Ctrl+Ctrl+V，目标程序收到的是裸 V，粘贴就"失灵"了。"""
-    for vk in MODIFIER_VKS:
-        try:
-            if u32.GetAsyncKeyState(vk) & 0x8000:
-                send_key(vk, up=True, gap=gap)
-        except Exception:
-            pass
-
-
-def send_ctrl_v():
-    """Ctrl+V。改用 SendInput：一次一个事件、带扫描码，比已废弃的 keybd_event 可靠"""
-    all_keys_up()
-    send_key(VK_CONTROL, gap=0.008)
-    send_key(VK_V, gap=0.012)
-    send_key(VK_V, up=True, gap=0.008)
-    send_key(VK_CONTROL, up=True, gap=0)
-
-
-def send_backspaces(n, gap=0.018):
-    """连发 n 次退格（触发词替换：删掉刚输入的触发词 + 分隔符）。"""
-    for _ in range(max(0, int(n))):
-        send_key(VK_BACK, gap=gap)
-
-
-# ---------------- WM_PASTE 直接投递（面板不用让位、不抢焦点） ----------------
-WM_PASTE = 0x0302
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-TOKEN_QUERY = 0x0008
-TOKEN_INTEGRITY_LEVEL = 25
-SECURITY_MANDATORY_HIGH_RID = 0x3000   # 12288
-
-
-class GUITHREADINFO(ctypes.Structure):
-    _fields_ = [('cbSize', wintypes.DWORD), ('flags', wintypes.DWORD),
-                ('hwndActive', wintypes.HWND), ('hwndFocus', wintypes.HWND),
-                ('hwndCapture', wintypes.HWND), ('hwndMenuOwner', wintypes.HWND),
-                ('hwndMoveSize', wintypes.HWND), ('hwndCaret', wintypes.HWND),
-                ('rcCaret', wintypes.RECT)]
-
-
-u32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)]
-u32.GetGUIThreadInfo.restype = wintypes.BOOL
-u32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
-                             wintypes.LPARAM]
-u32.SendMessageW.restype = ctypes.c_ssize_t
-k32.GetCurrentProcessId.restype = wintypes.DWORD
-advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD,
-                                    ctypes.POINTER(wintypes.HANDLE)]
-advapi.OpenProcessToken.restype = wintypes.BOOL
-advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
-                                       wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
-advapi.GetTokenInformation.restype = wintypes.BOOL
-
-
-def target_focus_hwnd(hwnd_top):
-    """目标窗口里真正持有焦点的控件（输入框）。发 WM_PASTE 要发给它，不是顶层窗口。"""
-    hwnd_top = int(hwnd_top or 0)
-    if not hwnd_top:
-        return 0
-    try:
-        tid = u32.GetWindowThreadProcessId(hwnd_top, None)
-        if not tid:
-            return hwnd_top
-        gti = GUITHREADINFO()
-        gti.cbSize = ctypes.sizeof(GUITHREADINFO)
-        if u32.GetGUIThreadInfo(tid, ctypes.byref(gti)) and gti.hwndFocus:
-            return int(gti.hwndFocus)
-    except Exception:
-        pass
-    return hwnd_top
-
-
-def _pid_integrity(pid):
-    """进程完整性级别 RID（0x1000 低 / 0x2000 中 / 0x3000 高 / 0x4000 系统）。
-    拿不到返回 None。"""
-    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not h:
-        return None
-    try:
-        tok = wintypes.HANDLE()
-        if not advapi.OpenProcessToken(h, TOKEN_QUERY, ctypes.byref(tok)):
-            return None
-        try:
-            need = wintypes.DWORD()
-            advapi.GetTokenInformation(tok, TOKEN_INTEGRITY_LEVEL, None, 0,
-                                       ctypes.byref(need))
-            if not need.value:
-                return None
-            buf = ctypes.create_string_buffer(need.value)
-            if not advapi.GetTokenInformation(tok, TOKEN_INTEGRITY_LEVEL, buf,
-                                              need.value, ctypes.byref(need)):
-                return None
-            # TOKEN_MANDATORY_LABEL = { PSID Label; DWORD Attributes; }
-            # SID 布局：Revision(1) SubAuthorityCount(1) Authority(6) SubAuthority[n]
-            sid_addr = ctypes.c_void_p.from_buffer(buf, 0).value
-            if not sid_addr:
-                return None
-            sub_cnt = ctypes.c_ubyte.from_address(sid_addr + 1).value
-            return ctypes.c_uint32.from_address(
-                sid_addr + 8 + (sub_cnt - 1) * 4).value
-        finally:
-            k32.CloseHandle(tok)
-    finally:
-        k32.CloseHandle(h)
-
-
-def _integrity_of(hwnd):
-    hwnd = int(hwnd or 0)
-    if not hwnd:
-        return None
-    try:
-        pid = wintypes.DWORD()
-        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        return _pid_integrity(pid.value)
-    except Exception:
-        return None
-
-
-def is_elevated_hwnd(hwnd):
-    """目标进程完整性级别是否高于本进程（UAC 高权限窗口）。
-
-    UIPI 会静默拦截发往更高完整性进程的 SendMessage / SendInput，WM_PASTE 无效，
-    检测到就得退回「抢焦点 + 模拟 Ctrl+V」（同样可能被拦，但至少有失败提示）。
-    """
-    me = _pid_integrity(k32.GetCurrentProcessId())
-    target = _integrity_of(hwnd)
-    if target is None:
-        return False                    # 拿不到就当不是，走正常路径
-    if me is None:
-        return target >= SECURITY_MANDATORY_HIGH_RID
-    return target > me
-
-
-def paste_message(hwnd_top):
-    """用 WM_PASTE 直接投递到目标窗口的焦点控件，不抢焦点、面板不动。
-    返回 True 表示已发送（不代表目标一定处理）。标准 Edit/RichEdit 可靠，
-    浏览器/Electron 一般能透传；高权限窗口会被 UIPI 拦（先 is_elevated_hwnd 判断）。"""
-    focus = target_focus_hwnd(hwnd_top)
-    if not focus:
-        return False
-    try:
-        u32.SendMessageW(focus, WM_PASTE, 0, 0)
-        return True
-    except Exception:
-        return False
-
-
-# 只有这些原生编辑控件才 100% 处理 WM_PASTE；其余（浏览器/Electron/UWP/自绘）别赌。
-EDIT_CLASSES = ('edit', 'richedit20a', 'richedit20w', 'richedit50w',
-                'richedit', 'richeditd2dpt')
-
-
-def _focus_class_name(hwnd):
-    cls = ctypes.create_unicode_buffer(256)
-    u32.GetClassNameW(hwnd, cls, 256)
-    return cls.value.lower()
-
-
-def can_paste_message(hwnd_top):
-    """目标窗口能否安全地用 WM_PASTE 投递（面板完全不动）。
-
-    只有「焦点控件是标准 Edit/RichEdit 且非高权限窗口」才返回 True ——
-    这两条能保证 WM_PASTE 一定生效。其它情况退回抢焦点路径。"""
-    if is_elevated_hwnd(hwnd_top):
-        return False                    # UIPI 会拦，投了也是白投
-    focus = target_focus_hwnd(hwnd_top)
-    if not focus:
-        return False
-    return _focus_class_name(focus) in EDIT_CLASSES
-
-
-u32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
-u32.GetWindowRect.restype = wintypes.BOOL
-
-
-def window_rect(hwnd):
-    """窗口在屏幕上的矩形 (left, top, right, bottom)，物理坐标。"""
-    hwnd = int(hwnd or 0)
-    if not hwnd:
-        return None
-    r = wintypes.RECT()
-    try:
-        if u32.GetWindowRect(hwnd, ctypes.byref(r)):
-            return (r.left, r.top, r.right, r.bottom)
-    except Exception:
-        pass
-    return None
-
-
-def rects_overlap(a, b):
-    """两个矩形是否相交（含边界）。a/b 都是 (left, top, right, bottom)。"""
-    ax, ay, ar, ab = a
-    bx, by, br, bb = b
-    return not (ar <= bx or br <= ax or ab <= by or bb <= ay)
-
-
-# ---------------- 全屏检测（全屏程序前台时面板不再置顶） ----------------
-MONITOR_DEFAULTTONEAREST = 2
-
-
-class MONITORINFO(ctypes.Structure):
-    _fields_ = [('cbSize', wintypes.DWORD),
-                ('rcMonitor', wintypes.RECT),
-                ('rcWork', wintypes.RECT),
-                ('dwFlags', wintypes.DWORD)]
-
-
-u32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
-u32.MonitorFromWindow.restype = wintypes.HMONITOR
-u32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
-u32.GetMonitorInfoW.restype = wintypes.BOOL
-# 坑③同类：HWND 在 64 位是 64 位句柄，不声明 argtypes 会被 ctypes 按 c_int 截断。
-u32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-u32.GetClassNameW.restype = ctypes.c_int
-# 窗口状态 / 样式：用于「有标题栏的最大化窗口不算全屏」这条排除。
-# GetWindowLongW 的 HWND 同样必须声明 argtypes（64 位句柄截断坑），返回值用 LONG。
-u32.IsZoomed.argtypes = [wintypes.HWND]
-u32.IsZoomed.restype = wintypes.BOOL
-u32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
-u32.GetWindowLongW.restype = wintypes.LONG
-
-GWL_STYLE = -16
-WS_CAPTION = 0x00C00000          # WS_BORDER | WS_DLGFRAME
-
-# 桌面 / Shell 窗口本来就铺满整屏，但绝不是「全屏程序」，必须排除；否则桌面上
-# 会永远被判成全屏。Shell_TrayWnd/Shell_SecondaryTrayWnd 是任务栏（本就不满屏），一并排除。
-_DESKTOP_CLASSES = ('progman', 'workerw', 'shell_traywnd', 'shell_secondarytraywnd')
-
-
-def class_name_of(hwnd):
-    """窗口类名（小写）。取不到返回 ''。"""
-    try:
-        buf = ctypes.create_unicode_buffer(256)
-        u32.GetClassNameW(wintypes.HWND(int(hwnd or 0)), buf, 256)
-        return (buf.value or '').lower()
-    except Exception:
-        return ''
-
-
-def monitor_rect_of(hwnd):
-    """窗口**所在显示器**的完整矩形 (left, top, right, bottom)，物理像素。
-
-    必须用 MonitorFromWindow 取窗口所在的那台显示器 —— 本机双屏 + 主屏 125%，
-    拿主屏尺寸去比副屏上的窗口会直接判错。
-    """
-    hwnd = int(hwnd or 0)
-    if not hwnd:
-        return None
-    try:
-        hmon = u32.MonitorFromWindow(wintypes.HWND(hwnd), MONITOR_DEFAULTTONEAREST)
-        if not hmon:
-            return None
-        mi = MONITORINFO()
-        mi.cbSize = ctypes.sizeof(MONITORINFO)
-        if u32.GetMonitorInfoW(hmon, ctypes.byref(mi)):
-            r = mi.rcMonitor
-            return (r.left, r.top, r.right, r.bottom)
-    except Exception:
-        pass
-    return None
-
-
-def rect_covers(win_rect, mon_rect, tol=2):
-    """窗口矩形是否覆盖整个显示器矩形（容差 tol 像素，容忍边框 / 取整误差）。"""
-    if not win_rect or not mon_rect:
-        return False
-    wl, wt, wr, wb = win_rect
-    ml, mt, mr, mb = mon_rect
-    return (wl <= ml + tol and wt <= mt + tol and
-            wr >= mr - tol and wb >= mb - tol)
-
-
-def is_zoomed(hwnd):
-    """窗口是否处于「最大化」（WS_MAXIMIZE）。取不到当 False。"""
-    try:
-        return bool(u32.IsZoomed(wintypes.HWND(int(hwnd or 0))))
-    except Exception:
-        return False
-
-
-def has_caption(hwnd):
-    """窗口是否有标题栏（WS_CAPTION 位）。取不到当 False。"""
-    try:
-        style = u32.GetWindowLongW(wintypes.HWND(int(hwnd or 0)), GWL_STYLE)
-    except Exception:
-        return False
-    return bool(style & WS_CAPTION)
-
-
-def is_fullscreen_window(hwnd, self_hwnd=0):
-    """窗口是否「全屏」覆盖了它所在显示器的整个画面。
-
-    用于「全屏程序前台时面板不再置顶」。排除三类：句柄 0 / 面板自己 / 桌面与 Shell。
-    另排除「有标题栏的最大化窗口」—— 那不是全屏程序（见下）。
-
-    坐标系：进程启动时已声明 per-monitor DPI 感知（init_dpi_awareness →
-    SetProcessDpiAwareness(2)），因此 GetWindowRect 与 GetMonitorInfoW 返回的都是
-    **物理像素**，可直接比较，不需要再乘 / 除任何缩放系数（这正是本机双屏 + 主屏
-    125% 下不引入 1/缩放 偏差的关键）。
-
-    为什么要「IsZoomed 且有标题栏」这条额外排除：当用户**开启任务栏自动隐藏**时，
-    普通最大化窗口的 `rcWork == rcMonitor`，它的矩形会**等于整个显示器** —— 几何上
-    与真全屏无法区分，只能靠窗口状态来分。三类真全屏都不会命中该排除：独占全屏与
-    F11 式全屏 IsZoomed=False；无边框窗口化全屏即便 IsZoomed 也没有 WS_CAPTION。
-    """
-    hwnd = int(hwnd or 0)
-    if not hwnd:
-        return False
-    if self_hwnd and hwnd == int(self_hwnd):
-        return False
-    if class_name_of(hwnd).lower() in _DESKTOP_CLASSES:
-        return False
-    if not rect_covers(window_rect(hwnd), monitor_rect_of(hwnd), 2):
-        return False
-    if is_zoomed(hwnd) and has_caption(hwnd):
-        return False
-    return True
-
-
-
-def force_foreground(hwnd, timeout=0.35):
-    """把目标窗口抢回前台，并且**等它真的拿到焦点**才返回。
-    Ditto ExternalWindowTracker.cpp:187 的 AttachThreadInput 技巧：Windows 默认禁止
-    后台进程抢焦点（前台锁定），附加到当前前台线程的输入队列后就允许了；
-    :119 的 WaitForActiveWnd 用 Sleep(0) 轮询等焦点真的切过去，比固定 sleep 可靠。"""
-    hwnd = int(hwnd or 0)
-    if not hwnd:
-        return False
-    if u32.GetForegroundWindow() == hwnd:
-        return True
-    attached = False
-    fg_tid = 0
-    me = k32.GetCurrentThreadId()
-    try:
-        fg = u32.GetForegroundWindow()
-        fg_tid = u32.GetWindowThreadProcessId(fg, None) if fg else 0
-        if fg_tid and fg_tid != me:
-            attached = bool(u32.AttachThreadInput(fg_tid, me, True))
-        u32.BringWindowToTop(wintypes.HWND(hwnd))
-        u32.SetForegroundWindow(wintypes.HWND(hwnd))
-    except Exception:
-        pass
-    finally:
-        if attached:
-            try:
-                u32.AttachThreadInput(fg_tid, k32.GetCurrentThreadId(), False)
-            except Exception:
-                pass
-    end = time.time() + timeout
-    while time.time() < end:
-        if u32.GetForegroundWindow() == hwnd:
-            return True
-        time.sleep(0.01)
-    return u32.GetForegroundWindow() == hwnd
-
-
-def monitors():
-    """列出所有显示器的矩形（多显示器下 winfo_screenwidth 只给主屏，不够用）"""
-    out = []
-
-    @MONITORENUMPROC
-    def cb(hmon, hdc, lprc, lp):
-        r = lprc.contents
-        out.append((r.left, r.top, r.right, r.bottom))
-        return True
-    try:
-        u32.EnumDisplayMonitors(None, None, cb, 0)
-    except Exception:
-        pass
-    if not out:
-        out = [(0, 0, 1920, 1080)]
-    return out
-
-
-def visible_ratio(x, y, w, h):
-    """窗口与**所有**显示器的可见交集**之和**占自身面积的比例（上限 1.0）。
-
-    docstring 一直这么写，但旧实现取的是「各显示器交集比例的最大值」——
-    窗口跨在两屏之间时按单屏最多只能算到 **< 1**（恰好 50/50 骑跨才是 0.5，偏向一侧时
-    更大但仍 < 1），于是被 ensure_onscreen 误判成「跑出屏幕」而拉回主屏（跨过去了下次
-    呼出又被拽回来）。改成求和才与文档一致：
-    跨屏（整个窗口落在虚拟桌面内）→ 1.0；完全出屏 → 0；单屏内 → 1.0。
-    多显示器矩形互不重叠时和自然 ≤ 1.0，重叠时 clamp 到 1.0 以防 > 1。
-    """
-    if w <= 0 or h <= 0:
-        return 0.0
-    total = 0.0
-    for (l, t, r, b) in monitors():
-        iw = min(x + w, r) - max(x, l)
-        ih = min(y + h, b) - max(y, t)
-        if iw > 0 and ih > 0:
-            total += (iw * ih) / float(w * h)
-    return min(total, 1.0)
-
-
-def proc_name_of(hwnd):
-    pid = wintypes.DWORD(0)
-    u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    if not pid.value:
-        return 'unknown'
-    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
-    if not h:
-        return 'unknown'
-    try:
-        buf = ctypes.create_unicode_buffer(512)
-        size = wintypes.DWORD(512)
-        if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
-            base = os.path.basename(buf.value)
-            return os.path.splitext(base)[0] or 'unknown'
-    finally:
-        k32.CloseHandle(h)
-    return 'unknown'
-
-
-def window_title_of(hwnd):
-    buf = ctypes.create_unicode_buffer(512)
-    u32.GetWindowTextW(hwnd, buf, 512)
-    t = (buf.value or '').strip()
-    low = t.lower()
-    if any(w in low for w in TITLE_BAD_WORDS):
-        return None          # 含敏感词的窗口标题一律不记录
-    return t or None
-
-
-def system_dpi():
-    """真实系统 DPI（96/120/144…），不依赖 Tk scaling 的初始化时机。
-
-    frozen 环境下 Tk 的 tk scaling 会延迟到窗口映射后才反映真实 DPI，
-    直接读它会拿到默认 1.333、把 125% 缩放误判成 100%。所以改用 Win32 直读。
-    """
-    try:
-        dpi = ctypes.windll.user32.GetDpiForSystem()   # Win10 1607+ / Win11
-        if dpi:
-            return int(dpi)
-    except Exception:
-        pass
-    try:
-        hdc = ctypes.windll.user32.GetDC(0)
-        dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)   # LOGPIXELSX
-        ctypes.windll.user32.ReleaseDC(0, hdc)
-        if dpi:
-            return int(dpi)
-    except Exception:
-        pass
-    return 96
-
-
-def dpi_scale(root):
-    """当前屏幕相对 100% 的缩放系数（96 DPI=1.0，120 DPI=1.25）。
-
-    用 Win32 GetDpiForSystem 直读系统 DPI，不读 tk scaling —— 后者在 frozen 下
-    会延迟生效，且已被 UI 缩放（config.UI_SCALE）改写，读它会双重缩放/误判。
-    """
-    k = system_dpi() / 96.0
-    return k if 0.5 <= k <= 4.0 else 1.0
-
-
-def capture_source(self_hwnd, delay_retry=True):
-    """抓取当前前台进程名。竞态：抓到自己/空 → 延迟 50ms 重试一次"""
-    for attempt in range(2):
-        hwnd = u32.GetForegroundWindow()
-        if hwnd and hwnd != self_hwnd:
-            name = proc_name_of(hwnd)
-            if name != 'unknown':
-                return name, hwnd
-        if attempt == 0 and delay_retry:
-            time.sleep(0.05)
-    return 'unknown', None
-
-
-def init_dpi_awareness():
-    """坑③唯一承载点：读窗口坐标/测量前必须先声明 DPI 感知。
-
-    内部 SetProcessDpiAwareness(2) + try/except；`dpi_scale(root)` 也归本模块。
-    约定：任何读取窗口几何/做屏幕测量的路径（main/--shot/--bench/测试脚本）都复用本函数。
-    """
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except Exception:
-        pass
-
-
-MUTEX = [None]
-
-
-def single_instance():
-    """互斥体：二次启动聚焦已有实例后退出"""
-    MUTEX[0] = k32.CreateMutexW(None, True, 'ClawBoard_SingleInstance_Mutex')
-    if ctypes.get_last_error() == 183:      # ERROR_ALREADY_EXISTS
-        try:
-            hwnd = u32.FindWindowW(None, APP_NAME)
-            if hwnd:
-                u32.ShowWindow(hwnd, 9)     # SW_RESTORE
-                u32.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
-        return False
-    return True
-
-
-# ---------------- 开机自启（只写当前用户注册表，可逆） ----------------
-RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
-RUN_NAME = 'ClawBoard'
-
-
-def autostart_cmd():
-    """frozen 时写 exe 自身；脚本运行时写 pythonw + 脚本路径"""
-    if getattr(sys, 'frozen', False):
-        return '"%s"' % sys.executable
-    py = sys.executable.replace('python.exe', 'pythonw.exe')
-    if not os.path.exists(py):
-        py = sys.executable
-    return '"%s" "%s"' % (py, os.path.join(BASE_DIR, 'ClawBoard.py'))
-
-
-def get_autostart():
-    """读取注册表真实状态，不信任配置文件"""
-    try:
-        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY)
-        v, _ = winreg.QueryValueEx(k, RUN_NAME)
-        winreg.CloseKey(k)
-        return True, v
-    except Exception:
-        return False, ''
-
-
-def set_autostart(on):
-    try:
-        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE)
-        if on:
-            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, autostart_cmd())
-        else:
-            try:
-                winreg.DeleteValue(k, RUN_NAME)
-            except Exception:
-                pass
-        winreg.CloseKey(k)
-        return True
-    except Exception:
-        return False
-
-
-# ---------------- 窗口外观：圆角 + Acrylic 毛玻璃 ----------------
-# 实验结论（本机 Win11 实测）：
-#   · 圆角 (DWMWA_WINDOW_CORNER_PREFERENCE=33) —— 有效，方角变圆角
-#   · Acrylic (SetWindowCompositionAttribute) —— 有效，窗口有毛玻璃底
-#   · Mica (DWMWA_SYSTEMBACKDROP_TYPE=38) —— 无效：overrideredirect 是 WS_POPUP，
-#     系统不给 Mica 背景（API 返回成功但视觉无变化）
-#   · 深色标题栏 —— 无意义（无边框窗口没有标题栏）
-# 重要：Tk 的 winfo_id() 是**子窗口**，DWM 属性必须设在**顶层窗口**上，
-#       对子窗口调用会返回 0x80070006（句柄无效）。
-_dwm = ctypes.windll.dwmapi
-
-DWMWA_WINDOW_CORNER_PREFERENCE = 33
-DWMWCP_DEFAULT = 0
-DWMWCP_DONOTROUND = 1
-DWMWCP_ROUND = 2
-
-u32.SetWindowCompositionAttribute.argtypes = [wintypes.HWND, ctypes.c_void_p]
-u32.SetWindowCompositionAttribute.restype = wintypes.BOOL
-WCA_ACCENT_POLICY = 19
-ACCENT_DISABLED = 0
-ACCENT_ENABLE_BLURBEHIND = 3
-ACCENT_ENABLE_ACRYLICBLURBEHIND = 4
-
-
-class ACCENTPOLICY(ctypes.Structure):
-    _fields_ = [('AccentState', ctypes.c_int),
-                ('AccentFlags', ctypes.c_int),
-                ('GradientColor', ctypes.c_uint),   # 0xAABBGGRR（注意是 BGR）
-                ('AnimationId', ctypes.c_int)]
-
-
-class WINCOMPATTRDATA(ctypes.Structure):
-    _fields_ = [('Attribute', ctypes.c_int),
-                ('Data', ctypes.POINTER(ACCENTPOLICY)),
-                ('SizeOfData', ctypes.c_size_t)]
-
-
-def top_hwnd(root):
-    """取顶层窗口句柄。
-
-    Tk 的 winfo_id() 返回的是内部子窗口；DWM / 合成属性必须作用在顶层窗口上，
-    否则调用返回 0x80070006（ERROR_INVALID_HANDLE）。
-    """
-    try:
-        h = int(root.winfo_id())
-        p = u32.GetParent(wintypes.HWND(h))
-        return int(p) if p else h
-    except Exception:
-        return 0
-
-
-def set_rounded(root, on=True):
-    """窗口圆角。返回是否成功（老系统不支持时静默失败）。"""
-    try:
-        v = ctypes.c_int(DWMWCP_ROUND if on else DWMWCP_DONOTROUND)
-        hr = _dwm.DwmSetWindowAttribute(
-            wintypes.HWND(top_hwnd(root)),
-            ctypes.c_uint(DWMWA_WINDOW_CORNER_PREFERENCE),
-            ctypes.byref(v), ctypes.sizeof(v))
-        return hr == 0
-    except Exception:
-        return False
-
-
-def set_acrylic(root, on=True, color=0xB0252831):
-    """Acrylic 毛玻璃背景。
-
-    color 是 0xAABBGGRR（Alpha 在前、且是 BGR 顺序）。不透明窗口下只在外围
-    间隙露出模糊底；把窗口 -alpha 调低会整体变透（实测过 0.88 会太透，不建议）。
-    """
-    try:
-        accent = ACCENTPOLICY()
-        accent.AccentState = ACCENT_ENABLE_ACRYLICBLURBEHIND if on else ACCENT_DISABLED
-        accent.AccentFlags = 2
-        accent.GradientColor = color
-        accent.AnimationId = 0
-        data = WINCOMPATTRDATA()
-        data.Attribute = WCA_ACCENT_POLICY
-        data.Data = ctypes.pointer(accent)
-        data.SizeOfData = ctypes.sizeof(accent)
-        return bool(u32.SetWindowCompositionAttribute(
-            wintypes.HWND(top_hwnd(root)), ctypes.byref(data)))
-    except Exception:
-        return False
-
-
-def apply_window_effects(root, rounded=True, frosted=True, frosted_color=0xB0252831):
-    """一次性应用窗口外观开关（圆角 + 毛玻璃）。返回 (圆角成功, 毛玻璃成功)。"""
-    return (set_rounded(root, rounded), set_acrylic(root, frosted, frosted_color))
-
-
-# ---------------- 全局键盘钩子（触发词监听） ----------------
-import threading
-
-WH_KEYBOARD_LL = 13
-WM_KEYDOWN = 0x0100
-WM_KEYUP = 0x0101
-WM_SYSKEYDOWN = 0x0104
-WM_SYSKEYUP = 0x0105
-
-VK_BACK = 0x08
-VK_TAB = 0x09
-VK_RETURN = 0x0D
-VK_SPACE = 0x20
-VK_CAPITAL = 0x14
-
-
-class KBDLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [('vkCode', wintypes.DWORD), ('scanCode', wintypes.DWORD),
-                ('flags', wintypes.DWORD), ('time', wintypes.DWORD),
-                ('dwExtraInfo', ctypes.c_void_p)]
-
-
-HOOKPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM,
-                              wintypes.LPARAM)
-
-u32.SetWindowsHookExW.argtypes = [ctypes.c_int, HOOKPROC, wintypes.HINSTANCE,
-                                  wintypes.DWORD]
-u32.SetWindowsHookExW.restype = ctypes.c_void_p
-u32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, wintypes.WPARAM,
-                               wintypes.LPARAM]
-u32.CallNextHookEx.restype = ctypes.c_ssize_t
-u32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
-u32.UnhookWindowsHookEx.restype = wintypes.BOOL
-u32.GetKeyState.argtypes = [ctypes.c_int]
-u32.GetKeyState.restype = ctypes.c_short
-
-
-# 美式键盘 OEM 键到字符（无 Shift 时）
-_OEM_BASE = {0xBC: ',', 0xBE: '.', 0xBD: '-', 0xBA: ';', 0xBF: '/',
-             0xDE: "'", 0xDC: '\\', 0xC0: '`', 0xDB: '[', 0xDD: ']', 0xBB: '='}
-# 有 Shift 时（数字键的符号 + OEM 键上档）
-_OEM_SHIFT = {0xBC: '<', 0x30: ')', 0x31: '!', 0x32: '@', 0x33: '#', 0x34: '$',
-              0x35: '%', 0x36: '^', 0x37: '&', 0x38: '*', 0x39: '(', 0xBE: '>',
-              0xBD: '_', 0xBA: ':', 0xBF: '?', 0xDE: '"', 0xDC: '|',
-              0xC0: '~', 0xDB: '{', 0xDD: '}', 0xBB: '+'}
-
-
-def vk_to_char(vk, shift, caps):
-    """vkCode → 字符（美式键盘简化映射）。返回 '' 表示无法识别。"""
-    if 0x30 <= vk <= 0x39:                  # 数字 0-9
-        return _OEM_SHIFT.get(vk) if shift else chr(vk)
-    if 0x41 <= vk <= 0x5A:                  # 字母 A-Z
-        upper = bool(shift) != bool(caps)   # Shift 与 CapsLock 异或决定大小写
-        c = chr(vk)
-        return c if upper else c.lower()
-    if vk == VK_SPACE:
-        return ' '
-    if vk == VK_TAB:
-        return '\t'
-    if vk == VK_RETURN:
-        return '\n'
-    if vk in _OEM_BASE:
-        return _OEM_SHIFT.get(vk) if shift else _OEM_BASE[vk]
-    return ''
-
-
-_hook = None
-_hook_cb = None
-_hook_stop = None
-_hook_thread = None
-
-
-def start_keyboard_hook(on_char, on_backspace):
-    """启动全局低级键盘钩子（WH_KEYBOARD_LL）。
-
-    on_char(ch)：普通字符键按下时回调（单字符 str）
-    on_backspace()：退格按下时回调
-
-    回调在钩子的消息循环线程被调用，不能在里面做耗时操作——把事件转交给
-    主线程（塞进 queue.Queue，主线程轮询消费）即可。返回是否设置成功。
-    """
-    global _hook, _hook_cb, _hook_stop, _hook_thread
-    if _hook:
-        return True
-
-    @HOOKPROC
-    def _cb(nCode, wParam, lParam):
-        if nCode >= 0 and wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
-            kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-            vk = kb.vkCode
-            if vk == VK_BACK:
-                on_backspace()
-            else:
-                shift = bool(u32.GetKeyState(VK_SHIFT) & 0x8000)
-                caps = bool(u32.GetKeyState(VK_CAPITAL) & 0x0001)
-                ch = vk_to_char(vk, shift, caps)
-                if ch:
-                    on_char(ch)
-        return u32.CallNextHookEx(None, nCode, wParam, lParam)
-
-    _hook_cb = _cb
-    _hook = u32.SetWindowsHookExW(WH_KEYBOARD_LL, _cb, k32.GetModuleHandleW(None), 0)
-    if not _hook:
-        return False
-
-    _hook_stop = threading.Event()
-
-    def _loop():
-        msg = wintypes.MSG()
-        while not _hook_stop.is_set():
-            if u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-                u32.TranslateMessage(ctypes.byref(msg))
-                u32.DispatchMessageW(ctypes.byref(msg))
-
-    _hook_thread = threading.Thread(target=_loop, daemon=True)
-    _hook_thread.start()
-    return True
-
-
-def stop_keyboard_hook():
-    """卸载键盘钩子、停止消息循环线程。"""
-    global _hook, _hook_cb, _hook_stop, _hook_thread
-    if _hook:
-        u32.UnhookWindowsHookEx(_hook)
-        _hook = None
-    if _hook_stop:
-        _hook_stop.set()
-        u32.PostQuitMessage(0)
-    _hook_cb = None
-    _hook_stop = None
-    _hook_thread = None
-
+from clawboard import (
+    windows_api, windows_input, windows_focus, windows_geometry,
+    windows_system, windows_effects, windows_hooks,
+)
+
+_MODULES = (windows_api, windows_input, windows_focus, windows_geometry,
+            windows_system, windows_effects, windows_hooks)
+_OWNER_NAMES = {
+    'ACCENTPOLICY': 'windows_api',
+    'ACCENT_DISABLED': 'windows_api',
+    'ACCENT_ENABLE_ACRYLICBLURBEHIND': 'windows_api',
+    'ACCENT_ENABLE_BLURBEHIND': 'windows_api',
+    'CF_HDROP': 'windows_api',
+    'CF_NAME_EXCLUDE': 'windows_api',
+    'CF_NAME_INCLUDE_HISTORY': 'windows_api',
+    'CF_UNICODETEXT': 'windows_api',
+    'DWMWA_WINDOW_CORNER_PREFERENCE': 'windows_api',
+    'DWMWCP_DEFAULT': 'windows_api',
+    'DWMWCP_DONOTROUND': 'windows_api',
+    'DWMWCP_ROUND': 'windows_api',
+    'EDIT_CLASSES': 'windows_focus',
+    'GMEM_MOVEABLE': 'windows_api',
+    'GUITHREADINFO': 'windows_api',
+    'GWL_STYLE': 'windows_api',
+    'HARDWAREINPUT': 'windows_api',
+    'HOOKPROC': 'windows_api',
+    'HWND_MESSAGE': 'windows_api',
+    'IMAGE_ICON': 'windows_api',
+    'INPUT': 'windows_api',
+    'INPUT_KEYBOARD': 'windows_api',
+    'KBDLLHOOKSTRUCT': 'windows_api',
+    'KEYBDINPUT': 'windows_api',
+    'KEYEVENTF_KEYUP': 'windows_api',
+    'LRESULT': 'windows_api',
+    'LR_DEFAULTSIZE': 'windows_api',
+    'LR_LOADFROMFILE': 'windows_api',
+    'MODIFIER_VKS': 'windows_api',
+    'MOD_ALT': 'windows_api',
+    'MOD_CONTROL': 'windows_api',
+    'MOD_SHIFT': 'windows_api',
+    'MONITORENUMPROC': 'windows_api',
+    'MONITORINFO': 'windows_api',
+    'MONITOR_DEFAULTTONEAREST': 'windows_api',
+    'MOUSEINPUT': 'windows_api',
+    'MUTEX': 'windows_system',
+    'NIF_ICON': 'windows_api',
+    'NIF_INFO': 'windows_api',
+    'NIF_MESSAGE': 'windows_api',
+    'NIF_TIP': 'windows_api',
+    'NIIF_INFO': 'windows_api',
+    'NIM_ADD': 'windows_api',
+    'NIM_DELETE': 'windows_api',
+    'NIM_MODIFY': 'windows_api',
+    'NOTIFYICONDATA': 'windows_api',
+    'PROCESS_MEMORY_COUNTERS': 'windows_api',
+    'PROCESS_QUERY_LIMITED_INFORMATION': 'windows_api',
+    'RUN_KEY': 'windows_system',
+    'RUN_NAME': 'windows_system',
+    'SECURITY_MANDATORY_HIGH_RID': 'windows_api',
+    'TITLE_BAD_WORDS': 'windows_system',
+    'TOKEN_INTEGRITY_LEVEL': 'windows_api',
+    'TOKEN_QUERY': 'windows_api',
+    'VK_BACK': 'windows_api',
+    'VK_CAPITAL': 'windows_api',
+    'VK_CONTROL': 'windows_api',
+    'VK_MENU': 'windows_api',
+    'VK_RETURN': 'windows_api',
+    'VK_SHIFT': 'windows_api',
+    'VK_SPACE': 'windows_api',
+    'VK_TAB': 'windows_api',
+    'VK_V': 'windows_api',
+    'WCA_ACCENT_POLICY': 'windows_api',
+    'WH_KEYBOARD_LL': 'windows_api',
+    'WINCOMPATTRDATA': 'windows_api',
+    'WM_APP_REG': 'windows_api',
+    'WM_APP_UNREG': 'windows_api',
+    'WM_DESTROY': 'windows_api',
+    'WM_HOTKEY': 'windows_api',
+    'WM_KEYDOWN': 'windows_api',
+    'WM_KEYUP': 'windows_api',
+    'WM_LBUTTONUP': 'windows_api',
+    'WM_PASTE': 'windows_api',
+    'WM_RBUTTONUP': 'windows_api',
+    'WM_SYSKEYDOWN': 'windows_api',
+    'WM_SYSKEYUP': 'windows_api',
+    'WM_TRAY': 'windows_api',
+    'WM_USER': 'windows_api',
+    'WNDCLASS': 'windows_api',
+    'WNDPROC': 'windows_api',
+    'WS_CAPTION': 'windows_api',
+    '_DESKTOP_CLASSES': 'windows_geometry',
+    '_INPUTUNION': 'windows_api',
+    '_OEM_BASE': 'windows_hooks',
+    '_OEM_SHIFT': 'windows_hooks',
+    '_dwm': 'windows_api',
+    'gdi32': 'windows_api',
+    'shcore': 'windows_api',
+    '_focus_class_name': 'windows_focus',
+    '_hook': 'windows_hooks',
+    '_hook_cb': 'windows_hooks',
+    '_hook_stop': 'windows_hooks',
+    '_hook_thread': 'windows_hooks',
+    '_hook_tid': 'windows_hooks',
+    '_hook_lock': 'windows_hooks',
+    'HOOK_START_TIMEOUT': 'windows_hooks',
+    'HOOK_STOP_TIMEOUT': 'windows_hooks',
+    'PASTE_MESSAGE_TIMEOUT_MS': 'windows_focus',
+    'SMTO_ABORTIFHUNG': 'windows_api',
+    'WM_QUIT': 'windows_api',
+    'PM_NOREMOVE': 'windows_api',
+    '_integrity_of': 'windows_focus',
+    '_kbd': 'windows_input',
+    '_pid_integrity': 'windows_focus',
+    'advapi': 'windows_api',
+    'all_keys_up': 'windows_input',
+    'apply_window_effects': 'windows_effects',
+    'autostart_cmd': 'windows_system',
+    'can_paste_message': 'windows_focus',
+    'capture_source': 'windows_system',
+    'class_name_of': 'windows_geometry',
+    'cpu_ms': 'windows_system',
+    'dpi_scale': 'windows_system',
+    'force_foreground': 'windows_focus',
+    'get_autostart': 'windows_system',
+    'has_caption': 'windows_geometry',
+    'init_dpi_awareness': 'windows_system',
+    'is_elevated_hwnd': 'windows_focus',
+    'is_fullscreen_window': 'windows_geometry',
+    'is_zoomed': 'windows_geometry',
+    'k32': 'windows_api',
+    'mem_mb': 'windows_system',
+    'monitor_rect_of': 'windows_geometry',
+    'monitors': 'windows_geometry',
+    'paste_message': 'windows_focus',
+    'proc_name_of': 'windows_system',
+    'psapi': 'windows_api',
+    'rect_covers': 'windows_geometry',
+    'rects_overlap': 'windows_geometry',
+    'send_backspaces': 'windows_input',
+    'send_ctrl_v': 'windows_input',
+    'send_key': 'windows_input',
+    'set_acrylic': 'windows_effects',
+    'set_autostart': 'windows_system',
+    'set_rounded': 'windows_effects',
+    'sh32': 'windows_api',
+    'shell32': 'windows_api',
+    'single_instance': 'windows_system',
+    'start_keyboard_hook': 'windows_hooks',
+    'stop_keyboard_hook': 'windows_hooks',
+    'system_dpi': 'windows_system',
+    'target_focus_hwnd': 'windows_focus',
+    'top_hwnd': 'windows_geometry',
+    'u32': 'windows_api',
+    'visible_ratio': 'windows_geometry',
+    'vk_to_char': 'windows_hooks',
+    'window_rect': 'windows_geometry',
+    'window_title_of': 'windows_system'
+}
+_OWNERS = {name: globals()[module] for name, module in _OWNER_NAMES.items()}
+__all__ = sorted({name for name in _OWNERS if not name.startswith('_')} | {
+    'ctypes', 'os', 'sys', 'time', 'threading', 'winreg', 'wintypes', 'APP_NAME', 'BASE_DIR',
+})
+
+
+def __getattr__(name):
+    owner = _OWNERS.get(name)
+    if owner is not None:
+        return getattr(owner, name)
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_OWNERS))
+
+
+class _CompatibilityModule(types.ModuleType):
+    def __setattr__(self, name, value):
+        owner = _OWNERS.get(name)
+        if owner is None:
+            super().__setattr__(name, value)
+            if name in ('ctypes', 'os', 'sys', 'time', 'threading', 'winreg',
+                        'wintypes', 'APP_NAME', 'BASE_DIR'):
+                for module in _MODULES:
+                    if name in vars(module):
+                        setattr(module, name, value)
+            return
+        # 旧回归会替换 W.monitors/W.window_rect；同时更新引用它的适配器，
+        # 避免 facade 名称变了、实际函数却仍调用导入时旧对象的隐蔽分叉。
+        setattr(owner, name, value)
+        for module in _MODULES:
+            if module is not owner and name in vars(module):
+                setattr(module, name, value)
+
+    def __delattr__(self, name):
+        owner = _OWNERS.get(name)
+        if owner is None:
+            return super().__delattr__(name)
+        # mock.patch 把 __getattr__ 导出视为非本地属性：退出时先 delattr，
+        # 再用 setattr 恢复。只删定义端，保留消费者引用，让恢复时的转发
+        # 仍能找到并更新它们；避免内层 patch 留下外层/内层的临时对象。
+        delattr(owner, name)
+
+
+sys.modules[__name__].__class__ = _CompatibilityModule

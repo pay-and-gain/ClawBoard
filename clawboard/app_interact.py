@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""InteractionMixin + PhraseMixin：交互 / 粘贴 / 常用语 / 搜索 / 变换 / 导出。
+"""Owner-thread interaction and phrase editing; paste lives in PasteMixin.
 
 PhraseMixin：add_phrase / save_as_phrase / push_phrase / edit_phrase / rename_phrase /
              find / find_raw_item / split_words。
@@ -11,24 +11,17 @@ InteractionMixin：on_click_item / on_menu_item / on_hover_item / toggle_fav / s
              on_search_return / search_menu / clear_history / select_all_visible /
              open_query_help / current_target_text / open_transform / open_export。
 """
-import time
-import os
-import io
-import threading
 import tkinter as tk
 
-from clawboard import sound
-from clawboard.config import FONT, BASE_DIR
+from clawboard import runtime
+from clawboard.config import FONT
 from clawboard.theme import T
 from clawboard.runtime import uid
-from clawboard.classify import human_size, preview, to_plain
-from clawboard.timefmt import full_time, now_ms, rel_time
-from clawboard.clipboard import (clip_read, clip_write,
-                                 clip_write_files, looks_like_file_list)
-from clawboard.image import png_to_dib, write_clipboard_dib
-from clawboard.win32 import (force_foreground, send_ctrl_v,
-                             paste_message, can_paste_message,
-                             window_rect, rects_overlap)
+from clawboard.classify import human_size, preview
+from clawboard.privacy import display_text
+from clawboard.paste_adapter import PasteMixin
+from clawboard.timefmt import full_time, rel_time
+from clawboard.clipboard import clip_read
 from clawboard.widgets import (Dialog, SplitDialog, CopyToast, ContentPreview,
                                ImagePreview)
 from clawboard.dialogs import SettingsWindow, TransformWindow, ExportDialog
@@ -73,7 +66,7 @@ class PhraseMixin:
 
         def done(v):
             if v and v[0].strip():
-                it['text'] = v[0]
+                self.application.history.replace_text(it, v[0])
                 it['trigger'] = (v[1] or '').strip()
                 self.save(True)
                 self.render()
@@ -122,7 +115,7 @@ class PhraseMixin:
         SplitDialog(self, text)
 
 
-class InteractionMixin(PhraseMixin):
+class InteractionMixin(PhraseMixin, PasteMixin):
     # ---------- 交互 ----------
     def on_click_item(self, i, e=None):
         """Ctrl = 多选切换，Shift = 连选，都不触发粘贴；普通单击 = 选中并粘贴"""
@@ -238,14 +231,18 @@ class InteractionMixin(PhraseMixin):
                                         it.get('copy_count', 1)),
             '最近粘贴：%s' % full_time(it.get('last_used_at')),
             '来源应用：%s' % src,
-            '窗口标题：%s' % (it.get('source_title') or '（未记录）'),
+            '窗口标题：%s' % display_text(it.get('source_title') or '（未记录）',
+                                           masked=self.st.get('mask_sensitive', True),
+                                           reveal=bool(it.get('mask_off'))),
             '类型/大小：%s / %s（%d 字符）' % (it.get('content_type'),
                                             human_size(int(it.get('content_size') or 0)),
                                             len(it.get('text') or '')),
             '序号 seq：%s' % it.get('seq'),
             '',
             '内容预览：',
-            preview(it.get('text'), 200),
+            preview(display_text(it.get('text'), it.get('sens') or None,
+                                 masked=self.st.get('mask_sensitive', True),
+                                 reveal=bool(it.get('mask_off'))), 200),
         ])
         Dialog(self.root, '条目详情', [('', body, True)],
                on_ok=lambda v: None, ok_text='关闭').show(460, 380)
@@ -266,6 +263,9 @@ class InteractionMixin(PhraseMixin):
         self.vlist.update_view()
 
     def quick_paste(self, n):
+        guard = getattr(self, 'ensure_current_results', None)
+        if guard and not guard():
+            return
         """Ctrl+1..9 / Ctrl+0：直接粘贴第 1..10 项，不必先按 ↑↓ 再回车。
         序号映射来自 PasteBar（index 9 显示成 0），下标减一取第 n 项。"""
         items = self.vlist.items
@@ -282,176 +282,6 @@ class InteractionMixin(PhraseMixin):
         self.paste(it.get('text') or '', cid=it['id'])
         return 'break'
 
-    def trim_for_paste(self, text):
-        """粘贴前去掉首尾空白。
-        从 PDF / 网页 / 代码块复制出来的文本常带着前导缩进和换行，
-        而列表预览用 ' '.join(split()) 把它们压平了显示 —— 面板里看着干干净净、
-        粘出去却带空格，感觉就像凭空多了一个空格。默认开，设置里可关。"""
-        if not self.st.get('trim_paste', True):
-            return text or ''
-        return (text or '').strip()
-
-    def write_clip(self, text):
-        """写入剪贴板。
-
-        如果这段文本其实是「资源管理器复制来的文件路径列表」（我们正是这么记录的），
-        就改写成 CF_HDROP —— 粘到聊天窗口是发文件、粘到资源管理器是复制文件，
-        而不是粘出一串路径文字。判定从严，见 clipboard.looks_like_file_list。
-        数据格式没有任何改动：老版本（含共用数据文件的 C 版）读到的仍只是普通文本。
-        """
-        if looks_like_file_list(text):
-            return clip_write_files(text.splitlines())
-        return clip_write(text)
-
-    def paste(self, text, force=False, cid=None):
-        """粘贴出去：只刷新 last_used_at，绝不改写 created_at"""
-        # 图片条目走图片粘贴（写 DIB 而非文本）
-        if cid:
-            pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
-            item = next((x for x in pool if x['id'] == cid), None)
-            if item and item.get('content_type') == 'image':
-                return self.paste_image(item, force)
-        text = self.trim_for_paste(text)
-        if cid:
-            pool = self.data['clip'] if self.tab == 'clip' else self.cur_group()['items']
-            for x in pool:
-                if x['id'] == cid:
-                    x['last_used_at'] = now_ms()
-                    x['use_count'] = int(x.get('use_count') or 0) + 1
-                    break
-            self.save(True)
-        if not self.write_clip(text):
-            self.tip('剪贴板被占用，写入失败')
-            return False
-        if (self.st['autopaste'] or force) and not self.hidden:
-            hwnd = self.prev_hwnd
-            # 视觉反馈：只闪被粘贴的那条，整窗不动
-            if cid:
-                self.vlist.flash(cid)
-            if can_paste_message(hwnd):
-                # 标准编辑控件（记事本/Word 等）：WM_PASTE 直接投递，
-                # 面板完全不参与焦点切换、不消失、不关置顶。
-                threading.Thread(target=self._paste_message_worker,
-                                 args=(hwnd,), daemon=True).start()
-            else:
-                # 浏览器 / Electron / UWP 等自绘控件：只能抢焦点 + Ctrl/V。
-                # 只有面板确实盖住目标窗口时才临时关置顶（否则面板连置顶都不变）；
-                # 粘完由 _paste_worker 恢复置顶。
-                need_yield = self._panel_overlaps(hwnd)
-                if need_yield:
-                    self.root.attributes('-topmost', False)
-                    self._topmost_applied = False   # 同步实际值，粘完交给 sync_topmost 恢复
-                    self._topmost_yield = True      # 让位进行中：期间 poll_bg 不得把它改回置顶
-                threading.Thread(target=self._paste_worker,
-                                 args=(hwnd, need_yield), daemon=True).start()
-            # 粘贴音：走到这里 = 剪贴板已写好 + 粘贴已投递（真正去贴），故播放。
-            # 只把内容放进剪贴板、并不真的去贴（autopaste 关且未 force、或面板已隐藏）
-            # 不在此分支内，因此不会响 —— 那种情况是"复制"而非"粘贴"。
-            # 是否响由独立开关 sound_paste 控制；播放异步、立即返回，绝不阻塞。
-            if self.st.get('sound_paste'):
-                sound.play_paste()
-        return True
-
-    def paste_image(self, item, force=False):
-        """粘贴图片：读 PNG → DIB → 写剪贴板 → 粘贴到目标窗口。"""
-        img_name = item.get('image_path')
-        if not img_name:
-            return False
-        full = os.path.join(BASE_DIR, 'images', img_name)
-        if not os.path.exists(full):
-            self.tip('图片文件已丢失')
-            return False
-        try:
-            png = io.open(full, 'rb').read()
-            dib, w, h = png_to_dib(png)
-        except Exception as e:
-            self.tip('图片读取失败：%s' % e)
-            return False
-        if not write_clipboard_dib(dib):
-            self.tip('剪贴板被占用，写入失败')
-            return False
-        item['last_used_at'] = now_ms()
-        item['use_count'] = int(item.get('use_count') or 0) + 1
-        self.save(True)
-        if (self.st['autopaste'] or force) and not self.hidden:
-            hwnd = self.prev_hwnd
-            self.vlist.flash(item['id'])
-            need_yield = self._panel_overlaps(hwnd)
-            if need_yield:
-                self.root.attributes('-topmost', False)
-                self._topmost_applied = False       # 同步实际值，粘完交给 sync_topmost 恢复
-                self._topmost_yield = True          # 让位进行中：期间 poll_bg 不得把它改回置顶
-            threading.Thread(target=self._paste_worker,
-                             args=(hwnd, need_yield), daemon=True).start()
-            # 图片粘贴同样给听觉确认（覆盖范围与文本粘贴一致）
-            if self.st.get('sound_paste'):
-                sound.play_paste()
-        return True
-
-    def _panel_overlaps(self, hwnd):
-        """面板窗口是否盖住目标窗口。不重叠就不关置顶——面板纹丝不动。"""
-        try:
-            tr = window_rect(hwnd)
-            if not tr:
-                return True            # 拿不到目标矩形就保守让位
-            self.root.update_idletasks()
-            x, y = self.root.winfo_rootx(), self.root.winfo_rooty()
-            w, h = self.root.winfo_width(), self.root.winfo_height()
-            return rects_overlap((x, y, x + w, y + h), tr)
-        except Exception:
-            return True
-
-    def _paste_message_worker(self, hwnd):
-        """WM_PASTE 投递线程：不抢焦点，面板全程不动。"""
-        paste_message(hwnd)
-
-    def _restore_topmost(self):
-        self._topmost_yield = False        # 让位结束：撤销标志，再按状态机重新决定
-        if not self.hidden:
-            # 走统一状态机：尊重用户意图 + 全屏抑制，而不是无脑置顶
-            self.sync_topmost()
-
-    def _paste_worker(self, hwnd, restore_topmost=False):
-        """把焦点还给原窗口，再模拟 Ctrl+V。
-        时序照 Ditto：① AttachThreadInput 绕过 Windows 的前台锁定；② **等**目标窗口真的
-        拿到焦点再发键（Ditto WaitForActiveWnd），不再用固定 sleep —— 那个值在慢机器上
-        不够、在快机器上白等；③ 发键前先抬掉残留修饰键（见 all_keys_up）。"""
-        ok = False
-        try:
-            if hwnd:
-                time.sleep(0.06)
-                ok = force_foreground(hwnd, timeout=0.4)
-                if ok:
-                    time.sleep(0.05)        # 给目标程序处理 WM_SETFOCUS 的时间
-                    send_ctrl_v()
-        except Exception:
-            ok = False
-        time.sleep(0.12)
-        self._paste_fail = not ok
-        # 面板没 withdraw；若之前为让位关过置顶，粘完恢复（主线程里操作）
-        if restore_topmost:
-            self.root.after(0, self._restore_topmost)
-
-    def paste_plain_sel(self):
-        items = self.vlist.items
-        sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
-        if not sel and items:
-            sel = items[0]['id']
-        for it in items:
-            if it['id'] == sel:
-                self.paste_plain(it)
-                return
-        self.tip('先选中一条再按 Ctrl+Shift+Enter')
-
-    def paste_plain(self, it):
-        """F6：粘贴为纯文本。三个坑全处理：不污染历史 / 还原焦点 / 失败降级提示"""
-        text = self.trim_for_paste(to_plain(it.get('text') or ''))
-        if len(text.encode('utf-8')) > 5 * 1024 * 1024:
-            clip_write(text)
-            self.tip('文本超 5MB，已放入剪贴板，请手动 Ctrl+V')
-            return
-        if not self.paste(text, True, it.get('id')):
-            self.tip('剪贴板被占用，已尝试复制，请手动 Ctrl+V')
 
     def move_sel(self, delta):
         items = self.vlist.items
@@ -474,6 +304,9 @@ class InteractionMixin(PhraseMixin):
         self.schedule_preview()      # 键盘浏览时在角落显示完整内容（防抖）
 
     def enter_sel(self):
+        guard = getattr(self, 'ensure_current_results', None)
+        if guard and not guard():
+            return
         items = self.vlist.items
         sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
         if not sel and items:
@@ -488,15 +321,12 @@ class InteractionMixin(PhraseMixin):
                 return
 
     def _purge_image_files(self, items):
-        """删除一批图片条目对应的 PNG 文件（被删/清空/裁剪的图片不再留盘）。"""
-        img_dir = os.path.join(BASE_DIR, 'images')
-        for x in items:
-            name = (x or {}).get('image_path')
-            if name and (x or {}).get('content_type') == 'image':
-                try:
-                    os.remove(os.path.join(img_dir, name))
-                except Exception:
-                    pass
+        """Register cleanup; files are removed only after history is saved."""
+        if runtime.NO_SAVE:
+            return
+        names = (entry.get('image_path') for entry in items if isinstance(entry, dict)
+                 and entry.get('content_type') == 'image')
+        self.application.queue_image_cleanup(names)
 
     def del_item(self, cid, kind):
         if kind == 'clip':
@@ -516,6 +346,9 @@ class InteractionMixin(PhraseMixin):
         self.render()
 
     def del_sel(self):
+        guard = getattr(self, 'ensure_current_results', None)
+        if guard and not guard():
+            return
         cid = self.sel_clip if self.tab == 'clip' else self.sel_phrase
         if not cid:
             self.tip('先选中一条')
@@ -570,7 +403,11 @@ class InteractionMixin(PhraseMixin):
 
     # ---------- F3 搜索：历史 / 帮助 ----------
     def on_search_return(self, e=None):
+        guard = getattr(self, 'ensure_current_results', None)
+        if guard and not guard():
+            return 'break'
         q = self.search.get().strip()
+        self.enter_sel()
         if q:
             h = list(self.data.get('search_history') or [])
             if q in h:
@@ -578,7 +415,6 @@ class InteractionMixin(PhraseMixin):
             h.insert(0, q)
             self.data['search_history'] = h[:10]
             self.save(True)
-        self.enter_sel()
         return 'break'
 
     def search_menu(self, e):
@@ -617,18 +453,17 @@ class InteractionMixin(PhraseMixin):
 
     def schedule_preview(self):
         """选中变化后延迟显示角落预览（防抖：↑↓ 连按时不闪）。"""
+        self.close_preview()
         if not self.st.get('show_preview', True):
-            return self.close_preview()
-        if getattr(self, '_pv_job', None):
-            try:
-                self.root.after_cancel(self._pv_job)
-            except Exception:
-                pass
+            return
         self._pv_job = self.root.after(320, self._preview_now)
 
     def _preview_now(self):
         self._pv_job = None
         self.close_preview()
+        if (getattr(self, 'hidden', False) or getattr(self, 'collapsed', False)
+                or not self.st.get('show_preview', True)):
+            return
         try:
             text, it = self.current_target_text()
         except Exception:
@@ -637,23 +472,45 @@ class InteractionMixin(PhraseMixin):
             return
         img_name = (it or {}).get('image_path')
         if img_name:
-            full = os.path.join(BASE_DIR, 'images', img_name)
-            if os.path.exists(full):
-                meta = '%s×%s' % ((it or {}).get('image_w'),
-                                  (it or {}).get('image_h'))
-                try:
-                    self._preview = ImagePreview(self, full, meta)
-                except Exception:
-                    self._preview = None
-                return
+            key = (self.tab, it.get('id'), img_name)
+            meta = '%s×%s' % (it.get('image_w'), it.get('image_h'))
+            self.application.tasks.submit(
+                self._thumbnail_cache.get, img_name, key='image-preview',
+                on_result=lambda png: self._show_image_preview(png, key, meta),
+                on_error=lambda error: None)
+            return
         kind = (it or {}).get('kind_auto') or 'text'
         meta = '%d 字符' % len(text)
         try:
-            self._preview = ContentPreview(self, text, kind, meta)
+            shown = display_text(text, (it or {}).get('sens') or None,
+                                 masked=self.st.get('mask_sensitive', True),
+                                 reveal=bool((it or {}).get('mask_off')))
+            self._preview = ContentPreview(self, shown, kind, meta)
+        except Exception:
+            self._preview = None
+
+    def _show_image_preview(self, png, key, meta):
+        if (self.hidden or self.collapsed or not self.st.get('show_preview', True)
+                or self.application.closed):
+            return
+        _, item = self.current_target_text()
+        if (self.tab, (item or {}).get('id'), (item or {}).get('image_path')) != key:
+            return
+        try:
+            self._preview = ImagePreview(self, meta=meta, data=png)
         except Exception:
             self._preview = None
 
     def close_preview(self):
+        if getattr(self, '_pv_job', None):
+            try:
+                self.root.after_cancel(self._pv_job)
+            except Exception:
+                pass
+            self._pv_job = None
+        application = getattr(self, 'application', None)
+        if application is not None:
+            application.tasks.invalidate('image-preview')
         p = getattr(self, '_preview', None)
         if p:
             try:
@@ -673,7 +530,7 @@ class InteractionMixin(PhraseMixin):
                 return
             lines = t.count('\n') + 1
             chars = len(t)
-            prev = preview(t, 42)
+            prev = preview(display_text(t, masked=self.st.get('mask_sensitive', True)), 42)
             CopyToast(self, lines, chars, prev,
                       ms=int(self.st.get('toast_ms') or 1800))
         except Exception:
@@ -681,6 +538,9 @@ class InteractionMixin(PhraseMixin):
 
     # ---------- F4 变换 / F5 导出 ----------
     def current_target_text(self):
+        guard = getattr(self, 'ensure_current_results', None)
+        if guard and not guard():
+            return '', None
         items = self.vlist.items
         sel = self.sel_clip if self.tab == 'clip' else self.sel_phrase
         for it in items:
