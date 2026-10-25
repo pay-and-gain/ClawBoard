@@ -8,7 +8,7 @@
 import re
 import tkinter as tk
 
-from clawboard.config import FONT, FONT_B, FONT_SM, FONT_MONO, WHEEL_LINES
+from clawboard.config import FONT, FONT_B, FONT_SM, FONT_MONO, WHEEL_LINES, scaled
 from clawboard.theme import T
 from clawboard.runtime import uid
 from clawboard.classify import preview
@@ -143,20 +143,35 @@ class SplitDialog:
         self.app = app
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
-        dark_top(self.win, '拆词')
+        self.bar = dark_top(self.win, '拆词')
+        self.bar.configure(height=scaled(30))
         self.win.attributes('-topmost', True)
         self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
+        # 先保留操作区，再分配可伸缩内容；长预览和高 DPI 都不能挤掉取消按钮。
+        self.footer = tk.Frame(self.win, bg=T['bg'])
+        self.footer.pack(side='bottom', fill='x', padx=scaled(12), pady=scaled(8))
+        self.mk(self.footer, '拆成常用语', T['acc'], self.ok).pack(side='right', padx=(scaled(6), 0))
+        self.mk(self.footer, '预览', T['card_h'], self.do_preview).pack(side='right')
+        self.mk(self.footer, '取消', T['card_h'], self.cancel).pack(side='left')
         body = tk.Frame(self.win, bg=T['bg'])
-        body.pack(fill='both', expand=True, padx=12, pady=8)
-        tk.Label(body, text='源文本', bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w').pack(fill='x')
-        self.txt = tk.Text(body, height=5, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+        body.pack(fill='both', expand=True, padx=scaled(12), pady=scaled(8))
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(1, weight=3)
+        body.rowconfigure(4, weight=1)
+        tk.Label(body, text='源文本', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                 anchor='w').grid(row=0, column=0, sticky='ew')
+        source = tk.Frame(body, bg=T['bg'])
+        source.grid(row=1, column=0, sticky='nsew', pady=(scaled(2), scaled(8)))
+        self.txt = tk.Text(source, width=1, height=5, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
                            relief='flat', font=FONT, wrap='word', bd=0,
                            highlightthickness=1, highlightbackground=T['line'],
                            highlightcolor=T['acc'])
         self.txt.insert('1.0', text)
-        self.txt.pack(fill='x', pady=(2, 8))
+        source_scroll = tk.Scrollbar(source, command=self.txt.yview)
+        self.txt.configure(yscrollcommand=source_scroll.set)
+        pack_static_then_fill(source, source_scroll, self.txt)
         row = tk.Frame(body, bg=T['bg'])
-        row.pack(fill='x', pady=(0, 6))
+        row.grid(row=2, column=0, sticky='ew', pady=(0, scaled(6)))
         tk.Label(row, text='分隔方式', bg=T['bg'], fg=T['fg2'], font=FONT_SM).pack(side='left')
         self.mode = tk.StringVar(value=self.MODES[0])
         mb = tk.Label(row, text='▾ 选择', bg=T['card'], fg=T['fg'], font=FONT_SM,
@@ -167,19 +182,48 @@ class SplitDialog:
                                relief='flat', font=FONT, bd=0, highlightthickness=1,
                                highlightbackground=T['line'], highlightcolor=T['acc'])
         self.custom.insert(0, '|')
-        self.custom.pack(fill='x', pady=(0, 6))
-        self.prev = tk.Label(body, text='', bg=T['bg'], fg=T['acc'], font=FONT_SM,
-                             anchor='w', wraplength=330, justify='left')
-        self.prev.pack(fill='x', pady=(0, 6))
-        btns = tk.Frame(body, bg=T['bg'])
-        btns.pack(fill='x')
-        self.mk(btns, '拆成常用语', T['acc'], self.ok).pack(side='right', padx=(6, 0))
-        self.mk(btns, '预览', T['card_h'], self.do_preview).pack(side='right')
-        self.mk(btns, '取消', T['card_h'], self.cancel).pack(side='left')
+        self.custom.grid(row=3, column=0, sticky='ew', pady=(0, scaled(6)))
+        preview_box = tk.Frame(body, bg=T['bg'])
+        preview_box.grid(row=4, column=0, sticky='nsew')
+        self.prev = tk.Text(preview_box, width=1, height=3, bg=T['bg'], fg=T['acc'],
+                            font=FONT_SM, wrap='word', relief='flat', bd=0, state='disabled')
+        preview_scroll = tk.Scrollbar(preview_box, command=self.prev.yview)
+        self.prev.configure(yscrollcommand=preview_scroll.set)
+        pack_static_then_fill(preview_box, preview_scroll, self.prev)
         self.win.bind('<Escape>', lambda e: self.cancel())
         self.win.protocol('WM_DELETE_WINDOW', self.cancel)
         self.do_preview()
-        center_on(self.win, self.app.root, 380, 360)
+        self._fit_window()
+
+    def _fit_window(self):
+        self.win.update_idletasks()
+        parent = self.app.root
+        px, py = parent.winfo_rootx(), parent.winfo_rooty()
+        pw, ph = parent.winfo_width(), parent.winfo_height()
+        area = (px, py, px + parent.winfo_screenwidth(), py + parent.winfo_screenheight())
+        try:
+            import ctypes
+            from clawboard.windows_api import u32, MONITORINFO, MONITOR_DEFAULTTONEAREST
+            from clawboard.windows_geometry import top_hwnd
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(info)
+            monitor = u32.MonitorFromWindow(top_hwnd(parent), MONITOR_DEFAULTTONEAREST)
+            if u32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                r = info.rcWork
+                area = (r.left, r.top, r.right, r.bottom)
+        except (ImportError, AttributeError, OSError):
+            pass
+        left, top, right, bottom = area
+        margin = min(scaled(8), max(0, (right - left - 1) // 2), max(0, (bottom - top - 1) // 2))
+        aw, ah = max(1, right - left - 2 * margin), max(1, bottom - top - 2 * margin)
+        width = min(aw, max(scaled(380), self.footer.winfo_reqwidth() + scaled(24)))
+        height = min(ah, max(scaled(360), self.win.winfo_reqheight()))
+        x = max(left + margin, min(px + (pw - width) // 2, right - width - margin))
+        y = max(top + margin, min(py + (ph - height) // 2, bottom - height - margin))
+        # 负坐标属于合法副屏；不能像旧 center_on 一样直接截到主屏的 0。
+        self.win.geometry('%dx%d%+d%+d' % (width, height, x, y))
+        self.win.minsize(min(width, max(scaled(300), self.footer.winfo_reqwidth() + scaled(24))),
+                         min(height, self.bar.winfo_reqheight() + self.footer.winfo_reqheight() + scaled(160)))
 
     def mk(self, master, text, color, cmd):
         b = tk.Label(master, text=text, bg=color, fg='#fff', font=FONT_B,
@@ -209,13 +253,19 @@ class SplitDialog:
 
     def do_preview(self):
         parts = self.do_split()
-        self.prev.configure(text='预览：共 %d 条 → %s' %
-                            (len(parts), ' | '.join(parts[:6]) + (' …' if len(parts) > 6 else '')))
+        self._set_preview('预览：共 %d 条 → %s' %
+                          (len(parts), ' | '.join(parts[:6]) + (' …' if len(parts) > 6 else '')))
+
+    def _set_preview(self, text, color=None):
+        self.prev.configure(state='normal', fg=color or T['acc'])
+        self.prev.delete('1.0', 'end')
+        self.prev.insert('1.0', text)
+        self.prev.configure(state='disabled')
 
     def ok(self):
         parts = self.do_split()
         if not parts:
-            self.prev.configure(text='没拆出任何内容', fg=T['danger'])
+            self._set_preview('没拆出任何内容', T['danger'])
             return
         g = self.app.cur_group()
         for p in parts:

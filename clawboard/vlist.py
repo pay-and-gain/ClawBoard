@@ -277,8 +277,8 @@ class VirtualList(tk.Frame):
                 return self.pool.get(i)
         return None
 
-    def flash(self, cid, times=3, gap=140):
-        """让某条卡片快速闪几下作为反馈（粘贴/收藏等），不整窗闪。
+    def flash(self, cid, times=1, gap=140):
+        """条目默认短亮一次确认操作，避免连续闪烁打断阅读。
 
         只改背景色、不碰选中态：base 取「选中/普通」色，闪烁期间在强调色与
         base 之间来回切，最后停在 base。条目被滚出可视区（_find 返回 None）时
