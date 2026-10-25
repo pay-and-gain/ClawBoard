@@ -87,15 +87,22 @@ class UiMixin:
             hotkey=self.st.get('hotkey', onboard.DEFAULT_HOTKEY))
 
         self.tool = tk.Frame(self.body, bg=T['panel'], height=scaled(TOOL_H))
-        self.tool.pack(fill='x')
+        # 固定工具栏先分空间，列表最后伸缩；否则向上缩窗会把工具栏压成几像素。
+        self.tool.pack(side='bottom', fill='x', before=self.vlist)
         self.tool.pack_propagate(False)
-        # width=8 只是"请求宽度"，靠 expand 去吃剩余空间。默认 20 字符会把工具条撑爆，
-        # 于是最后一个按钮被压成 3px（又是这类"抢空间"的老问题）
-        self.search_entry = tk.Entry(self.tool, textvariable=self.search, bg=T['card'],
+        # 横向同样先保留按钮，再让搜索框使用余量，避免窄窗里按钮被搜索框挤掉。
+        self.tool_actions = tk.Frame(self.tool, bg=T['panel'])
+        self.tool_actions.pack(side='right', fill='y')
+        # Entry 的 width 按字符计，外层用像素限宽；宽窗也不再把空白全部分给搜索。
+        self.search_box = tk.Frame(self.tool, bg=T['panel'], width=scaled(100))
+        self.search_box.pack(side='left', padx=scaled(6))
+        self.search_box.pack_propagate(False)
+        self.search_entry = tk.Entry(self.search_box, textvariable=self.search, bg=T['card'],
                                      fg=T['fg'], insertbackground=T['fg'], relief='flat',
                                      font=FONT_SM, bd=0, width=8, highlightthickness=1,
                                      highlightbackground=T['line'], highlightcolor=T['acc'])
-        self.search_entry.pack(side='left', padx=scaled(6), ipady=scaled(3), fill='x', expand=True)
+        self.search_box.configure(height=self.search_entry.winfo_reqheight() + scaled(6))
+        self.search_entry.pack(fill='both', expand=True)
         # Entry 没有 placeholder，用一层灰字 Label 顶替：空着时提示可以怎么搜，
         # 一输入就消失。Label 会吃掉点击，所以补一个转发焦点
         self.search_ph = tk.Label(self.tool, bg=T['card'], fg=T['fg2'], font=FONT_SM,
@@ -113,8 +120,8 @@ class UiMixin:
         # 但菜单是整块弹出来的，用长提示会撑出一张比面板还宽的菜单
         for txt, tip2, menu2, cmd in (
                 ('＋', '新增常用语', '新增常用语', self.add_phrase),
-                ('拆', '拆词：把一段文字拆成多条常用语', '拆词', self.split_words),
                 ('删', '删除选中项', '删除选中项', self.del_sel),
+                ('拆', '拆词：把一段文字拆成多条常用语', '拆词', self.split_words),
                 ('清', '清空当前列表', '清空列表', self.clear_list),
                 ('🔧', '文本变换（Ctrl+T）', '文本变换', self.open_transform),
                 ('⚙', '设置', '设置', self.open_settings)):
@@ -122,13 +129,13 @@ class UiMixin:
         # 留一个 ⚙ 的句柄：发现新版本时可给它染色做提示（只改 fg，不动尺寸 → 不影响布局）
         self.setting_btn = next((b for t, b in self._tool_btns if t == '⚙'), None)
         # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
-        self.more_btn = tk.Label(self.tool, text='⋯', bg=T['card'], fg=T['fg2'],
+        self.more_btn = tk.Label(self.tool_actions, text='⋯', bg=T['card'], fg=T['fg2'],
                                  font=FONT_B, width=3, cursor='hand2')
         self.more_btn._pack_args = dict(side='left', padx=scaled(2), pady=scaled(9))
         self.more_btn.bind('<Button-1>', self.more_menu)
         self.more_btn.bind('<Enter>',
                            lambda e: (self.more_btn.configure(bg=T['card_h']),
-                                      self.tip('更多：新增 / 拆词 / 清空')))
+                                      self.tip('更多操作')))
         self.more_btn.bind('<Leave>', lambda e: self.more_btn.configure(bg=T['card']))
         # 面板变窄时按优先级收起次要按钮，别把它们挤成残废
         self._tool_hidden = ()
@@ -157,7 +164,8 @@ class UiMixin:
             if self.search.get():
                 self.search_ph.place_forget()
             else:
-                self.search_ph.place(in_=self.search_entry, x=5, rely=0.5, anchor='w')
+                self.search_ph.place(in_=self.search_entry, x=5, rely=0.5, anchor='w',
+                                     relwidth=1, width=-10)
         except Exception:
             pass
 
@@ -173,17 +181,8 @@ class UiMixin:
         f._lb, f._bar, f._key = lb, bar, key
         return f
 
-    # 窗口不够宽时按优先级把次要按钮收进「⋯」溢出菜单（🔧变换和 ⚙设置永远直接可见，
-    # 删也跟着保留——有选中项时它是最高频的）。阈值按算式推出来，不是拍脑袋：
-    #   按钮 30px + padx 2*2 = 34px；搜索框要留 ≥120px；entry padx 12px。
-    #   关键：收 1 个按钮进「⋯」不省空间（少一个普通按钮多一个 ⋯，总位数不变），
-    #   所以 ＋ 和 拆 必须同一阈值一起收，否则会出现"收了 1 个还是放不下"的尴尬档：
-    #   6 位（全显：＋拆删清🔧⚙）→ W >= 34*6 + 12 + 120 = 336
-    #   5 位（收 ＋拆）          → W >= 34*5 + 12 + 120 = 302
-    #   MIN_W=280 → 4 位（收 ＋拆清 → 删🔧⚙ + ⋯）→ entry 132，够用
-    # 注：v1.5.3 起移除了工具条上的「?」搜索语法帮助按钮（界面太挤），
-    #     其功能仍在搜索框右键菜单里，入口没丢。
-    TOOL_HIDE_AT = (('＋', 336), ('拆', 336), ('清', 302))
+    # 先缩短搜索框，再按实际控件宽度收起低频动作；新增、删除、拆词始终直接可见。
+    TOOL_HIDE_PRIORITY = ('清', '🔧')
 
     def _layout_tool(self):
         """窄面板时把次要按钮收进「⋯」菜单，而不是让它们被压成残废。
@@ -201,7 +200,17 @@ class UiMixin:
         if w == self._last_tw:
             return
         self._last_tw = w
-        hidden = tuple(t for t, need in self.TOOL_HIDE_AT if w < scaled(need))
+        sizes = {text: button.winfo_reqwidth() + 2 * button._pack_args['padx']
+                 for text, button in self._tool_btns}
+        more_width = self.more_btn.winfo_reqwidth() + 2 * self.more_btn._pack_args['padx']
+        hidden = ()
+        used = sum(sizes.values())
+        for text in self.TOOL_HIDE_PRIORITY:
+            if used + scaled(48 + 12) <= w:
+                break
+            hidden += (text,)
+            used = sum(size for key, size in sizes.items() if key not in hidden) + more_width
+        self.search_box.configure(width=max(1, min(scaled(100), w - used - scaled(12))))
         if hidden == getattr(self, '_tool_hidden', None):
             return
         self._tool_hidden = hidden
@@ -209,7 +218,7 @@ class UiMixin:
             b.pack_forget()
         self.more_btn.pack_forget()
         hide = set(hidden)
-        for text, b in self._tool_btns:           # 固定顺序：＋拆删清🔧?⚙
+        for text, b in self._tool_btns:           # 固定顺序：＋删拆清🔧⚙
             if text not in hide:
                 b.pack(**b._pack_args)
         if hidden:
@@ -235,7 +244,7 @@ class UiMixin:
         # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示；padx=2 让按钮之间
         # 有 4px 间距（padx=1 时 7 个按钮连成一坨，视觉上像被互相遮挡）。
         # 窄面板下由 _layout_tool 收进「⋯」菜单，宁可挪走也不要挤扁
-        b = tk.Label(self.tool, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
+        b = tk.Label(self.tool_actions, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
                      width=3, cursor='hand2')
         # pady=9 垂直居中：TOOL_H 48 - 文字 25 - 9*2 = 5px 余量；参数存一份给 _layout_tool 复原
         b._pack_args = dict(side='left', padx=scaled(2), pady=scaled(9))
