@@ -317,19 +317,28 @@ class VirtualList(tk.Frame):
         """按卡片实际宽度分配横向空间。
         窄的时候先让序号列和徽章退出：窗口被拖到 192px 宽时，若还固定给徽章留 88px、
         给序号留 24px，正文只剩 60 多像素，看着就像"面板里没有内容"。"""
-        if getattr(f, '_lw', None) == w:
+        # Recycled rows and display switches can change badge visibility without
+        # resizing the window; hidden badges must return their width to the body.
+        has_badge = bool(self.items[f._idx].get('badge', ''))
+        layout_key = (w, has_badge)
+        if getattr(f, '_lw', None) == layout_key:
             return
-        f._lw = w
+        f._lw = layout_key
         num = scaled(16) if w >= scaled(190) else 0
         badge = scaled(80) if w >= scaled(240) else (scaled(48) if w >= scaled(180) else 0)
+        if not has_badge:
+            badge = 0
         x0 = (scaled(6) + num + scaled(2)) if num else scaled(7)
         right = (badge + scaled(10)) if badge else scaled(7)
         f._numw = num
         f._num.place_configure(x=scaled(6), y=scaled(7), width=max(1, num), height=scaled(16))
         f._row.place_configure(x=x0, y=scaled(6), relwidth=1, width=-(x0 + right), height=scaled(18))
         f._l2.place_configure(x=x0, y=scaled(28), relwidth=1, width=-(x0 + scaled(7)), height=scaled(16))
-        f._badge.place_configure(relx=1.0, x=-scaled(10), y=scaled(6), anchor='ne', height=scaled(18),
-                                 width=max(1, badge))
+        if badge:
+            f._badge.place_configure(relx=1.0, x=-scaled(10), y=scaled(6), anchor='ne',
+                                     height=scaled(18), width=badge)
+        else:
+            f._badge.place_forget()
 
     def _first_hit(self, body):
         """找出该高亮哪个词。

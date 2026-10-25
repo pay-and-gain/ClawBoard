@@ -129,6 +129,7 @@ CLASSIFY_MAX = 128000
 DEFAULT_SETTINGS = dict(theme='dark', hotkey='ctrl+shift+v', max_items=500,
                         listen=True, autopaste=True, mask_sensitive=True,
                         skip_sensitive=False, show_time=False, record_title=False,
+                        show_source=False, show_size=False,
                         group_by_time=False, edge_hide=False, edge_delay=8,
                         close_action='hide')      # hide=隐藏到托盘 / quit=直接退出
 # v1.4.0 补齐项（对照 Ditto / PasteBar 的同类设置）
@@ -205,6 +206,8 @@ class SettingsDict(TypedDict, total=False):
     mask_sensitive: bool
     skip_sensitive: bool
     show_time: bool
+    show_source: bool
+    show_size: bool
     record_title: bool
     group_by_time: bool
     edge_hide: bool

@@ -43,6 +43,8 @@ class SettingsWindow:
         self.row_switch(body, '敏感内容打码显示', 'mask_sensitive')
         self.row_switch(body, '敏感内容不入库', 'skip_sensitive')
         self.row_switch(body, '列表中显示时间', 'show_time')
+        self.row_switch(body, '列表中显示来源', 'show_source', after=app.render)
+        self.row_switch(body, '列表中显示大小（字节数 / 图片尺寸）', 'show_size', after=app.render)
         self.row_switch(body, '记录来源窗口标题（隐私）', 'record_title')
         self.row_switch(body, '靠边自动隐藏（贴屏幕边缘自动收起）', 'edge_hide')
         self.row_autostart_switch(body)

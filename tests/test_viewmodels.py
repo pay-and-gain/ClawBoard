@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
+from copy import deepcopy
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -37,7 +39,8 @@ class ProjectionTests(unittest.TestCase):
             self.assertEqual(projection.cache_size, 0)
 
     def test_only_two_accessed_rows_derive_and_repeated_fields_reuse(self):
-        rows = ViewProjection().project([item(i) for i in range(1000)], 'clip', {})
+        rows = ViewProjection().project([item(i) for i in range(1000)], 'clip',
+                                        {'show_source': True, 'show_size': True})
         with patch('clawboard.viewmodels.classify', return_value=('text', {})) as classify, \
                 patch('clawboard.viewmodels.privacy.display_text', side_effect=lambda text, *a, **k: text) as display:
             self.assertEqual(rows[4]['disp'], 'hello world')
@@ -88,7 +91,8 @@ class ProjectionTests(unittest.TestCase):
 
     def test_phrase_name_and_unnamed_preview_are_masked(self):
         projection = ViewProjection()
-        named = projection.project([item(name='password=synthetic_secret')], 'phrase', {})[0]
+        named = projection.project([item(name='password=synthetic_secret')], 'phrase',
+                                   {'show_size': True})[0]
         unnamed = projection.project([item(text='password=synthetic_secret')], 'phrase', {})[0]
         self.assertNotIn('synthetic_secret', named['sub'])
         self.assertNotIn('synthetic_secret', unnamed['sub'])
@@ -96,7 +100,7 @@ class ProjectionTests(unittest.TestCase):
 
     def test_image_semantics_and_direct_metadata(self):
         raw = item(text='[图片]', content_type='image', image_path='example.png', image_w=1920, image_h=1080)
-        row = ViewProjection().project([raw], 'clip', {})[0]
+        row = ViewProjection().project([raw], 'clip', {'show_source': True, 'show_size': True})[0]
         self.assertEqual(row['disp'], '图片 1920×1080')
         self.assertEqual(row['badge'], '1920×1080')
         self.assertEqual(row['kind_auto'], 'image')
@@ -104,6 +108,60 @@ class ProjectionTests(unittest.TestCase):
         self.assertEqual(row.get('image_path'), 'example.png')
         self.assertEqual(row['kind'], 'clip')
         self.assertEqual(row['app'], 'chrome')
+
+    def test_display_switches_are_independent_and_invalidate_existing_rows(self):
+        raw = item(text='first\nsecond', copy_count=3, tags=['email'])
+        before = deepcopy(raw)
+        settings = {}
+        row = ViewProjection().project([raw], 'clip', settings)[0]
+        for source, size in ((False, False), (True, False), (True, True),
+                             (False, True), (False, False)):
+            settings.update(show_source=source, show_size=size)
+            self.assertEqual('chrome' in row['sub'], source)
+            self.assertEqual(bool(row['badge']), size)
+            for marker in ('+1 行', '×3', '邮箱'):
+                self.assertIn(marker, row['sub'])
+            self.assertEqual(row['source_app'], 'chrome')
+            self.assertEqual(row['text'], raw['text'])
+        self.assertEqual(raw, before)
+
+    def test_default_hidden_preserves_phrase_names_and_image_metadata(self):
+        projection = ViewProjection()
+        phrase = projection.project([item(name='Synthetic name')], 'phrase', {})[0]
+        image = projection.project([item(content_type='image', image_w=320, image_h=200)],
+                                   'clip', {})[0]
+        self.assertEqual(phrase['sub'], 'Synthetic name')
+        self.assertEqual(phrase['badge'], '')
+        self.assertEqual(image['sub'], '图片')
+        self.assertEqual(image['badge'], '')
+        self.assertEqual(image['image_w'], 320)
+
+    def test_legacy_settings_default_off_and_persist_without_metadata_changes(self):
+        from clawboard.models import default_data
+        from clawboard.storage import JsonStore
+        import json
+        data = default_data()
+        self.assertFalse(data['settings'].pop('show_source'))
+        self.assertFalse(data['settings'].pop('show_size'))
+        data['settings']['future_setting'] = 'preserved'
+        data['clip'] = [item()]
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'synthetic.json'
+            path.write_text(json.dumps(data), encoding='utf-8')
+            before = path.read_bytes()
+            store = JsonStore(path)
+            loaded = store.load().data
+            self.assertEqual(path.read_bytes(), before)
+            self.assertFalse(loaded['settings']['show_source'])
+            self.assertFalse(loaded['settings']['show_size'])
+            raw = deepcopy(loaded['clip'])
+            loaded['settings'].update(show_source=True, show_size=True)
+            store.save(loaded)
+            restored = JsonStore(path).load().data
+            self.assertTrue(restored['settings']['show_source'])
+            self.assertTrue(restored['settings']['show_size'])
+            self.assertEqual(restored['clip'], raw)
+            self.assertEqual(restored['settings']['future_setting'], 'preserved')
 
     def test_lru_limits_entry_count_and_characters(self):
         projection = ViewProjection(max_entries=2)

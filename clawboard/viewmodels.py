@@ -137,6 +137,8 @@ class ViewProjection:
             bool(record.get('fav')), bool(record.get('pinned')), bool(record.get('mask_off')),
             record.get('image_w'), record.get('image_h'),
             bool(row._settings.get('mask_sensitive', True)), show_time,
+            bool(row._settings.get('show_source', False)),
+            bool(row._settings.get('show_size', False)),
             _number(self.clock()) // 60_000 if show_time else None,
         )
         return signature, text
@@ -166,6 +168,8 @@ class ViewProjection:
     def _derive(self, row, text):
         record = row._record
         settings = row._settings
+        show_source = bool(settings.get('show_source', False))
+        show_size = bool(settings.get('show_size', False))
         is_image = record.get('content_type') == 'image'
         masked = bool(settings.get('mask_sensitive', True))
         reveal = bool(record.get('mask_off'))
@@ -195,15 +199,17 @@ class ViewProjection:
             else:
                 subtitle = preview(privacy.display_text(text, hits, masked=masked, reveal=reveal)
                                    [:self.preview_chars], 28)
-            badge = human_size(byte_size(text))
+            badge = human_size(byte_size(text)) if show_size else ''
         elif is_image:
-            subtitle = '%s · 图片' % _source(record)
-            badge = '%s×%s' % (record.get('image_w'), record.get('image_h'))
+            subtitle = '%s · 图片' % _source(record) if show_source else '图片'
+            badge = ('%s×%s' % (record.get('image_w'), record.get('image_h'))
+                     if show_size else '')
         else:
             parts = []
             if settings.get('show_time', False):
                 parts.append(rel_time(_number(record.get('created_at')), record.get('is_estimated')))
-            parts.append(_source(record))
+            if show_source:
+                parts.append(_source(record))
             newline_count = text.count('\n')
             if newline_count:
                 parts.append('+%d 行' % newline_count)
@@ -216,5 +222,6 @@ class ViewProjection:
             if tags:
                 parts.append('🏷' + '/'.join(TAG_LABELS.get(tag, tag) for tag in tags))
             subtitle = ' · '.join(parts)[:self.preview_chars]
-            badge = '%s %s' % (kind_icon(kind), human_size(_number(record.get('content_size'))))
+            badge = ('%s %s' % (kind_icon(kind), human_size(_number(record.get('content_size'))))
+                     if show_size else '')
         return {'disp': display, 'sub': subtitle, 'badge': badge, 'kind_auto': kind, 'sens': hits}
