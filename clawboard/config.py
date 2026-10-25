@@ -59,6 +59,8 @@ CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
 # onefile resources live in PyInstaller's bundle; installed directories may be
 # read-only, so tray setup must not generate an icon beside Program Files/exe.
 ICON_FILE = os.path.join(getattr(sys, '_MEIPASS', _EXE_DIR), 'ClawBoard.ico')
+UI_ASSET_DIR = (os.path.join(sys._MEIPASS, 'ui-assets') if getattr(sys, 'frozen', False)
+                else os.path.join(_EXE_DIR, 'packaging', 'ui-assets'))
 
 # 保证 query.py / transform.py 与数据文件同目录可用（frozen 模式下同样如此）。
 if _EXE_DIR not in sys.path:

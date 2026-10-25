@@ -413,6 +413,12 @@ class GeometryMixin(DpiMixin):
         副屏上 `wx + ww >= winfo_screenwidth()-4` 会恒真（那是主屏宽），窗口会被
         误判成「贴右边缘」并被搬到主屏最右（edge_hide 一开就是必现）。
         """
+        workbench = getattr(self, '_workbench_window', None)
+        if workbench is not None and workbench.win.winfo_exists() and workbench.win.winfo_ismapped():
+            self._edge_tick = 0
+            if self._edge_hidden:
+                self._edge_show()
+            return
         st = self.st
         if not st.get('edge_hide') or self.hidden or self.collapsed:
             if self._edge_hidden:

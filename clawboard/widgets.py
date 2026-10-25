@@ -107,7 +107,7 @@ class Dialog:
         self.win.protocol('WM_DELETE_WINDOW', self._cancel)
 
     def _mk_btn(self, master, text, color, cmd):
-        b = tk.Label(master, text=text, bg=color, fg='#ffffff', font=FONT_B,
+        b = tk.Label(master, text=text, bg=color, fg=T.get('on_acc', '#fff') if color == T['acc'] else T.get('on_danger', '#fff') if color == T['danger'] else T['fg'], font=FONT_B,
                      padx=14, pady=5, cursor='hand2')
         b.bind('<Button-1>', lambda e: cmd())
         b.bind('<Enter>', lambda e: b.configure(bg=T['acc2'] if color == T['acc'] else T['line']))
@@ -226,7 +226,7 @@ class SplitDialog:
                          min(height, self.bar.winfo_reqheight() + self.footer.winfo_reqheight() + scaled(160)))
 
     def mk(self, master, text, color, cmd):
-        b = tk.Label(master, text=text, bg=color, fg='#fff', font=FONT_B,
+        b = tk.Label(master, text=text, bg=color, fg=T.get('on_acc', '#fff') if color == T['acc'] else T.get('on_danger', '#fff') if color == T['danger'] else T['fg'], font=FONT_B,
                      padx=12, pady=5, cursor='hand2')
         b.bind('<Button-1>', lambda e: cmd())
         return b

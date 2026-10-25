@@ -54,8 +54,7 @@ def run():
 
         class HarnessSettings(SettingsWindow):
             def row_switch(self, master, text, key, after=None):
-                super().row_switch(master, text, key, after)
-                switches[key] = master.winfo_children()[-1].winfo_children()[-1]
+                switches[key] = super().row_switch(master, text, key, after)
 
         # Keep the real settings constructor and requested switches; skip
         # unrelated controls so this regression never reads system settings.
@@ -69,6 +68,7 @@ def run():
                 for name in methods:
                     stack.enter_context(patch.object(HarnessSettings, name, lambda *a, **k: None))
                 settings = HarnessSettings(app)
+            settings.select_section('appearance')
             root.update()
             for key in ('show_source', 'show_size'):
                 assert switches[key].cget('text') == '关'
@@ -76,7 +76,7 @@ def run():
             def click(key):
                 settings.sc.canvas.yview_moveto(0)
                 root.update()
-                switches[key].event_generate('<Button-1>', x=3, y=3)
+                switches[key].invoke()
                 root.update()
                 assert switches[key].cget('text') == ('开' if st[key] else '关')
 

@@ -19,6 +19,9 @@ from clawboard.widgets import Dialog
 from clawboard.vlist import VirtualList
 from clawboard import onboard
 from clawboard import update
+from clawboard.ui_controls import UIActionButton
+from clawboard.ui_icons import get_icon
+from clawboard.query_presets import TYPE_FILTERS, clear_visual_filters, has_favorite, set_filter
 
 import query as Q          # F3 查询解析器（独立模块，可单测）
 
@@ -37,25 +40,27 @@ class UiMixin:
         self.bar.pack_propagate(False)
         # 标题占满剩余宽度：整条标题栏（除了右边三个按钮）都是双击折叠的热区
         self.title_lb = tk.Label(self.bar, text=self._default_title(), bg=T['panel'],
-                                 fg=T['acc'], font=FONT_TITLE, anchor='w')
+                                 fg=T['fg'], font=FONT_TITLE, anchor='w')
         # 按钮必须先 pack：pack 按调用顺序分配空间，标题带 expand=True 后 pack 的话
         # 会把按钮挤成 1px（和之前滚动条被挤成 1px 是同一个坑）
         self._bar_btns = []
-        for txt, cmd, col in (('✕', self.hide, T['danger']),
-                              ('📌', self.toggle_pin, None),
-                              ('—', self.toggle_collapse, None)):
-            # 按钮热区放大：更宽 + 更高（pady），不用瞄准
-            b = tk.Label(self.bar, text=txt, bg=T['panel'], fg=T['fg2'], font=FONT,
-                         width=4, pady=scaled(7), cursor='hand2')
-            b.pack(side='right')
-            b.bind('<Button-1>', lambda e, c=cmd: c())
-            b.bind('<Enter>', lambda e, b=b, c=col: b.configure(fg=c or T['fg']))
-            b.bind('<Leave>', lambda e, b=b: b.configure(fg=T['fg2']))
+        for glyph, name, cmd, label in (('✕', 'close', self.hide, '隐藏面板'),
+                                        ('📌', 'pin', self.toggle_pin, '面板置顶'),
+                                        ('—', 'collapse', self.toggle_collapse, '折叠 / 展开')):
+            b = UIActionButton(self.bar, text=glyph, icon=name, command=cmd,
+                               tooltip=label, bg=T['panel'], size=24)
+            b.pack(side='right', padx=scaled(1))
             self._bar_btns.append(b)
-        self.title_lb.pack(side='left', padx=8, fill='x', expand=True)
+        self.workbench_btn = UIActionButton(self.bar, icon='workbench', command=self.open_workbench,
+                                            tooltip='打开工作台（Ctrl+Shift+W）', bg=T['panel'], size=24)
+        self.workbench_btn.pack(side='right', padx=scaled(2))
+        self._brand_image = get_icon(r, 'logo', scaled(20))
+        self.brand = tk.Label(self.bar, image=self._brand_image, bg=T['panel'])
+        self.brand.pack(side='left', padx=(scaled(8), scaled(5)))
+        self.title_lb.pack(side='left', padx=(0, scaled(4)), fill='x', expand=True)
         # 事件不会从子控件冒泡到父控件，所以标题文字上必须再绑一份：
         # 只绑 bar 的话，双击能用的只剩标题右侧那一小条空白（"很局限"就是这个原因）
-        for w in (self.bar, self.title_lb):
+        for w in (self.bar, self.title_lb, self.brand):
             w.bind('<ButtonPress-1>', self.start_move)
             w.bind('<B1-Motion>', self.do_move)
             w.bind('<Double-Button-1>', lambda e: self.toggle_collapse())
@@ -63,17 +68,24 @@ class UiMixin:
         self.body = tk.Frame(r, bg=T['bg'])
         self.body.pack(fill='both', expand=True)
 
-        tabs = tk.Frame(self.body, bg=T['bg'], height=scaled(32))
+        tabs = tk.Frame(self.body, bg=T['bg'], height=scaled(38))
         tabs.pack(fill='x')
         tabs.pack_propagate(False)
-        self.tab_clip = self.mk_tab(tabs, '剪贴板', 'clip')
+        self.filter_btn = tk.Button(tabs, text='筛选', command=self.filter_menu, bg=T['bg'],
+                                    fg=T['fg2'], activebackground=T['card_h'], activeforeground=T['fg'],
+                                    font=FONT_SM, bd=0, relief='flat', padx=scaled(6),
+                                    highlightthickness=1, highlightbackground=T['bg'],
+                                    highlightcolor=T.get('focus', T['acc']), takefocus=True)
+        self.filter_btn.pack(side='right', padx=scaled(5), pady=scaled(5))
+        self.filter_btn.bind('<Return>', lambda e: (self.filter_menu(), 'break')[1])
+        self.tab_clip = self.mk_tab(tabs, '历史', 'clip')
         self.tab_phr = self.mk_tab(tabs, '常用语', 'phrase')
+        self.tab_fav = self.mk_tab(tabs, '收藏', 'fav')
 
         self.gbar = tk.Frame(self.body, bg=T['bg'], height=scaled(28))
-        self.gname = tk.Label(self.gbar, text='', bg=T['bg'], fg=T['fg'],
-                              font=FONT_B, cursor='hand2')
+        self.gname = UIActionButton(self.gbar, text='', bg=T['bg'], fg=T['fg'],
+                                    command=self.group_menu, size=None, font=FONT_B)
         self.gname.pack(side='left', padx=(8, 2))
-        self.gname.bind('<Button-1>', lambda e: self.group_menu())
         tk.Label(self.gbar, text='▾', bg=T['bg'], fg=T['fg2'], font=FONT_SM).pack(side='left')
 
         self.vlist = VirtualList(self.body, self.on_click_item,
@@ -129,14 +141,9 @@ class UiMixin:
         # 留一个 ⚙ 的句柄：发现新版本时可给它染色做提示（只改 fg，不动尺寸 → 不影响布局）
         self.setting_btn = next((b for t, b in self._tool_btns if t == '⚙'), None)
         # 窄面板放不下时的「⋯」溢出入口：收起的按钮都还能从这里点进去，功能不丢
-        self.more_btn = tk.Label(self.tool_actions, text='⋯', bg=T['card'], fg=T['fg2'],
-                                 font=FONT_B, width=3, cursor='hand2')
+        self.more_btn = UIActionButton(self.tool_actions, text='⋯', icon='more',
+                                      command=self.more_menu, tooltip='更多操作', size=24)
         self.more_btn._pack_args = dict(side='left', padx=scaled(2), pady=scaled(9))
-        self.more_btn.bind('<Button-1>', self.more_menu)
-        self.more_btn.bind('<Enter>',
-                           lambda e: (self.more_btn.configure(bg=T['card_h']),
-                                      self.tip('更多操作')))
-        self.more_btn.bind('<Leave>', lambda e: self.more_btn.configure(bg=T['card']))
         # 面板变窄时按优先级收起次要按钮，别把它们挤成残废
         self._tool_hidden = ()
         self._last_tw = 0
@@ -157,6 +164,9 @@ class UiMixin:
         self.root.after(60, self._sync_ph)     # 初始就该显示搜索框提示
         if getattr(self, 'collapsed', False):  # 换主题重建 UI 时要保住折叠态
             self.body.pack_forget()
+        workbench = getattr(self, '_workbench_window', None)
+        if workbench is not None and workbench.win.winfo_exists():
+            workbench.refresh_style()
 
     def _sync_ph(self):
         """搜索框为空时显示灰字提示，有内容就藏起来"""
@@ -172,12 +182,17 @@ class UiMixin:
     def mk_tab(self, master, text, key):
         f = tk.Frame(master, bg=T['bg'], cursor='hand2')
         f.pack(side='left', fill='y')
-        lb = tk.Label(f, text=text, bg=T['bg'], fg=T['fg2'], font=FONT_B, padx=14, pady=6)
-        lb.pack()
-        bar = tk.Frame(f, bg=T['bg'], height=2)
+        lb = tk.Button(f, text=text, bg=T['bg'], fg=T['fg2'], font=FONT_B,
+                       command=lambda: self.set_tab(key), bd=0, relief='flat',
+                       padx=scaled(8), pady=scaled(3), takefocus=True,
+                       activebackground=T['card_h'], activeforeground=T['fg'],
+                       highlightthickness=1, highlightbackground=T['bg'],
+                       highlightcolor=T.get('focus', T['acc']))
+        lb.pack(fill='both', expand=True)
+        lb.bind('<Return>', lambda e: (self.set_tab(key), 'break')[1])
+        bar = tk.Frame(f, bg=T['bg'], height=scaled(1))
         bar.pack(fill='x', side='bottom')
-        for w in (f, lb):
-            w.bind('<Button-1>', lambda e: self.set_tab(key))
+        f.bind('<Button-1>', lambda e: self.set_tab(key))
         f._lb, f._bar, f._key = lb, bar, key
         return f
 
@@ -244,17 +259,16 @@ class UiMixin:
         # width=3 保证 emoji（🔧/⚙ 实测 17px）和汉字都完整显示；padx=2 让按钮之间
         # 有 4px 间距（padx=1 时 7 个按钮连成一坨，视觉上像被互相遮挡）。
         # 窄面板下由 _layout_tool 收进「⋯」菜单，宁可挪走也不要挤扁
-        b = tk.Label(self.tool_actions, text=text, bg=T['card'], fg=T['fg'], font=FONT_B,
-                     width=3, cursor='hand2')
+        names = {'＋': 'add', '删': 'delete', '拆': 'split', '清': 'clear',
+                 '🔧': 'transform', '⚙': 'settings'}
+        b = UIActionButton(self.tool_actions, text=text, icon=names[text], command=cmd,
+                           tooltip=tip, size=24)
         # pady=9 垂直居中：TOOL_H 48 - 文字 25 - 9*2 = 5px 余量；参数存一份给 _layout_tool 复原
         b._pack_args = dict(side='left', padx=scaled(2), pady=scaled(9))
         b._tip_text = tip                 # 悬停提示（可以长）
         b._menu_text = menu_text or tip   # 溢出菜单里的短文案
         b._tip_cmd = cmd
         b.pack(**b._pack_args)
-        b.bind('<Button-1>', lambda e: cmd())
-        b.bind('<Enter>', lambda e: (b.configure(bg=T['card_h']), self.tip(tip)))
-        b.bind('<Leave>', lambda e: b.configure(bg=T['card']))
         return b
 
     def tip(self, text):
@@ -263,18 +277,18 @@ class UiMixin:
         avail = max(80, self.title_lb.winfo_width() - 40)
         try:
             f = tkfont.Font(font=FONT_TITLE)
-            while t and f.measure('⚡ ' + t) > avail:
+            while t and f.measure(t) > avail:
                 t = t[:-1]
             if t != (text or ''):
                 t = t.rstrip() + '…'
         except Exception:
             t = t[:18]
-        self.title_lb.configure(text='⚡ ' + t)
+        self.title_lb.configure(text=t)
         self.root.after(2500, lambda: self.title_lb.configure(text=self._default_title()))
 
     def _default_title(self):
         readonly = bool(getattr(getattr(self, '_store', None), 'recovery_required', False))
-        return '⚡ ' + APP_NAME + (' · 只读保护' if readonly else '')
+        return APP_NAME + (' · 只读保护' if readonly else '')
 
     def confirm(self, text, on_yes):
         Dialog(self.root, '确认', [('', text, True)],
@@ -282,8 +296,76 @@ class UiMixin:
 
     # ---------- Tab / 分组 ----------
     def set_tab(self, key):
-        self.tab = key
+        self.tab = 'clip' if key == 'fav' else key
+        if key == 'fav':
+            self.search.set(set_filter(self.search.get(), 'favorite', True))
+        elif key == 'clip':
+            self.search.set(set_filter(self.search.get(), 'favorite'))
         self.render()
+
+    def filter_menu(self):
+        menu = tk.Menu(self.root, tearoff=0, bg=T['panel'], fg=T['fg'], font=FONT,
+                       activebackground=T['card_h'], activeforeground=T['fg'])
+        for label, value in TYPE_FILTERS:
+            menu.add_command(label=label, command=lambda v=value: self._set_visual_filter('type', v))
+        menu.add_separator()
+        menu.add_command(label='最近一天', command=lambda: self._set_visual_filter('time', '<1d'))
+        menu.add_command(label='不限时间', command=lambda: self._set_visual_filter('time'))
+        menu.add_separator()
+        menu.add_command(label='清除可视筛选', command=lambda: self._apply_visual_query(
+            clear_visual_filters(self.search.get())))
+        menu.tk_popup(self.filter_btn.winfo_rootx(),
+                      self.filter_btn.winfo_rooty() + self.filter_btn.winfo_height())
+
+    def _set_visual_filter(self, field, value=None):
+        self._apply_visual_query(set_filter(self.search.get(), field, value))
+
+    def _apply_visual_query(self, query):
+        self.search.set(query)
+        self.render()
+
+    def open_workbench(self):
+        current = getattr(self, '_workbench_window', None)
+        if current is not None and current.win.winfo_exists():
+            current.refresh()
+            current.win.deiconify()
+            current.win.lift()
+            current.win.focus_force()
+            return
+        from clawboard.workbench import WorkbenchWindow
+        self._workbench_window = WorkbenchWindow(self, state=getattr(current, 'view_state', None))
+
+    def locate_workbench_item(self, kind, cid, group_index=None):
+        """Explicit navigation may change the quick-panel view; it never pastes."""
+        if kind == 'phrase':
+            groups = self.data.get('groups', [])
+            if group_index is None or not 0 <= group_index < len(groups):
+                return False
+            pool = groups[group_index]['items']
+        else:
+            pool = self.data['clip']
+        if not any(item.get('id') == cid for item in pool):
+            self.tip('这条内容已不在当前资料中，请刷新工作台')
+            return False
+        if kind == 'phrase':
+            self.data['gi'] = group_index
+            self.sel_phrase = cid
+        else:
+            self.sel_clip = cid
+        self.tab = 'phrase' if kind == 'phrase' else 'clip'
+        self.search.set('')
+        if getattr(self, 'hidden', False):
+            self.toggle_show()
+        if getattr(self, 'collapsed', False):
+            self.toggle_collapse()
+        self.render()
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        index = next((i for i, item in enumerate(self.vlist.items) if item.get('id') == cid), None)
+        if index is not None:
+            self.vlist.scroll_to_index(index)
+        return True
 
     def cur_group(self):
         return self.data['groups'][self.data['gi']]
@@ -427,10 +509,13 @@ class UiMixin:
         return False
 
     def render(self):
-        for t in (self.tab_clip, self.tab_phr):
-            on = (t._key == self.tab)
-            t._lb.configure(fg=T['fg'] if on else T['fg2'])
-            t._bar.configure(bg=T['acc'] if on else T['bg'])
+        favorite = has_favorite(self.search.get())
+        for t in (self.tab_clip, self.tab_phr, self.tab_fav):
+            on = ((t._key == 'fav' and self.tab == 'clip' and favorite) or
+                  (t._key == self.tab and (self.tab != 'clip' or not favorite)))
+            t._lb.configure(fg=T['acc'] if on else T['fg2'],
+                            bg=T['card_s'] if on else T['bg'])
+            t._bar.configure(bg=T['bg'])
         if self.tab == 'phrase':
             if not self.gbar.winfo_ismapped():
                 self.gbar.pack(fill='x', before=self.vlist)

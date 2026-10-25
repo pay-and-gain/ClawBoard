@@ -305,6 +305,7 @@ class SafetyAndCompatibilityTests(unittest.TestCase):
         class RowWidget(FakeWidget):
             def __init__(self, *args, **kwargs):
                 super().__init__()
+                self.options.update(kwargs)
                 self.bindings = {}
                 widgets.append(self)
 
@@ -314,9 +315,9 @@ class SafetyAndCompatibilityTests(unittest.TestCase):
             def bind(self, event, callback):
                 self.bindings[event] = callback
 
-        namespace = {'tk': types.SimpleNamespace(Frame=RowWidget, Label=RowWidget),
+        namespace = {'tk': types.SimpleNamespace(Frame=RowWidget, Label=RowWidget, Button=RowWidget),
                      'FONT': (), 'FONT_B': (),
-                     'T': {'bg': '', 'fg': '', 'fg2': '', 'acc': '', 'card': ''}}
+                     'T': {'bg': '', 'fg': '', 'fg2': '', 'acc': '', 'card': '', 'card_h': '', 'line': ''}}
         cls = adapter_class('settings_dialog.py', 'SettingsWindow', namespace)
         instance = cls.__new__(cls)
         state, calls = {'listen': True}, []
@@ -328,7 +329,7 @@ class SafetyAndCompatibilityTests(unittest.TestCase):
         instance.app = types.SimpleNamespace(st=state, toggle_listen=toggle,
             save=lambda *args: self.fail('system entrypoint already saves'))
         instance.row_switch(None, 'listen', 'listen')
-        widgets[-1].bindings['<Button-1>']()
+        instance._switches['listen'].options['command']()
         self.assertEqual(calls, ['toggle_listen'])
         self.assertFalse(state['listen'])
 

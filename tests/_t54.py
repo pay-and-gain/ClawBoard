@@ -114,7 +114,7 @@ def run():
                     assert all(button.winfo_ismapped() for _, button in app._tool_btns)
                     # Wider control metrics exercise the overflow fallback without
                     # changing the user's minimum window size or hiding Split.
-                    dict(app._tool_btns)['清'].configure(width=40)
+                    dict(app._tool_btns)['清'].configure(width=config.scaled(160))
                     app._last_tw = 0
                     pump()
                     check()
@@ -129,7 +129,7 @@ def run():
                     menu.invoke(0)
                     assert len(calls) == start + 1 and calls[-1] in ('clear_list', 'open_transform')
                     menu.destroy()
-                    dict(app._tool_btns)['清'].configure(width=3)
+                    dict(app._tool_btns)['清'].configure(width=max(1, config.scaled(24) - 2))
                     app._last_tw = 0
                     pump()
                     app.body.pack_forget()

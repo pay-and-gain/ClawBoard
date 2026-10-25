@@ -7,6 +7,7 @@ from clawboard.config import (scaled, ITEM_H, CARD_GAP, WHEEL_LINES,
 from clawboard.theme import T
 from clawboard.classify import preview
 from clawboard.widgets import Tip, ThinBar, pack_static_then_fill
+from clawboard.ui_icons import get_icon
 
 
 class VirtualList(tk.Frame):
@@ -223,7 +224,8 @@ class VirtualList(tk.Frame):
             frame.destroy()
 
     def _mk_item(self, i):
-        f = tk.Frame(self.canvas, bg=T['card'], height=scaled(ITEM_H) - scaled(CARD_GAP), cursor='hand2')
+        f = tk.Frame(self.canvas, bg=T['card'], height=scaled(ITEM_H) - scaled(CARD_GAP),
+                     cursor='hand2', highlightthickness=1, highlightbackground=T['line'])
         f.pack_propagate(False)
         f._idx = i
         f._vw = 0
@@ -234,6 +236,7 @@ class VirtualList(tk.Frame):
         # 序号列：按住 Ctrl 时显示 1..9/0，提示「Ctrl+数字直接粘贴」（Ditto QListCtrl.cpp:610）
         f._num = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['acc'], anchor='w')
         f._num.place(x=6, y=7, width=16, height=16)
+        f._type = tk.Label(f, bg=T['card'], bd=0)
         row = tk.Frame(f, bg=T['card'])
         row.place(x=24, y=6, relwidth=1, width=-112, height=18)
         f._row = row
@@ -246,7 +249,7 @@ class VirtualList(tk.Frame):
         f._badge.place(relx=1.0, x=-10, y=6, anchor='ne', height=18, width=80)
         f._l2 = tk.Label(f, bg=T['card'], font=FONT_SM, fg=T['fg2'], anchor='w')
         f._l2.place(x=24, y=28, relwidth=1, width=-32, height=16)
-        for wg in (f, row, f._num, f._l1a, f._l1b, f._l1c, f._l2, f._badge):
+        for wg in (f, row, f._num, f._type, f._l1a, f._l1b, f._l1c, f._l2, f._badge):
             wg.bind('<Button-1>', lambda e, ff=f: self.on_click(ff._idx, e))
             wg.bind('<Button-3>', lambda e, ff=f: self.on_menu(e, ff._idx))
             wg.bind('<Enter>', lambda e, ff=f: (self._hover(ff._idx, True),
@@ -261,9 +264,10 @@ class VirtualList(tk.Frame):
         if getattr(f, '_paint_color', None) == c:
             return
         f._paint_color = c
-        f.configure(bg=c)
+        f.configure(bg=c, highlightbackground=T['acc'] if c == T['card_s'] else T['line'])
         f._row.configure(bg=c)
         f._num.configure(bg=c)
+        f._type.configure(bg=c)
         f._l1a.configure(bg=c)
         f._l1b.configure(bg=c)
         f._l1c.configure(bg=c)
@@ -287,7 +291,7 @@ class VirtualList(tk.Frame):
         if f is None:
             return
         base = T['card_s'] if cid == self.sel else T['card']
-        flash_c = T['acc']
+        flash_c = T.get('flash', T['card_h'])
 
         def tick(remaining):
             f2 = self._find(cid)
@@ -320,7 +324,8 @@ class VirtualList(tk.Frame):
         # Recycled rows and display switches can change badge visibility without
         # resizing the window; hidden badges must return their width to the body.
         has_badge = bool(self.items[f._idx].get('badge', ''))
-        layout_key = (w, has_badge)
+        has_sub = bool(self.items[f._idx].get('sub', ''))
+        layout_key = (w, has_badge, has_sub, self.show_num)
         if getattr(f, '_lw', None) == layout_key:
             return
         f._lw = layout_key
@@ -332,10 +337,18 @@ class VirtualList(tk.Frame):
         right = (badge + scaled(10)) if badge else scaled(7)
         f._numw = num
         f._num.place_configure(x=scaled(6), y=scaled(7), width=max(1, num), height=scaled(16))
-        f._row.place_configure(x=x0, y=scaled(6), relwidth=1, width=-(x0 + right), height=scaled(18))
-        f._l2.place_configure(x=x0, y=scaled(28), relwidth=1, width=-(x0 + scaled(7)), height=scaled(16))
+        title_y = scaled(6 if has_sub else 14)
+        f._row.place_configure(x=x0, y=title_y, relwidth=1, width=-(x0 + right), height=scaled(18))
+        if has_sub:
+            f._l2.place_configure(x=x0, y=scaled(28), relwidth=1, width=-(x0 + scaled(7)), height=scaled(16))
+        else:
+            f._l2.place_forget()
+        if num and not self.show_num:
+            f._type.place_configure(x=scaled(6), y=title_y, width=num, height=scaled(18))
+        else:
+            f._type.place_forget()
         if badge:
-            f._badge.place_configure(relx=1.0, x=-scaled(10), y=scaled(6), anchor='ne',
+            f._badge.place_configure(relx=1.0, x=-scaled(10), y=title_y, anchor='ne',
                                      height=scaled(18), width=badge)
         else:
             f._badge.place_forget()
@@ -384,6 +397,10 @@ class VirtualList(tk.Frame):
                          if (self.show_num and i < 10 and f._numw) else '')
         # 自适应：代码/JSON 用等宽字体，链接用强调色 —— 一眼看出这行是什么东西
         ka = it.get('kind_auto') or 'text'
+        name = ('image' if ka == 'image' else 'link' if ka == 'url' else
+                'file' if ka in ('filelist', 'path') else 'code' if ka in ('code', 'json') else 'text')
+        f._icon_image = get_icon(self, name, scaled(14))
+        f._type.configure(image=f._icon_image)
         ft = FONT_MONO if ka in ('code', 'json') else FONT
         fg = T['acc'] if ka == 'url' else T['fg']
         kw, pos = self._first_hit(body)

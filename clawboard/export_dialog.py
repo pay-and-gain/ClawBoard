@@ -65,7 +65,7 @@ class ExportDialog:
                      bg=T['bg'], fg=T['danger'], font=FONT_SM, anchor='w').pack(fill='x', pady=4)
         btns = tk.Frame(body, bg=T['bg'])
         btns.pack(fill='x', pady=(8, 0))
-        b = tk.Label(btns, text='导出到本目录', bg=T['acc'], fg='#fff', font=FONT_B,
+        b = tk.Label(btns, text='导出到本目录', bg=T['acc'], fg=T.get('on_acc', '#fff'), font=FONT_B,
                      padx=14, pady=5, cursor='hand2')
         b.pack(side='right')
         b.bind('<Button-1>', lambda e: self.do_export())
