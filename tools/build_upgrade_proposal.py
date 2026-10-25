@@ -13,7 +13,8 @@ SOURCE = ROOT / 'docs/plans/v3-upgrade'
 RESEARCH = ROOT / '_archive/upgrade-research-20261025'
 REPORTS = ('windows-market.md', 'mac-patterns.md', 'current-capabilities.md',
            'blank-slate-ideas.md', 'idea-screening.md', 'decision-rubric.md',
-           'prototype-review.md', 'RESEARCH_OVERVIEW.md', 'VALIDATION.md')
+           'prototype-review.md', 'RESEARCH_OVERVIEW.md', 'VALIDATION.md',
+           'prototype-geometry-checks.json')
 
 
 def sha(data):

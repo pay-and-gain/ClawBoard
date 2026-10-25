@@ -212,4 +212,3 @@ dialog>footer{font-size:10px;color:#59695e;border-top:1px solid #e2e7de;padding:
 @media(max-width:500px){.material-cards{grid-template-columns:1fr}
 .recipe-columns{grid-template-columns:1fr}
 }
-
