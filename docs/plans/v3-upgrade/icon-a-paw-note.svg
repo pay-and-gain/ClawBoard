@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="ClawBoard 爪印便签图标方案">
+  <rect x="12" y="12" width="232" height="232" rx="58" fill="#235B50"/>
+  <path d="M70 57h88l34 34v100a13 13 0 0 1-13 13H70a13 13 0 0 1-13-13V70a13 13 0 0 1 13-13Z" fill="#F8F5EA"/>
+  <path d="M158 57v24a10 10 0 0 0 10 10h24" fill="#BAD7C6"/>
+  <ellipse cx="103" cy="122" rx="10" ry="13" transform="rotate(-28 103 122)" fill="#235B50"/>
+  <ellipse cx="127" cy="112" rx="10" ry="13" fill="#235B50"/>
+  <ellipse cx="151" cy="122" rx="10" ry="13" transform="rotate(28 151 122)" fill="#235B50"/>
+  <path d="M104 150c4-18 13-24 23-24s19 6 23 24c4 15-7 22-23 17-16 5-27-2-23-17Z" fill="#235B50"/>
+</svg>
