@@ -14,6 +14,7 @@
 | 数据模型 | `models.py`、`history.py` | 校验归一化、旧 C 枚举兼容、入库/编辑、分类与敏感元数据更新 |
 | 查询与显示 | `search.py`、`privacy.py`、`viewmodels.py` | 查询语法、按需拼音、有界缓存、统一遮罩、可见行惰性投影 |
 | 纯处理 | `classify.py`、`tag.py`、`timefmt.py`、`image.py`、`exports.py`、`transform.py` | 内容规则、时间、编解码、导出和文本变换；不需要创建窗口 |
+| 回收站 | `trash.py`、`recycle_adapter.py`、`trash_dialog.py` | 可选共享JSON扩展、手动删除与恢复、保存后图片清理接线和原生预览；不改变历史字段语义 |
 | 应用编排 | `application.py` | `ApplicationController` 持有历史、查询、任务和保存服务，提交后台采集结果与安排退出 |
 | 调度与服务 | `dispatch.py`、`tasks.py`、`services.py` | 主线程结果队列、受限工作池、剪贴板序列确认、串行保存 |
 | 文件适配器 | `storage.py`、`media.py` | 注入路径的 JSON / 图片文件读写；错误和损坏保护显式返回 |

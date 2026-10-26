@@ -116,6 +116,32 @@ def bench():
     app = ClawBoard(root)
     root.geometry('340x480+-2000+-2000')   # 移出屏幕但保持 mapped，保证布局真实
     root.update()
+    if '--trash-smoke' in sys.argv:
+        from clawboard.models import normalize_item
+        from clawboard.settings_dialog import SettingsWindow
+        app.data['clip'] = [normalize_item(dict(id='trash-smoke',
+            text='Synthetic recycle smoke 中文', created_at=1700000000000), 1)]
+        app.del_item('trash-smoke', 'clip')
+        entries = app.application.trash.entries()
+        assert len(entries) == 1 and not app.data['clip']
+        settings = SettingsWindow(app)
+        settings.select_section('data')
+        window = settings.open_trash()
+        root.update()
+        window.restore_selected()
+        window.purge_selected()
+        window.purge_all()
+        assert '自测' in window.status.cget('text')
+        assert len(app.application.trash.entries()) == 1
+        app.recycle_restore([entries[0]['id']])
+        assert app.data['clip'][0]['text'] == 'Synthetic recycle smoke 中文'
+        window.refresh()
+        assert not window._rows
+        window.close()
+        settings.close()
+        print('Frozen trash UI smoke: passed; NO_SAVE guards active', flush=True)
+        app.quit_app()
+        return
     if '--backup-smoke' in sys.argv:
         from clawboard.settings_dialog import SettingsWindow
         from clawboard.backup_dialog import BackupWindow

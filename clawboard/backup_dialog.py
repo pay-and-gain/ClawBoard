@@ -204,9 +204,9 @@ class BackupWindow:
             self._setting_path = False
         self.preview_label.configure(text=(
             '备份时间：%s\n程序版本：%s\n剪贴板历史：%d 条\n常用语：%d 条\n'
-            '图片：%d 张\n内容大小：%s\n外部文件引用：%d 条（只保留路径）'
+            '回收站：%d 条\n图片：%d 张\n内容大小：%s\n外部文件引用：%d 条（只保留路径）'
             % (self._created_time(preview.created_at), preview.app_version, preview.clip_count,
-               preview.phrase_count, preview.image_count, self._size(preview.total_bytes),
+               preview.phrase_count, preview.trash_count, preview.image_count, self._size(preview.total_bytes),
                preview.external_file_count)))
 
     def choose_archive(self):

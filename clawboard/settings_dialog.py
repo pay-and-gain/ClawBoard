@@ -140,6 +140,10 @@ class SettingsWindow:
         from clawboard.backup_dialog import BackupWindow
         return BackupWindow(self.app)
 
+    def open_trash(self):
+        from clawboard.trash_dialog import TrashWindow
+        return TrashWindow(self.app)
+
     def button(self, master, command, **kwargs):
         options = dict(bg=T['card'], fg=T['fg'], activebackground=T['card_h'],
                        activeforeground=T['fg'], font=self.font(FONT), relief='flat', bd=0,
@@ -324,6 +328,7 @@ class SettingsWindow:
             self.app.data['groups'] = [{'name': '默认', 'items': []}]
             self.app.data['gi'] = 0
             self.app.data['search_history'] = []
+            self.app.data.pop('trash', None)
             self.app.data['geom'] = None
             application.search.clear()
             application.mark_changed()
@@ -348,7 +353,7 @@ class SettingsWindow:
 
         self.app.confirm(
             '确定要彻底清理吗？此操作不可撤销：\n\n'
-            '· 删除全部剪贴板历史与常用语\n'
+            '· 删除全部剪贴板历史、常用语与回收站\n'
             '· 关闭开机自启（清理注册表项）\n'
             '· 删除当前库、图片及迁移备份\n'
             '· 另存的完整备份包会保留\n\n'

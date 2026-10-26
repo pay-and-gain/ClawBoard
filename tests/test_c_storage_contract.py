@@ -130,10 +130,15 @@ class CStorageContractTests(unittest.TestCase):
     def test_top_level_unknown_fields_and_settings_survive(self):
         source = {'schema_version': 3, 'clip': [], 'groups': [],
                   'settings': {'theme': 'light', 'future_option': {'x': 1}},
-                  'extension': {'precise': 9007199254740993}}
+                  'extension': {'precise': 9007199254740993},
+                  'trash': {'version': 1, 'items': [
+                      {'id': 'recycled', 'deleted_at': 1700000000000, 'group': None,
+                       'item': {'id': 'old', 'text': 'synthetic 中文', 'image_path': 'kept.png',
+                                'future': {'precise': 9007199254740993}}}]}}
         output = json.loads(self.call('patch', source, 'clip', '[{"text":"new"}]').stdout)
         self.assertEqual(output['settings'], source['settings'])
         self.assertEqual(output['extension'], source['extension'])
+        self.assertEqual(output['trash'], source['trash'])
         self.assertEqual(output['clip'], [{'text': 'new'}])
 
     def test_item_serializer_preserves_id_and_unknown_metadata(self):

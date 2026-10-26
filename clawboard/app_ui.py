@@ -414,12 +414,16 @@ class UiMixin:
         g = self.cur_group()
 
         def do_del():
-            i = self.data['gi']
+            if len(self.data['groups']) <= 1:
+                self.tip('至少要保留一个分组')
+                return
+            if not self._recycle_move([item['id'] for item in g['items']], group=g):
+                return
+            i = next(index for index, group in enumerate(self.data['groups']) if group is g)
             del self.data['groups'][i]
             self.data['gi'] = max(0, i - 1)
-            self.save(True)
-            self.render()
-        self.confirm('删除分组「%s」及其 %d 条常用语？此操作不可撤销。' %
+            self._recycle_changed()
+        self.confirm('删除分组「%s」及其 %d 条常用语？内容移入回收站，可在30天内恢复。' %
                      (g['name'], len(g['items'])), do_del)
 
     # ---------- 渲染 ----------

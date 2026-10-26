@@ -132,6 +132,9 @@ class SettingsLayout:
         d.row_switch(body, '清空历史时保留收藏项', 'keep_on_clear')
         self.note(body, '当前数据文件')
         self.note(body, DATA_FILE)
+        self.trash_button = d.button(body, d.open_trash, text='回收站…', padx=10, pady=6)
+        self.trash_button.pack(anchor='w', pady=(self.dialog.scaled(8), self.dialog.scaled(4)))
+        self.note(body, '手动删除的内容保留最多30天，可预览和恢复；自动超量裁剪不进入回收站。')
         self.backup_button = d.button(body, d.open_backup, text='完整备份与恢复…', padx=10, pady=6)
         self.backup_button.pack(anchor='w', pady=(self.dialog.scaled(8), self.dialog.scaled(4)))
         self.note(body, '完整备份包含历史、常用语、设置和图片；恢复前先预览，并自动保留恢复前的资料。')
@@ -143,7 +146,7 @@ class SettingsLayout:
         danger.pack(fill='x', pady=(self.dialog.scaled(20), self.dialog.scaled(8)))
         tk.Label(danger, text='危险操作', bg=T['bg'], fg=T['danger'], font=self.dialog.font(FONT_B),
                  anchor='w').pack(fill='x', padx=self.dialog.scaled(10), pady=(self.dialog.scaled(10), self.dialog.scaled(3)))
-        self.note(danger, '清理会删除当前库、图片及迁移备份，并关闭开机自启；另存的完整备份包会保留。该操作无法撤销。')
+        self.note(danger, '清理会删除当前库、回收站、图片及迁移备份，并关闭开机自启；另存的完整备份包会保留。该操作无法撤销。')
         self.wipe_button = d.button(danger, d.wipe_all, text='清理当前资料库',
                                     fg=T['danger'], padx=10, pady=6)
         self.wipe_button.pack(anchor='w', padx=self.dialog.scaled(10), pady=(self.dialog.scaled(4), self.dialog.scaled(10)))

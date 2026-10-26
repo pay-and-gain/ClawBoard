@@ -12,6 +12,7 @@ import tempfile
 import zipfile
 
 from clawboard.config import APP_VER, SCHEMA_VERSION
+from clawboard.trash import TrashService, TrashError, image_references
 
 MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_IMAGE_BYTES = 64 * 1024 * 1024
@@ -43,6 +44,7 @@ class BackupPreview:
     image_count: int
     total_bytes: int
     external_file_count: int
+    trash_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -135,9 +137,13 @@ def data_details(raw):
         if not isinstance(items, list):
             raise BackupError('常用语条目结构无效。')
         phrases.extend(items)
+    try:
+        recycled = [entry['item'] for entry in TrashService(data).entries()]
+    except TrashError as error:
+        raise BackupError('回收站结构需要检查，未创建或恢复不完整备份。') from error
     names, external = set(), 0
     folded = {}
-    for item in (*clips, *phrases):
+    for item in (*clips, *phrases, *recycled):
         if not isinstance(item, dict) or not isinstance(item.get('text'), str):
             raise BackupError('数据包含无效条目。')
         name = item.get('image_path')
@@ -150,10 +156,18 @@ def data_details(raw):
         elif item.get('content_type') == 'image':
             raise BackupError('图片条目缺少图片文件引用。')
         external += item.get('content_type') in ('filelist', 'files')
+    # Preserve assets referenced by optional future metadata just as the GC
+    # does; retaining its JSON without the corresponding bytes is incomplete.
+    for name in image_references(data):
+        safe_name(name)
+        other = folded.setdefault(name.casefold(), name)
+        if other != name:
+            raise BackupError('图片名称存在大小写冲突。')
+        names.add(name)
     if len(names) + 2 > MAX_MEMBERS:
         raise BackupError('图片成员数量超过上限。')
     return dict(schema_version=version, clip_count=len(clips), phrase_count=len(phrases),
-                external_file_count=external), sorted(names)
+                external_file_count=external, trash_count=len(recycled)), sorted(names)
 
 
 def read_file(path, limit, cancelled=None):
@@ -250,7 +264,7 @@ def write_package(destination, raw, image_paths, *, details=None, safety=False,
         os.replace(temporary, destination)
         return BackupPreview(destination, digest, manifest['created_at'], APP_VER,
                              details['clip_count'], details['phrase_count'], len(image_paths),
-                             total, details['external_file_count'])
+                             total, details['external_file_count'], details.get('trash_count', 0))
     except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:
         if isinstance(error, BackupError):
             raise
@@ -396,7 +410,8 @@ def read_package(path, *, staging=None, expected_sha256=None, cancelled=None):
                     raise BackupError('图片引用与备份成员不一致，可能缺少图片。')
                 image_count = len(declared) - 1
                 for key, value in dict(details, image_count=image_count, total_bytes=payload_total).items():
-                    if type(manifest.get(key)) is not int or manifest[key] != value:
+                    actual = manifest.get(key, 0) if key == 'trash_count' else manifest.get(key)
+                    if type(actual) is not int or actual != value:
                         raise BackupError('备份清单统计与内容不一致。')
                 for key in ('created_at', 'app_version'):
                     if not isinstance(manifest.get(key), str) or len(manifest[key]) > 100:
@@ -407,7 +422,7 @@ def read_package(path, *, staging=None, expected_sha256=None, cancelled=None):
                     raise BackupError('读取期间备份包发生变化。')
                 preview = BackupPreview(path, digest, manifest['created_at'], manifest['app_version'],
                     details['clip_count'], details['phrase_count'], image_count, payload_total,
-                    details['external_file_count'])
+                    details['external_file_count'], details['trash_count'])
                 return Package(preview, manifest, payload)
     except (OSError, ValueError, zipfile.BadZipFile, NotImplementedError, RuntimeError, EOFError) as error:
         if isinstance(error, BackupError):
