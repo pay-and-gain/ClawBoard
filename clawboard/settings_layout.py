@@ -132,16 +132,19 @@ class SettingsLayout:
         d.row_switch(body, '清空历史时保留收藏项', 'keep_on_clear')
         self.note(body, '当前数据文件')
         self.note(body, DATA_FILE)
+        self.backup_button = d.button(body, d.open_backup, text='完整备份与恢复…', padx=10, pady=6)
+        self.backup_button.pack(anchor='w', pady=(self.dialog.scaled(8), self.dialog.scaled(4)))
+        self.note(body, '完整备份包含历史、常用语、设置和图片；恢复前先预览，并自动保留恢复前的资料。')
         self.export_button = d.button(body, d.export_all, text='导出全部内容（JSON）',
                                       padx=10, pady=6)
         self.export_button.pack(anchor='w', pady=(self.dialog.scaled(8), self.dialog.scaled(4)))
-        self.note(body, '导出包含历史和常用语的记录字段，不包含设置、图片本体或所引用文件的正文。当前没有导入或一键恢复入口。')
+        self.note(body, 'JSON导出仅含记录字段，不包含设置、图片本体或引用文件正文。整库恢复请使用完整备份包。')
         danger = tk.Frame(body, bg=T['bg'], highlightthickness=1, highlightbackground=T['line'])
         danger.pack(fill='x', pady=(self.dialog.scaled(20), self.dialog.scaled(8)))
         tk.Label(danger, text='危险操作', bg=T['bg'], fg=T['danger'], font=self.dialog.font(FONT_B),
                  anchor='w').pack(fill='x', padx=self.dialog.scaled(10), pady=(self.dialog.scaled(10), self.dialog.scaled(3)))
-        self.note(danger, '彻底清理会删除本机数据及备份，并关闭开机自启。该操作无法撤销。')
-        self.wipe_button = d.button(danger, d.wipe_all, text='彻底清理所有数据',
+        self.note(danger, '清理会删除当前库、图片及迁移备份，并关闭开机自启；另存的完整备份包会保留。该操作无法撤销。')
+        self.wipe_button = d.button(danger, d.wipe_all, text='清理当前资料库',
                                     fg=T['danger'], padx=10, pady=6)
         self.wipe_button.pack(anchor='w', padx=self.dialog.scaled(10), pady=(self.dialog.scaled(4), self.dialog.scaled(10)))
 

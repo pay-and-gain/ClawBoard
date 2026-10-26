@@ -135,6 +135,10 @@ class SettingsWindow:
     def select_section(self, key):
         self.layout.select(key)
 
+    def open_backup(self):
+        from clawboard.backup_dialog import BackupWindow
+        return BackupWindow(self.app)
+
     def button(self, master, command, **kwargs):
         options = dict(bg=T['card'], fg=T['fg'], activebackground=T['card_h'],
                        activeforeground=T['fg'], font=self.font(FONT), relief='flat', bd=0,
@@ -336,8 +340,9 @@ class SettingsWindow:
             '确定要彻底清理吗？此操作不可撤销：\n\n'
             '· 删除全部剪贴板历史与常用语\n'
             '· 关闭开机自启（清理注册表项）\n'
-            '· 删除本地全部数据文件与备份\n\n'
-            '清理完成后，直接删除程序文件夹即彻底卸载。', do)
+            '· 删除当前库、图片及迁移备份\n'
+            '· 另存的完整备份包会保留\n\n'
+            '该操作无法撤销，请先确认已有需要的完整备份。', do)
 
     def row_ui_scale(self, master):
         r = tk.Frame(master, bg=T['bg'])

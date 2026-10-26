@@ -68,7 +68,7 @@ class ExportDialog:
             self.rows.append(r)
         self.paint()
         tk.Label(body, text='JSON 保留所选记录字段，不包含设置、图片本体或所引用文件的正文。'
-                 '\n当前没有导入或一键恢复入口。',
+                 '\n整库恢复请使用设置中的完整备份包。',
                  bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w',
                  justify='left', wraplength=scaled(440)).pack(fill='x', pady=(6, 0))
         sens = sum(1 for x in items if x.get('sens'))

@@ -116,6 +116,23 @@ def bench():
     app = ClawBoard(root)
     root.geometry('340x480+-2000+-2000')   # 移出屏幕但保持 mapped，保证布局真实
     root.update()
+    if '--backup-smoke' in sys.argv:
+        from clawboard.settings_dialog import SettingsWindow
+        from clawboard.backup_dialog import BackupWindow
+        settings = SettingsWindow(app)
+        settings.select_section('data')
+        backup = BackupWindow(app)
+        root.update()
+        backup.create_backup()
+        backup.choose_archive()
+        backup.inspect_archive()
+        backup.confirm_restore()
+        assert '自测' in backup.status.cget('text')
+        backup.close()
+        settings.close()
+        print('Frozen backup UI smoke: passed; NO_SAVE guards active', flush=True)
+        app.quit_app()
+        return
     print('启动到可响应: %.0f ms' % ((time.time() - app.t0) * 1000))
     print('初始常驻内存: %.1f MB' % mem_mb())
 
@@ -169,6 +186,10 @@ def bench():
 
 
 def main():
+    from clawboard.backup_startup import run_restore_mode
+    restore_exit = run_restore_mode(sys.argv[1:], BASE_DIR, no_save=runtime.NO_SAVE)
+    if restore_exit is not None:
+        return restore_exit
     init_dpi_awareness()
     install_excepthook()
     if '--bench' in sys.argv:
@@ -200,9 +221,30 @@ def main():
         return
     if not single_instance():
         sys.exit(0)
+    from clawboard.backup_startup import recover_before_start, consume_notice, recovery_notice
+    try:
+        recovery = recover_before_start(BASE_DIR, no_save=runtime.NO_SAVE)
+    except Exception:
+        # Loading a half-restored library could cause GC to erase its before-
+        # images. Keep startup closed until the transaction can be recovered.
+        from tkinter import messagebox
+        protected = tk.Tk()
+        protected.withdraw()
+        messagebox.showerror('资料恢复需要检查',
+            '上次恢复尚未完成，程序已停止打开资料库。请保留整个数据文件夹及恢复前备份，检查磁盘后重试。',
+            parent=protected)
+        protected.destroy()
+        return 1
     root = tk.Tk()
     tk_error(root)
     app = ClawBoard(root)
+    notice = consume_notice(BASE_DIR, no_save=runtime.NO_SAVE) or recovery_notice(recovery)
+    if notice:
+        def show_notice():
+            from tkinter import messagebox
+            title, text, warning = notice
+            (messagebox.showwarning if warning else messagebox.showinfo)(title, text, parent=root)
+        root.after(350, show_notice)
     app.note('%s v%s 启动（热键 %s，pid %d，窗口 %s，最小 %s，tk scaling %s）'
              % (APP_NAME, APP_VER, app.st['hotkey'], os.getpid(),
                 root.geometry(), root.minsize(), root.tk.call('tk', 'scaling')))
@@ -210,7 +252,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main() or 0)
 
 
 # ---------------------------------------------------------------------------
