@@ -373,7 +373,10 @@ class ThinBar(tk.Canvas):
         try:
             self.delete('all')
             h = max(1, self.winfo_height())
-            self.create_rectangle(0, 0, self.w, h, fill=T['panel'], outline='')
+            # Per-window DPI refresh can resize this canvas after construction.
+            # Drawing at its initial width leaves a thin, misplaced thumb.
+            width = max(1, self.winfo_width())
+            self.create_rectangle(0, 0, width, h, fill=T['panel'], outline='')
             y, th, _ = self._geom()
             if th >= h:             # 内容不满一屏：只留一条淡轨道，不影响观感
                 return
@@ -383,7 +386,8 @@ class ThinBar(tk.Canvas):
                 col = T['fg']       # 悬停
             else:
                 col = T['fg2']      # 静默也看得见
-            self.create_rectangle(1, y + 1, self.w - 1, y + th - 1, fill=col, outline='')
+            inset = min(1, width / 2)
+            self.create_rectangle(inset, y + 1, width - inset, y + th - 1, fill=col, outline='')
         except tk.TclError:
             pass
 

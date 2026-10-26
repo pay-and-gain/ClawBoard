@@ -20,6 +20,7 @@ class ExportDialog:
         self._export_pending = False
         self._export_cancel = Event()
         self._export_key = ('export', id(self))
+        self._focus_job = self._fit_job = None
         ids = set(app.vlist.multi)
         items = [x for x in app.vlist.items if x['id'] in ids] if ids else list(app.vlist.items)
         self.items = items
@@ -34,7 +35,7 @@ class ExportDialog:
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         self.win.bind('<Destroy>', self._destroyed, add='+')
         self.win.bind('<Escape>', lambda e: self.close())
-        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
+        self._focus_job = self.win.after(60, self._focus_later)
         # Reserve actions first so constrained work areas only shrink the body.
         btns = tk.Frame(self.win, bg=T['bg'])
         btns.pack(side='bottom', fill='x', padx=scaled(14), pady=scaled(10))
@@ -88,7 +89,28 @@ class ExportDialog:
         self._body.bind_wheel_tree()
         self._fit_window(btns)
         # The first native map can reset a Toplevel's position on another DPI.
-        self.app.root.after(80, lambda: self._fit_window(btns) if self._alive() else None)
+        self._fit_job = self.app.root.after(80, lambda: self._fit_later(btns))
+
+    def _focus_later(self):
+        self._focus_job = None
+        if self._alive():
+            self.win.lift()
+            self.win.focus_force()
+
+    def _fit_later(self, footer):
+        self._fit_job = None
+        if self._alive():
+            self._fit_window(footer)
+
+    def _cancel_window_jobs(self):
+        for owner, name in ((self.win, '_focus_job'), (self.app.root, '_fit_job')):
+            job = getattr(self, name, None)
+            setattr(self, name, None)
+            if job:
+                try:
+                    owner.after_cancel(job)
+                except tk.TclError:
+                    pass
 
     def _fit_window(self, footer):
         self.win.update_idletasks()
@@ -134,6 +156,7 @@ class ExportDialog:
 
     def _destroyed(self, event):
         if event.widget is self.win:
+            self._cancel_window_jobs()
             self._closed = True
             self._export_cancel.set()
             self.app.application.tasks.invalidate(self._export_key)
@@ -142,6 +165,7 @@ class ExportDialog:
         if getattr(self, '_closed', False):
             return
         self._closed = True
+        self._cancel_window_jobs()
         self._export_cancel.set()
         self.app.application.tasks.invalidate(self._export_key)
         safe_release(self.win)

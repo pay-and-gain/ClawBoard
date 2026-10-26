@@ -32,11 +32,12 @@ class SettingsWindow:
         self._scale = self._window_scale(app.root)
         self._fonts = {}
         self._scale_job = None
+        self._focus_job = None
         dark_top(self.win, '设置')
         self.win.attributes('-topmost', True)
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         self.win.bind('<Destroy>', self._destroyed, add='+')
-        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
+        self._focus_job = self.win.after(60, self._focus_later)
         self.bar = self.win.winfo_children()[0]
         self.bar.configure(height=self.scaled(36))
         self.bar.winfo_children()[0].configure(font=self.font(FONT_B))
@@ -180,6 +181,12 @@ class SettingsWindow:
         except tk.TclError:
             return False
 
+    def _focus_later(self):
+        self._focus_job = None
+        if self._alive():
+            self.win.lift()
+            self.win.focus_force()
+
     def _destroyed(self, event):
         if event.widget is self.win:
             self._cancel_scale_job()
@@ -199,13 +206,16 @@ class SettingsWindow:
         self.win.destroy()
 
     def _cancel_scale_job(self):
-        job = getattr(self, '_scale_job', None)
-        self._scale_job = None
-        if job:
-            try:
-                self.win.after_cancel(job)
-            except tk.TclError:
-                pass
+        # Destroying a widget deletes its Tcl command, but not an after script
+        # that still names it. Cancel before destruction, including fast Esc.
+        for name in ('_scale_job', '_focus_job'):
+            job = getattr(self, name, None)
+            setattr(self, name, None)
+            if job:
+                try:
+                    self.win.after_cancel(job)
+                except tk.TclError:
+                    pass
         binding = getattr(self, '_scale_binding', None)
         self._scale_binding = None
         if binding:
