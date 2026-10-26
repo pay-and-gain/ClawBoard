@@ -37,7 +37,7 @@ def run():
         init_dpi_awareness()
         root = tk.Tk()
         root.title('ClawBoard synthetic independent-screen regression')
-        errors, samples = [], []
+        errors, samples, live_samples = [], [], []
         root.report_callback_exception = lambda kind, error, trace: errors.append(repr(error))
 
         def pump(seconds=.45):
@@ -76,7 +76,8 @@ def run():
                 root.tk.call('tk', 'scaling', base_dpi / 72 * level)
                 original_scaling = float(root.tk.call('tk', 'scaling'))
                 saved = []
-                settings = dict(config.DEFAULT_SETTINGS, future_key={'keep': True})
+                settings = dict(config.DEFAULT_SETTINGS, ui_scale=level,
+                                future_key={'keep': True})
                 app = SimpleNamespace(root=root, st=settings,
                                       data={'clip': [dict(id='synthetic-1', text='Synthetic complete text',
                                                         content_type='text')], 'groups': []},
@@ -84,7 +85,10 @@ def run():
                 for name in ('save', 'render', 'tip', 'apply_effects', 'apply_trigger_setting',
                              'open_releases', 'apply_hotkey', 'rebuild', 'quit_app', 'toggle_listen'):
                     setattr(app, name, lambda *args, n=name: saved.append(n))
-                app.set_ui_scale = lambda value: settings.update(ui_scale=value)
+                def set_ui_scale(value):
+                    config.UI_SCALE = value
+                    settings['ui_scale'] = value
+                app.set_ui_scale = set_ui_scale
                 workbench = WorkbenchWindow(app)
                 app.application.tasks = SimpleNamespace(invalidate=lambda *args: None)
                 with patch('clawboard.settings_dialog.get_autostart', return_value=(False, '')):
@@ -124,8 +128,50 @@ def run():
                     assert int(u32.GetDpiForWindow(top_hwnd(root))) == base_dpi
                     samples.append(dict(ui_scale=level, settings_dpi=dpi, workbench_dpi=wb_dpi))
                 workbench.close()
+                # Keep the same controls and a draft alive while the panel's
+                # shortcut notification changes the user's scale preference.
+                original_binding = dialog._scale_binding
+                for changed_level in (1.25, .75, level):
+                    set_ui_scale(changed_level)
+                    root.event_generate('<<ClawBoardUIScaleChanged>>', when='tail')
+                    pump()
+                    assert abs(dialog._scale - dpi / 96 * changed_level) < .001
+                    assert dialog._inputs['max_items'] is draft
+                    assert draft.get() == '632' and draft.index('insert') == 2
+                    assert dialog.win.focus_get() is draft, 'scale notification lost input focus'
+                    assert dialog.section == 'data' and not saved
+                    assert settings == dict(original_settings, ui_scale=changed_level)
+                    footer_inside(dialog)
+                    live_samples.append(dict(source='panel-event', ui_scale=changed_level))
+                # Invoking the existing settings control must also work when
+                # its parent adapter does not emit the panel notification.
+                for row in dialog.layout.pages['appearance'].inner.winfo_children():
+                    children = row.winfo_children()
+                    if any(isinstance(child, tk.Label) and child.cget('text').startswith('界面缩放')
+                           for child in children):
+                        scale_button = next(child for child in children if isinstance(child, tk.Button))
+                        break
+                else:
+                    raise AssertionError('settings scale control missing')
+                scale_button.invoke()
+                pump()
+                assert abs(dialog._scale - dpi / 96 * config.UI_SCALE) < .001
+                assert dialog._inputs['max_items'] is draft and draft.get() == '632'
+                assert draft.index('insert') == 2 and dialog.win.focus_get() is draft
+                assert dialog.section == 'data' and not saved
+                assert settings == dict(original_settings, ui_scale=config.UI_SCALE)
+                assert abs(float(root.tk.call('tk', 'scaling')) - original_scaling) < .001
+                live_samples.append(dict(source='settings-button', ui_scale=config.UI_SCALE))
+                # Close while a deferred update is pending, then broadcast
+                # again to catch dangling root bindings and destroyed callbacks.
+                dialog._configured()
+                pending = dialog._scale_job
                 dialog.close()
-                pump(.1)
+                assert dialog._scale_job is None and dialog._scale_binding is None
+                assert original_binding not in root.bind('<<ClawBoardUIScaleChanged>>')
+                assert pending not in root.tk.splitlist(root.tk.call('after', 'info'))
+                root.event_generate('<<ClawBoardUIScaleChanged>>', when='tail')
+                pump(.2)
             assert not errors, errors
             assert not Path(config.DATA_FILE).exists(), 'standalone harness wrote a data file'
         finally:
@@ -133,6 +179,7 @@ def run():
     assert {str(path): digest(path) for path in real} == before, 'real data changed during regression'
     native_dpis = sorted({sample['settings_dpi'] for sample in samples})
     print(json.dumps(dict(passed=True, native_dpis=native_dpis, samples=samples,
+                          live_scale_samples=live_samples,
                           two_dpi_monitors_verified=len(native_dpis) > 1,
                           real_hashes_unchanged=True)))
 

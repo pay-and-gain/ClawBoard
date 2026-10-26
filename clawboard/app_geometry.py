@@ -90,6 +90,7 @@ class GeometryMixin(DpiMixin):
             self.root.minsize(*self.min_size())
         self.tip('已缩放至 %d%%' % int(level * 100))
         self.save(True)
+        self.root.event_generate('<<ClawBoardUIScaleChanged>>', when='tail')
 
     def cycle_ui_scale(self, step):
         """按档位步进缩放（+1 放大一档 / -1 缩小一档），用于快捷键"""

@@ -45,6 +45,8 @@ class SettingsWindow:
         self.layout = SettingsLayout(self)
         self._metrics = self._remember_metrics(self.win)
         self.win.bind('<Configure>', self._configured, add='+')
+        self._scale_binding = app.root.bind(
+            '<<ClawBoardUIScaleChanged>>', lambda _: self._configured(), add='+')
         self.win.bind('<Escape>', lambda e: self.close())
         self._configured()
 
@@ -200,6 +202,13 @@ class SettingsWindow:
                 self.win.after_cancel(job)
             except tk.TclError:
                 pass
+        binding = getattr(self, '_scale_binding', None)
+        self._scale_binding = None
+        if binding:
+            try:
+                self.app.root.unbind('<<ClawBoardUIScaleChanged>>', binding)
+            except tk.TclError:
+                pass
 
     def export_all(self):
         if runtime.NO_SAVE:
@@ -343,6 +352,7 @@ class SettingsWindow:
             current = float(self.app.st.get('ui_scale') or 1.0)
             index = levels.index(current) if current in levels else levels.index(1.0)
             self.app.set_ui_scale(levels[(index + 1) % len(levels)])
+            self._configured()
             paint()
 
         lb = self.button(r, setv, text='', padx=8, pady=4, font=self.font(FONT_SM))
