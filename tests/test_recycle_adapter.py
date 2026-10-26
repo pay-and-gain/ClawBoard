@@ -1,7 +1,11 @@
 """Deletion entry wiring without an App, a Tk root, clipboard or disk writes."""
 from copy import deepcopy
+import os
 from types import SimpleNamespace
 import unittest
+
+if os.name != 'nt':
+    raise unittest.SkipTest('Tk shell adapters import native Windows integration')
 
 from clawboard.app_interact import InteractionMixin
 from clawboard.app_ui import UiMixin

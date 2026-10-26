@@ -6,24 +6,24 @@ ClawBoard keeps a history of copied content and a panel of reusable phrases. Sta
 
 The current interface uses Chinese labels: **设置** is Settings, **常用语** is Phrases, **关于** is About, and **退出** is Quit.
 
-> This guide describes **v2.7.0**. Older v2.6.1 packages lack the current IME and permission safeguards; keep triggers disabled while using that older build. Back up the data file and image folder before upgrading.
+> This guide describes **v3.0.0**. Older v2.6.1 packages lack the current IME and permission safeguards; keep triggers disabled while using that older build. Back up the data file and image folder before upgrading.
 
 ## 1. Choose how to run it
 
-**For the published build**, open the [v2.7.0 release](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0). Neither packaged option requires Python.
+**For the published build**, open the [v3.0.0 release](https://github.com/pay-and-gain/ClawBoard/releases/tag/v3.0.0). Neither packaged option requires Python.
 
-- [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip): extract the whole archive into a writable folder and run `ClawBoard.exe`. Keep the executable beside its data files.
-- [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe): follow the setup wizard. A desktop shortcut is optional.
+- [ClawBoard-3.0.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v3.0.0/ClawBoard-3.0.0-portable.zip): extract the whole archive into a writable folder and run `ClawBoard.exe`. Keep the executable beside its data files.
+- [ClawBoard-3.0.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v3.0.0/ClawBoard-3.0.0-setup.exe): follow the setup wizard. A desktop shortcut is optional.
 
 **To run from source**, use Windows 10/11, Git and Python 3.10+ with Tcl/Tk included in the Python installation:
 
 ```powershell
-git clone https://github.com/pay-and-gain/ClawBoard.git
+git clone --branch v3.0.0 https://github.com/pay-and-gain/ClawBoard.git
 cd ClawBoard
 python ClawBoard.py
 ```
 
-The application only needs the Python standard library; there are no pip dependencies to install. See [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) for the refactor. Source runs store data in the source directory by default; development tests must use a separate temporary library.
+The application only needs the Python standard library; there are no pip dependencies to install. See the [changelog](../CHANGELOG.md) for the v3 changes. Source runs store data in the source directory by default; development tests must use a separate temporary library.
 
 ## 2. Copy and paste your first entry
 
@@ -73,7 +73,11 @@ Open the phrases tab, select a group and click **＋** at the bottom. Enter a na
 
 Select an entry and press **Ctrl+T** for JSON formatting, encoding, case and line operations. Review the result before copying it, saving it as a new entry or overwriting the original.
 
-Use **Ctrl+click** to select several entries, or **Shift** for a range, then press **Ctrl+E**. With no multiple selection, export uses the current results. Choose TXT, CSV, JSON or Markdown. Exports go to the current data directory; a JSON export is not a complete backup of the image folder.
+Use **Ctrl+click** to select several entries, or **Shift** for a range, then press **Ctrl+E**. With no multiple selection, export uses the current results. Choose TXT, CSV, JSON or Markdown. Exports go to the current data directory. An ordinary JSON export excludes settings and image bodies, and cannot restore the library. Use the complete-backup entry in Settings → Data instead.
+
+## Optional read-only workbench
+
+Press **Ctrl+Shift+W** inside the panel to search and preview in a larger window. Use its locate action to return to the quick panel; the workbench does not paste automatically. Its search and selection can survive closing and reopening within the same process, but are not promised across restarts.
 
 ## 6. Locate your data
 
@@ -89,6 +93,12 @@ Images are in `images/` under that directory; the diagnostic log is `crash.log`.
 
 Portable use creates these local files. The optional Start with Windows setting also writes ClawBoard's entry under the current user's `Software\Microsoft\Windows\CurrentVersion\Run`; disabling it removes that entry. The installer creates installation records and shortcuts as well.
 
+## Complete backups and deleted entries
+
+Open **设置 → 数据** (Settings → Data). **完整备份与恢复** creates a ZIP containing history, phrases, the recycle bin, settings and referenced images. Inspect the package before restoring; restore replaces the library and settings, keeps a safety backup first, and restarts the app. External file entries keep paths only, not the referenced file bodies. See the [full guide](backup-and-restore.md), currently in Chinese.
+
+**回收站** (Recycle bin) previews and restores manual deletions for up to **30 days**. Its **5,000-entry** cap rejects new moves rather than evicting unexpired entries. Automatic history-limit pruning does not enter the bin. Permanent deletion requires confirmation; complete backups can still retain older content. [Recycle-bin details](recycle-bin.md).
+
 ## Backups, upgrades and moving data
 
 1. Exit ClawBoard with **Ctrl+Q** or the tray menu.
@@ -98,7 +108,7 @@ Portable use creates these local files. The optional Start with Windows setting 
 
 Back up before an installer upgrade too. The uninstall data question defaults to keeping data, and silent uninstall also keeps it. Silent installation and data-preserving uninstallation were tested in a separate local directory; see the [validation record](WINDOWS_VALIDATION.md) for scope.
 
-The Python and C implementations support the shared JSON format, but the C version has fewer features. Quit and back up before switching. Older 2.6.1 preview packages are different builds from the official v2.7.0 release.
+The Python and C implementations support the shared JSON format, but the C version has fewer features. Quit and back up before switching. Older 2.6.1 preview packages are different builds from v3.0.0.
 
 ## 7. Privacy settings
 
@@ -118,9 +128,9 @@ Review these settings for your use:
 
 **The destination runs as administrator.** Normal-privilege ClawBoard stops key injection into higher-privilege targets; unknown integrity levels also stop key injection. If copying succeeded, press `Ctrl+V` in the destination yourself. Use the same fallback when a target refuses focus or input.
 
-**A trigger does not expand.** Check that you are using v2.7.0, the setting is enabled, the target is outside ClawBoard, and a separate standard US keyboard is selected. Microsoft Pinyin switched to English is still an IME and is skipped. Clicking the phrase remains available.
+**A trigger does not expand.** Check that you are using v3.0.0, the setting is enabled, the target is outside ClawBoard, and a separate standard US keyboard is selected. Microsoft Pinyin switched to English is still an IME and is skipped. Clicking the phrase remains available.
 
-**The panel is missing.** Try the global show/hide shortcut, then use the tray's Reset position command. Mixed-DPI behavior has been checked for the main panel; this does not imply every already-open dialog adapts identically across displays.
+**The panel is missing.** Try the global show/hide shortcut, then use the tray's Reset position command. The main panel and settings, backup and recycle windows have dedicated DPI checks; this does not establish identical behavior for every dialog, physical keyboard navigation or full accessibility.
 
 **Whitespace changed when pasting.** Leading and trailing whitespace is trimmed by default; indentation within the text is retained. Turn off trimming in Settings when edge whitespace must be preserved.
 
@@ -137,6 +147,7 @@ Only the show/hide shortcut is global. The other keys apply inside the panel.
 | `Ctrl+Shift+Enter` | Paste as plain text |
 | `Ctrl+T` / `Ctrl+E` | Text transforms / export |
 | `Ctrl+Shift+P` | Command palette |
+| `Ctrl+Shift+W` | Open the read-only workbench |
 | `Ctrl+=` / `Ctrl+-` | Change user scaling |
 | `Delete` | Delete the selection |
 | `Esc` / `Ctrl+Q` | Hide / quit |
