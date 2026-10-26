@@ -4,11 +4,9 @@ import os
 from types import SimpleNamespace
 import unittest
 
-if os.name != 'nt':
-    raise unittest.SkipTest('Tk shell adapters import native Windows integration')
-
-from clawboard.app_interact import InteractionMixin
-from clawboard.app_ui import UiMixin
+if os.name == 'nt':
+    from clawboard.app_interact import InteractionMixin
+    from clawboard.app_ui import UiMixin
 from clawboard.history import HistoryService
 from clawboard.models import default_data, normalize_item
 from clawboard.recycle_adapter import RecycleMixin
@@ -16,9 +14,10 @@ from clawboard.trash import TrashService, TrashError
 
 
 class Harness(RecycleMixin):
-    del_item = InteractionMixin.del_item
-    clear_list = InteractionMixin.clear_list
-    del_group = UiMixin.del_group
+    if os.name == 'nt':
+        del_item = InteractionMixin.del_item
+        clear_list = InteractionMixin.clear_list
+        del_group = UiMixin.del_group
 
     def __init__(self):
         self.data = default_data()
@@ -54,6 +53,7 @@ class Harness(RecycleMixin):
         callback()
 
 
+@unittest.skipUnless(os.name == 'nt', 'Tk shell adapters require native Windows integration')
 class RecycleAdapterTests(unittest.TestCase):
     def setUp(self):
         self.host = Harness()
