@@ -117,6 +117,22 @@ def _digest(value):
     return value.lower()
 
 
+def _reject_pending(directory):
+    for candidate in directory.glob('*.json'):
+        if not _UUID_FILE.fullmatch(candidate.name):
+            continue
+        try:
+            path = _job_path(candidate, directory.parent)
+            _validate_ticket(_read_json(path), reject_current_pid=False)
+        except (OSError, RuntimeError, RestoreJobError):
+            continue
+        if (_cancelled(path) or os.path.lexists(str(path) + '.result')
+                or os.path.lexists(str(path) + '.result.seen')):
+            continue
+        # 不限父 PID：新窗口/新实例不能把另一恢复请求排到现有 helper 后面。
+        raise RestoreJobError('AlreadyRunning')
+
+
 def prepare_restore_job(base_dir, archive, expected_sha256, parent_pid=None):
     """只在 base_dir/.restore-jobs 创建新票据；调用方先拦截 NO_SAVE。"""
     digest = _digest(expected_sha256)
@@ -128,6 +144,7 @@ def prepare_restore_job(base_dir, archive, expected_sha256, parent_pid=None):
     if type(pid) is not int or not 0 < pid <= 0xffffffff:
         raise RestoreJobError()
     directory = _job_directory(base_dir, create=True)
+    _reject_pending(directory)
     path = directory / (str(uuid.uuid4()) + '.json')
     _atomic_json(path, {'version': JOB_VERSION, 'parent_pid': pid,
                         'archive': str(source), 'expected_sha256': digest,
@@ -220,7 +237,9 @@ def _product_lease(timeout):
         raise RestoreJobError('MutexTimeout')
     owned = False
     try:
-        state = kernel.WaitForSingleObject(handle, max(0, int(timeout * 1000)))
+        # 父进程已经完全退出；若新实例正占用资料，立即取消而不排队等它退出。
+        # timeout 参数仅为既有注入接口兼容保留。
+        state = kernel.WaitForSingleObject(handle, 0)
         # 原实例由进程退出释放，WAIT_ABANDONED 是预期的安全接管状态。
         if state not in (0, 0x80):
             raise RestoreJobError('MutexTimeout')
@@ -232,14 +251,15 @@ def _product_lease(timeout):
         kernel.CloseHandle(handle)
 
 
-def _validate_ticket(payload):
+def _validate_ticket(payload, *, reject_current_pid=True):
     # 禁止在未来扩展时误把未知 target/command 当成授权。
     if set(payload) != {'version', 'parent_pid', 'archive', 'expected_sha256', 'created_at'}:
         raise RestoreJobError()
     if type(payload['version']) is not int or payload['version'] != JOB_VERSION:
         raise RestoreJobError()
     pid = payload['parent_pid']
-    if type(pid) is not int or not 0 < pid <= 0xffffffff or pid == os.getpid():
+    if (type(pid) is not int or not 0 < pid <= 0xffffffff
+            or reject_current_pid and pid == os.getpid()):
         raise RestoreJobError()
     created = payload['created_at']
     if (type(created) not in (int, float) or not math.isfinite(created)

@@ -12,7 +12,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from clawboard import restore_job as jobs
@@ -90,6 +90,56 @@ class RestoreJobTests(unittest.TestCase):
         self.assertEqual(payload['expected_sha256'], self.digest)
         self.assertEqual(payload['archive'], str(self.archive))
         self.assertEqual(self.data.read_bytes(), self.original)
+
+    def test_prepare_rejects_second_pending_job_across_parent_ids(self):
+        before = set(self.ticket.parent.iterdir())
+        for pid in (0x12345678, 0x12345679):
+            with self.subTest(pid=pid), self.assertRaises(jobs.RestoreJobError) as caught:
+                jobs.prepare_restore_job(self.base, self.archive, self.digest, parent_pid=pid)
+            self.assertEqual(caught.exception.code, 'AlreadyRunning')
+        self.assertEqual(set(self.ticket.parent.iterdir()), before)
+
+    def test_prepare_detects_pending_job_from_current_app_pid(self):
+        self.edit_ticket(parent_pid=os.getpid())
+        with self.assertRaises(jobs.RestoreJobError) as caught:
+            jobs.prepare_restore_job(self.base, self.archive, self.digest)
+        self.assertEqual(caught.exception.code, 'AlreadyRunning')
+
+    def test_prepare_allows_cancelled_job_without_deleting_it(self):
+        jobs.cancel_restore_job(self.ticket, self.base)
+        second = jobs.prepare_restore_job(self.base, self.archive, self.digest)
+        self.assertNotEqual(second, self.ticket)
+        self.assertTrue(self.ticket.exists())
+        self.assertTrue(Path(str(self.ticket) + '.cancel').exists())
+
+    def test_prepare_allows_completed_and_seen_jobs_without_deleting_them(self):
+        first_result = Path(str(self.ticket) + '.result')
+        first_result.write_text('{}', encoding='utf-8')
+        second = jobs.prepare_restore_job(self.base, self.archive, self.digest)
+        second_seen = Path(str(second) + '.result.seen')
+        second_seen.write_text('{}', encoding='utf-8')
+        third = jobs.prepare_restore_job(self.base, self.archive, self.digest)
+        self.assertTrue(third.exists())
+        self.assertTrue(self.ticket.exists())
+        self.assertTrue(first_result.exists())
+        self.assertTrue(second.exists())
+        self.assertTrue(second_seen.exists())
+
+    def test_prepare_allows_expired_job_without_deleting_it(self):
+        self.edit_ticket(created_at=time.time() - jobs.JOB_TTL - 10)
+        original = self.ticket.read_bytes()
+        second = jobs.prepare_restore_job(self.base, self.archive, self.digest)
+        self.assertTrue(second.exists())
+        self.assertEqual(self.ticket.read_bytes(), original)
+
+    def test_prepare_ignores_damaged_and_unknown_tickets_without_executing_them(self):
+        self.ticket.write_text('broken fixture', encoding='utf-8')
+        unknown = self.ticket.parent / 'unknown.json'
+        unknown.write_text('{"command":["untrusted.exe"]}', encoding='utf-8')
+        second = jobs.prepare_restore_job(self.base, self.archive, self.digest)
+        self.assertTrue(second.exists())
+        self.assertEqual(self.ticket.read_text(encoding='utf-8'), 'broken fixture')
+        self.assertTrue(unknown.exists())
 
     def test_success_waits_for_process_then_mutex_then_restore_and_restart(self):
         result = self.run_job()
@@ -240,6 +290,32 @@ class RestoreJobTests(unittest.TestCase):
         self.assertNotIn('restore', self.events)
         self.assertEqual(self.data.read_bytes(), self.original)
         self.assertEqual(self.events, ['parent-exited'])
+
+    def test_product_mutex_live_owner_is_rejected_immediately_without_queueing(self):
+        kernel = Mock()
+        handle = 0x123456789
+        kernel.CreateMutexW.return_value = handle
+        kernel.WaitForSingleObject.return_value = 258
+        with patch.object(jobs, '_kernel32', return_value=kernel):
+            with self.assertRaises(jobs.RestoreJobError) as caught:
+                with jobs._product_lease(30):
+                    self.fail('live owner must prevent entering restore')
+        self.assertEqual(caught.exception.code, 'MutexTimeout')
+        kernel.WaitForSingleObject.assert_called_once_with(handle, 0)
+        kernel.ReleaseMutex.assert_not_called()
+        kernel.CloseHandle.assert_called_once_with(handle)
+
+    def test_product_mutex_accepts_abandoned_owner_and_releases_lease(self):
+        kernel = Mock()
+        handle = 0x123456789
+        kernel.CreateMutexW.return_value = handle
+        kernel.WaitForSingleObject.return_value = 0x80
+        with patch.object(jobs, '_kernel32', return_value=kernel):
+            with jobs._product_lease(30):
+                kernel.ReleaseMutex.assert_not_called()
+        kernel.WaitForSingleObject.assert_called_once_with(handle, 0)
+        kernel.ReleaseMutex.assert_called_once_with(handle)
+        kernel.CloseHandle.assert_called_once_with(handle)
 
     def test_parent_wait_error_never_restarts(self):
         def broken_wait(pid, timeout):

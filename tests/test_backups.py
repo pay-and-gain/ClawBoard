@@ -1,5 +1,6 @@
 """Backup/restore service regression. Only synthetic temporary libraries are used."""
 from copy import deepcopy
+import errno
 import hashlib
 import json
 import os
@@ -227,6 +228,56 @@ print('new-process-reload-ok')
             self.target_service.restore(self.archive, self.preview.sha256)
         self.assert_original()
         self.assertIsNone(self.target_service.recover_pending())
+
+    def test_disk_full_rollback_restores_bytes_without_new_file_allocation(self):
+        self.crash_after(self.target_images / 'shared.png')
+        no_space = OSError(errno.ENOSPC, 'synthetic full disk')
+        original_open = Path.open
+        def open_readonly(path, mode='r', *args, **kwargs):
+            if any(flag in mode for flag in 'wax+'):
+                raise no_space
+            return original_open(path, mode, *args, **kwargs)
+        with patch.object(Path, 'open', open_readonly), \
+             patch.object(R.tempfile, 'mkstemp', side_effect=no_space) as allocate, \
+             patch.object(R, '_copy', side_effect=no_space) as copy:
+            # The journal marker may fail, but existing target bytes must already be old.
+            with self.assertRaises(BackupError):
+                self.target_service.recover_pending()
+            self.assert_original()
+            copy.assert_not_called()
+            allocate.assert_called_once()
+        self.assertTrue((self.target.parent / '.clawboard-restore-journal.json').exists())
+        self.assertEqual(self.target_service.recover_pending().status, 'rolled_back')
+        self.assert_original()
+
+    def test_crash_after_rollback_rename_replays_without_consumed_before_image(self):
+        self.crash_after(self.target)
+        original_replace = os.replace
+        def replace(source, destination):
+            result = original_replace(source, destination)
+            if Path(destination) == self.target_images / 'shared.png':
+                raise SimulatedCrash()
+            return result
+        with patch.object(R.os, 'replace', side_effect=replace), self.assertRaises(SimulatedCrash):
+            self.target_service.recover_pending()
+        journal = self.target.parent / '.clawboard-restore-journal.json'
+        plan = json.loads(journal.read_bytes())
+        original_image = self.target.parent / plan['transaction'] / 'old/images/shared.png'
+        self.assertFalse(original_image.exists(), 'rollback rename must consume its before-image')
+        self.assertEqual((self.target_images / 'shared.png').read_bytes(), b'original-conflicting-image')
+        script = '''
+import sys
+sys.path.insert(0,sys.argv[1])
+from clawboard.backups import BackupService
+r=BackupService(sys.argv[2]).recover_pending()
+assert r.status=='rolled_back' and not r.cleanup_pending
+print('rollback-rename-replay-ok')
+'''
+        done = subprocess.run([sys.executable, '-c', script, str(ROOT), str(self.target)],
+                              capture_output=True, text=True, timeout=10)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assert_original()
+        self.assertFalse(journal.exists())
 
     def crash_after(self, destination):
         original_replace = os.replace

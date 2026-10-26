@@ -155,17 +155,13 @@ class RestoreTransaction:
         if current not in (None, entry['new_sha256'], entry['old_sha256']):
             raise BackupError('恢复中断后目标文件被其他程序改动，已保留现场：' + target.name)
         if entry['existed']:
+            if current == entry['old_sha256']:
+                return  # A previous replay may already have consumed this before-image.
             if _digest(original, limit) != entry['old_sha256']:
                 raise BackupError('恢复前原件校验失败，已保留现场。')
-            # Copy before replacing: replay must not consume the only before-image.
-            fd, temporary = tempfile.mkstemp(prefix='.rollback-', dir=original.parent)
-            os.close(fd)
-            try:
-                _copy(original, temporary, limit)
-                os.replace(temporary, target)
-            finally:
-                if os.path.exists(temporary):
-                    os.unlink(temporary)
+            # Same-volume rename needs no second full-file allocation when the
+            # disk is full. Replay recognizes the restored target by its hash.
+            os.replace(original, target)
         elif current == entry['new_sha256']:
             target.unlink()
 
