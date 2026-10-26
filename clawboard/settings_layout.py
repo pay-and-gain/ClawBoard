@@ -3,7 +3,7 @@ import ctypes
 import math
 import tkinter as tk
 
-from clawboard.config import DATA_FILE, FONT, FONT_B, FONT_SM, scaled
+from clawboard.config import DATA_FILE, FONT, FONT_B, FONT_SM
 from clawboard.theme import T
 from clawboard.widgets import ScrollFrame
 
@@ -37,7 +37,7 @@ class SettingsLayout:
         self.win = dialog.win
         self.pages, self.navigation = {}, {}
         self.footer = tk.Frame(self.win, bg=T['bg'])
-        self.footer.pack(side='bottom', fill='x', padx=scaled(16), pady=scaled(12))
+        self.footer.pack(side='bottom', fill='x', padx=self.dialog.scaled(16), pady=self.dialog.scaled(12))
         self.close_button = dialog.button(self.footer, dialog.save_and_close,
                                          text='关闭', bg=T['acc'],
                                          fg=T.get('on_acc', '#fff'), padx=16, pady=5)
@@ -46,19 +46,19 @@ class SettingsLayout:
                                         text='退出程序', fg=T['danger'], padx=8, pady=5)
         self.quit_button.pack(side='left')
         tk.Label(self.footer, text='设置自动保存', bg=T['bg'], fg=T['fg2'],
-                 font=FONT_SM).pack(side='left', padx=scaled(12))
+                 font=self.dialog.font(FONT_SM)).pack(side='left', padx=self.dialog.scaled(12))
 
         self.shell = tk.Frame(self.win, bg=T['bg'])
-        self.shell.pack(fill='both', expand=True, padx=scaled(12), pady=(scaled(12), 0))
+        self.shell.pack(fill='both', expand=True, padx=self.dialog.scaled(12), pady=(self.dialog.scaled(12), 0))
         self.nav = tk.Frame(self.shell, bg=T['panel'])
-        self.nav.pack(side='left', fill='y', padx=(0, scaled(14)))
+        self.nav.pack(side='left', fill='y', padx=(0, self.dialog.scaled(14)))
         self.content = tk.Frame(self.shell, bg=T['bg'])
         self.content.pack(side='left', fill='both', expand=True)
-        self.heading = tk.Label(self.content, bg=T['bg'], fg=T['fg'], font=FONT_B, anchor='w')
-        self.heading.pack(fill='x', pady=(0, scaled(5)))
-        self.description = tk.Label(self.content, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+        self.heading = tk.Label(self.content, bg=T['bg'], fg=T['fg'], font=self.dialog.font(FONT_B), anchor='w')
+        self.heading.pack(fill='x', pady=(0, self.dialog.scaled(5)))
+        self.description = tk.Label(self.content, bg=T['bg'], fg=T['fg2'], font=self.dialog.font(FONT_SM),
                                     anchor='w', justify='left', wraplength=300)
-        self.description.pack(fill='x', pady=(0, scaled(10)))
+        self.description.pack(fill='x', pady=(0, self.dialog.scaled(10)))
         self.description.bind('<Configure>', lambda e: self.description.configure(wraplength=max(80, e.width)))
         self.stack = tk.Frame(self.content, bg=T['bg'])
         self.stack.pack(fill='both', expand=True)
@@ -66,9 +66,9 @@ class SettingsLayout:
         self.stack.columnconfigure(0, weight=1)
         for key, name, _ in SECTIONS:
             button = dialog.button(self.nav, lambda k=key: self.select(k), text=name,
-                                   anchor='w', width=8, padx=scaled(10), pady=scaled(9),
+                                   anchor='w', width=8, padx=self.dialog.scaled(10), pady=self.dialog.scaled(9),
                                    bg=T['panel'])
-            button.pack(fill='x', padx=scaled(5), pady=scaled(3))
+            button.pack(fill='x', padx=self.dialog.scaled(5), pady=self.dialog.scaled(3))
             self.navigation[key] = button
             page = ScrollFrame(self.stack)
             page.grid(row=0, column=0, sticky='nsew')
@@ -134,22 +134,21 @@ class SettingsLayout:
         self.note(body, DATA_FILE)
         self.export_button = d.button(body, d.export_all, text='导出全部内容（JSON）',
                                       padx=10, pady=6)
-        self.export_button.pack(anchor='w', pady=(scaled(8), scaled(4)))
-        self.note(body, '导出包含历史和常用语的记录字段，不包含图片文件。迁移时请同时备份同层 images 文件夹。')
+        self.export_button.pack(anchor='w', pady=(self.dialog.scaled(8), self.dialog.scaled(4)))
+        self.note(body, '导出包含历史和常用语的记录字段，不包含设置、图片本体或所引用文件的正文。当前没有导入或一键恢复入口。')
         danger = tk.Frame(body, bg=T['bg'], highlightthickness=1, highlightbackground=T['line'])
-        danger.pack(fill='x', pady=(scaled(20), scaled(8)))
-        tk.Label(danger, text='危险操作', bg=T['bg'], fg=T['danger'], font=FONT_B,
-                 anchor='w').pack(fill='x', padx=scaled(10), pady=(scaled(10), scaled(3)))
+        danger.pack(fill='x', pady=(self.dialog.scaled(20), self.dialog.scaled(8)))
+        tk.Label(danger, text='危险操作', bg=T['bg'], fg=T['danger'], font=self.dialog.font(FONT_B),
+                 anchor='w').pack(fill='x', padx=self.dialog.scaled(10), pady=(self.dialog.scaled(10), self.dialog.scaled(3)))
         self.note(danger, '彻底清理会删除本机数据及备份，并关闭开机自启。该操作无法撤销。')
         self.wipe_button = d.button(danger, d.wipe_all, text='彻底清理所有数据',
                                     fg=T['danger'], padx=10, pady=6)
-        self.wipe_button.pack(anchor='w', padx=scaled(10), pady=(scaled(4), scaled(10)))
+        self.wipe_button.pack(anchor='w', padx=self.dialog.scaled(10), pady=(self.dialog.scaled(4), self.dialog.scaled(10)))
 
-    @staticmethod
-    def note(master, text):
-        label = tk.Label(master, text=text, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+    def note(self, master, text):
+        label = tk.Label(master, text=text, bg=T['bg'], fg=T['fg2'], font=self.dialog.font(FONT_SM),
                          anchor='w', justify='left', wraplength=300)
-        label.pack(fill='x', padx=scaled(3), pady=scaled(5))
+        label.pack(fill='x', padx=self.dialog.scaled(3), pady=self.dialog.scaled(5))
         label.bind('<Configure>', lambda e: label.configure(wraplength=max(60, e.width)))
         return label
 
@@ -187,9 +186,9 @@ class SettingsLayout:
         height = canvas.winfo_height()
         desired = top
         if y < top:
-            desired = y - scaled(8)
+            desired = y - self.dialog.scaled(8)
         elif bottom > top + height:
-            desired = bottom - height + scaled(8)
+            desired = bottom - height + self.dialog.scaled(8)
         if desired != top:
             # ScrollFrame uses whole 24px units. Round toward visibility rather
             # than let a small positive request round back to the old position.
@@ -211,7 +210,7 @@ class SettingsLayout:
             widget.bind('<B1-Motion>', move)
 
     def _make_grip(self):
-        grip = tk.Label(self.win, text='⌟', bg=T['bg'], fg=T['fg2'], font=FONT_SM, cursor='sizing')
+        grip = tk.Label(self.win, text='⌟', bg=T['bg'], fg=T['fg2'], font=self.dialog.font(FONT_SM), cursor='sizing')
         grip.place(relx=1, rely=1, x=-2, y=-2, anchor='se')
 
         def start(event):
@@ -226,7 +225,7 @@ class SettingsLayout:
         grip.bind('<ButtonPress-1>', start)
         grip.bind('<B1-Motion>', resize)
 
-    def fit_window(self):
+    def fit_window(self, initial=True, ratio=1.0):
         self.win.update_idletasks()
         parent = self.dialog.app.root
         px, py, pw, ph = parent.winfo_rootx(), parent.winfo_rooty(), parent.winfo_width(), parent.winfo_height()
@@ -236,20 +235,26 @@ class SettingsLayout:
             from clawboard.windows_geometry import top_hwnd
             info = MONITORINFO()
             info.cbSize = ctypes.sizeof(info)
-            monitor = u32.MonitorFromWindow(top_hwnd(parent), MONITOR_DEFAULTTONEAREST)
+            monitor = u32.MonitorFromWindow(top_hwnd(parent if initial else self.win), MONITOR_DEFAULTTONEAREST)
             if u32.GetMonitorInfoW(monitor, ctypes.byref(info)):
                 r = info.rcWork
                 area = (r.left, r.top, r.right, r.bottom)
         except (ImportError, AttributeError, OSError):
             pass
         left, top, right, bottom = area
-        margin = scaled(8)
+        margin = self.dialog.scaled(8)
         aw, ah = max(1, right - left - margin * 2), max(1, bottom - top - margin * 2)
-        width = min(aw, max(scaled(620), self.nav.winfo_reqwidth() + scaled(270), self.footer.winfo_reqwidth() + scaled(40)))
-        height = min(ah, max(scaled(540), self.nav.winfo_reqheight() + self.footer.winfo_reqheight() + scaled(90)))
+        width = min(aw, max(self.dialog.scaled(620), self.nav.winfo_reqwidth() + self.dialog.scaled(270), self.footer.winfo_reqwidth() + self.dialog.scaled(40)))
+        height = min(ah, max(self.dialog.scaled(540), self.nav.winfo_reqheight() + self.footer.winfo_reqheight() + self.dialog.scaled(90)))
         x = max(left + margin, min(px + (pw - width) // 2, right - width - margin))
         y = max(top + margin, min(py + (ph - height) // 2, bottom - height - margin))
+        if not initial:
+            width = min(aw, max(1, round(self.win.winfo_width() * ratio)))
+            height = min(ah, max(1, round(self.win.winfo_height() * ratio)))
+            x = max(left + margin, min(self.win.winfo_x(), right - width - margin))
+            y = max(top + margin, min(self.win.winfo_y(), bottom - height - margin))
+        self.win.minsize(1, 1)
         self.win.geometry('%dx%d%+d%+d' % (width, height, x, y))
-        self.win.minsize(min(width, max(scaled(440), self.nav.winfo_reqwidth() + scaled(220),
-                                      self.footer.winfo_reqwidth() + scaled(40))),
-                         min(height, max(scaled(350), self.nav.winfo_reqheight() + self.footer.winfo_reqheight() + scaled(50))))
+        self.win.minsize(min(width, max(self.dialog.scaled(440), self.nav.winfo_reqwidth() + self.dialog.scaled(220),
+                                      self.footer.winfo_reqwidth() + self.dialog.scaled(40))),
+                         min(height, max(self.dialog.scaled(350), self.nav.winfo_reqheight() + self.footer.winfo_reqheight() + self.dialog.scaled(50))))

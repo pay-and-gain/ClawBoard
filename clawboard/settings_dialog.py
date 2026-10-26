@@ -3,14 +3,15 @@ import os
 import subprocess
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from copy import deepcopy
 from threading import Event
-from clawboard import runtime, update
+from clawboard import config, runtime, update
 from clawboard.config import (APP_NAME, APP_VER, BASE_DIR, DATA_FILE, DEFAULT_SETTINGS,
-                              FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS, scaled)
+                              FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS)
 from clawboard.theme import T, set_theme
 from clawboard.win32 import get_autostart, set_autostart
-from clawboard.widgets import ScrollFrame, dark_top, center_on, safe_release
+from clawboard.widgets import dark_top, safe_release
 from clawboard.exports import write_payload, new_export_path
 from clawboard.settings_layout import SettingsLayout
 
@@ -28,24 +29,113 @@ class SettingsWindow:
         st = app.st
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
+        self._scale = self._window_scale(app.root)
+        self._fonts = {}
+        self._scale_job = None
         dark_top(self.win, '设置')
         self.win.attributes('-topmost', True)
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         self.win.bind('<Destroy>', self._destroyed, add='+')
         self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
         self.bar = self.win.winfo_children()[0]
-        self.bar.configure(height=scaled(36))
+        self.bar.configure(height=self.scaled(36))
+        self.bar.winfo_children()[0].configure(font=self.font(FONT_B))
         self._input_commits = []
         self._switches = {}
         self.layout = SettingsLayout(self)
+        self._metrics = self._remember_metrics(self.win)
+        self.win.bind('<Configure>', self._configured, add='+')
         self.win.bind('<Escape>', lambda e: self.close())
+        self._configured()
+
+    def scaled(self, value):
+        return max(1, round(value * self._scale))
+
+    def font(self, template):
+        key = tuple(template)
+        if key not in self._fonts:
+            # A Toplevel shares Tk scaling with its parent. Local pixel fonts
+            # let settings follow its own monitor without resizing the panel.
+            self._fonts[key] = tkfont.Font(self.win, font=(
+                key[0], -self.scaled(abs(key[1]) * 96 / 72), *key[2:]))
+            self._fonts[key].configure(size=-self.scaled(abs(key[1]) * 96 / 72))
+        return self._fonts[key]
+
+    def _window_scale(self, window=None):
+        try:
+            from clawboard.windows_system import dpi_scale
+            return dpi_scale(window or self.win) * config.UI_SCALE
+        except (ImportError, AttributeError, tk.TclError):
+            return config.DPI_SCALE * config.UI_SCALE
+
+    def _remember_metrics(self, parent):
+        metrics = []
+        for widget in parent.winfo_children():
+            options = {}
+            for key in ('padx', 'pady', 'borderwidth', 'highlightthickness',
+                        'insertwidth', 'selectborderwidth', 'yscrollincrement'):
+                if key in widget.keys():
+                    options[key] = float(widget.cget(key)) / self._scale
+            if isinstance(widget, (tk.Frame, tk.Canvas, tk.Scrollbar)):
+                for key in ('width', 'height'):
+                    if key in widget.keys():
+                        options[key] = float(widget.cget(key)) / self._scale
+            manager = widget.winfo_manager()
+            spacing = {}
+            if manager in ('pack', 'grid'):
+                info = getattr(widget, manager + '_info')()
+                for key in ('padx', 'pady', 'ipadx', 'ipady'):
+                    if key in info:
+                        values = info[key] if isinstance(info[key], (tuple, list)) else self.win.tk.splitlist(str(info[key]))
+                        spacing[key] = tuple(float(value) / self._scale
+                                             for value in values)
+            metrics.append((widget, options, manager, spacing))
+            metrics.extend(self._remember_metrics(widget))
+        return metrics
+
+    def _configured(self, event=None):
+        if self._closed or (event is not None and event.widget is not self.win):
+            return
+        if self._scale_job:
+            self.win.after_cancel(self._scale_job)
+        self._scale_job = self.win.after(120, self._sync_scale)
+
+    def _sync_scale(self):
+        self._scale_job = None
+        if self._closed:
+            return
+        if os.name == 'nt':
+            from clawboard.windows_api import u32
+            if u32.GetAsyncKeyState(1) & 0x8000:
+                self._configured()
+                return
+        new_scale = self._window_scale()
+        if abs(new_scale - self._scale) < .001:
+            return
+        ratio, self._scale = new_scale / self._scale, new_scale
+        scroll = {key: page.canvas.yview()[0] for key, page in self.layout.pages.items()}
+        # Keep controls alive: rebuilding would fire FocusOut and commit an
+        # unfinished input merely because the user dragged the window.
+        for template, font in self._fonts.items():
+            font.configure(size=-self.scaled(abs(template[1]) * 96 / 72))
+        for widget, options, manager, spacing in self._metrics:
+            widget.configure(**{key: round(value * new_scale) for key, value in options.items()})
+            if spacing:
+                getattr(widget, manager + '_configure')(**{
+                    key: tuple(round(value * new_scale) for value in values)
+                    for key, values in spacing.items()})
+        self.layout.fit_window(initial=False, ratio=ratio)
+        self.win.update_idletasks()
+        for key, page in self.layout.pages.items():
+            page._on_inner()
+            page.canvas.yview_moveto(scroll[key])
 
     def select_section(self, key):
         self.layout.select(key)
 
     def button(self, master, command, **kwargs):
         options = dict(bg=T['card'], fg=T['fg'], activebackground=T['card_h'],
-                       activeforeground=T['fg'], font=FONT, relief='flat', bd=0,
+                       activeforeground=T['fg'], font=self.font(FONT), relief='flat', bd=0,
                        highlightthickness=1, highlightbackground=T['line'],
                        highlightcolor=T['acc'], takefocus=True, cursor='hand2')
         options.update(kwargs)
@@ -53,9 +143,8 @@ class SettingsWindow:
         button.bind('<Return>', lambda e: (button.invoke(), 'break')[1])
         return button
 
-    @staticmethod
-    def row_label(master, text):
-        label = tk.Label(master, text=text, bg=T['bg'], fg=T['fg'], font=FONT,
+    def row_label(self, master, text):
+        label = tk.Label(master, text=text, bg=T['bg'], fg=T['fg'], font=self.font(FONT),
                          anchor='w', justify='left', wraplength=260)
         label.pack(side='left', fill='x', expand=True, padx=(0, 8))
         label.bind('<Configure>', lambda e: label.configure(wraplength=max(60, e.width)))
@@ -87,6 +176,7 @@ class SettingsWindow:
 
     def _destroyed(self, event):
         if event.widget is self.win:
+            self._cancel_scale_job()
             self._closed = True
             self._export_cancel.set()
             self.app.application.tasks.invalidate(self._export_key)
@@ -95,11 +185,21 @@ class SettingsWindow:
         if getattr(self, '_closed', False):
             return
         self._closed = True
+        self._cancel_scale_job()
         self._export_cancel.set()
         self.app.application.tasks.invalidate(self._export_key)
         self._commit_inputs()
         safe_release(self.win)
         self.win.destroy()
+
+    def _cancel_scale_job(self):
+        job = getattr(self, '_scale_job', None)
+        self._scale_job = None
+        if job:
+            try:
+                self.win.after_cancel(job)
+            except tk.TclError:
+                pass
 
     def export_all(self):
         if runtime.NO_SAVE:
@@ -245,7 +345,7 @@ class SettingsWindow:
             self.app.set_ui_scale(levels[(index + 1) % len(levels)])
             paint()
 
-        lb = self.button(r, setv, text='', padx=8, pady=4, font=FONT_SM)
+        lb = self.button(r, setv, text='', padx=8, pady=4, font=self.font(FONT_SM))
         lb.pack(side='right')
         self.row_label(r, '界面缩放（Ctrl+= / Ctrl+-）')
         paint()
@@ -266,12 +366,12 @@ class SettingsWindow:
 
         def menu():
             m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
-                        activebackground=T['card_h'], activeforeground=T['fg'], font=FONT, relief='flat')
+                        activebackground=T['card_h'], activeforeground=T['fg'], font=self.font(FONT), relief='flat')
             m.add_command(label='隐藏到托盘（继续后台监听）', command=lambda: setv('hide'))
             m.add_command(label='直接退出程序', command=lambda: setv('quit'))
             m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
 
-        lb = self.button(r, menu, text='', padx=8, pady=4, font=FONT_SM)
+        lb = self.button(r, menu, text='', padx=8, pady=4, font=self.font(FONT_SM))
         lb.pack(side='right')
         self.row_label(r, '点标题栏关闭按钮时')
         paint()
@@ -299,7 +399,7 @@ class SettingsWindow:
             if after:
                 after()
 
-        lb = self.button(r, toggle, text='', font=FONT_B, width=5, pady=3)
+        lb = self.button(r, toggle, text='', font=self.font(FONT_B), width=5, pady=3)
         lb.pack(side='right')
         self.row_label(r, text)
         if not hasattr(self, '_switches'):
@@ -318,24 +418,24 @@ class SettingsWindow:
         """
         r0 = tk.Frame(master, bg=T['bg'])
         r0.pack(fill='x', pady=(8, 3))
-        tk.Label(r0, text='当前版本', bg=T['bg'], fg=T['fg'], font=FONT_B,
+        tk.Label(r0, text='当前版本', bg=T['bg'], fg=T['fg'], font=self.font(FONT_B),
                  anchor='w').pack(side='left')
         tk.Label(r0, text='v%s' % APP_VER, bg=T['bg'], fg=T['fg2'],
-                 font=FONT).pack(side='right')
+                 font=self.font(FONT)).pack(side='right')
 
         self.row_switch(master, '启动时检查更新（每小时最多一次）', 'update_check')
 
         r = tk.Frame(master, bg=T['bg'])
         r.pack(fill='x', pady=3)
-        self._upd_status = tk.Label(r, text='', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+        self._upd_status = tk.Label(r, text='', bg=T['bg'], fg=T['fg2'], font=self.font(FONT_SM),
                                     anchor='w', justify='left')
         # 检查按钮（先 pack 到最右 → 它永远在最右），发现新版时才在它左侧露出「去下载」
         self._upd_btn = self.button(r, self.do_update_check, text='检查更新',
-                                   font=FONT_SM, padx=6, pady=4)
+                                   font=self.font(FONT_SM), padx=6, pady=4)
         self._upd_btn.pack(side='right')
         self._upd_dl = self.button(r, self.app.open_releases, text='去下载',
                                   bg=T['acc'], fg=T.get('on_acc', '#fff'),
-                                  font=FONT_SM, padx=6, pady=4)
+                                  font=self.font(FONT_SM), padx=6, pady=4)
         self._upd_status.pack(side='left', fill='x', expand=True)
         self._upd_checking = False
         self.paint_update()
@@ -408,14 +508,14 @@ class SettingsWindow:
         r.pack(fill='x', pady=5)
         current = [label for label, value in self.HKS if value == self.app.st.get('hotkey')]
         lb = self.button(r, lambda: self.hk_menu(lb), text=current[0] if current else '未设置',
-                         font=FONT_SM, padx=8, pady=4)
+                         font=self.font(FONT_SM), padx=8, pady=4)
         lb.pack(side='right')
         self.row_label(r, '全局唤起热键')
 
     def hk_menu(self, anchor):
         m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
                     activebackground=T['card_h'], activeforeground=T['fg'],
-                    font=FONT, relief='flat')
+                    font=self.font(FONT), relief='flat')
         for label, val in self.HKS:
             m.add_command(label=label, command=lambda v=val: self.set_hk(v))
         m.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
@@ -434,7 +534,7 @@ class SettingsWindow:
         r.pack(fill='x', pady=5)
         value = tk.StringVar(value=str(self.app.st.get(key)))
         entry = tk.Entry(r, textvariable=value, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
-                         relief='flat', font=FONT, bd=0, width=width, justify='right',
+                         relief='flat', font=self.font(FONT), bd=0, width=width, justify='right',
                          highlightthickness=1, highlightbackground=T['line'], highlightcolor=T['acc'])
         entry.pack(side='right', ipady=3)
         self.row_label(r, text)
@@ -482,12 +582,12 @@ class SettingsWindow:
 
         def menu():
             m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
-                        activebackground=T['card_h'], activeforeground=T['fg'], font=FONT, relief='flat')
+                        activebackground=T['card_h'], activeforeground=T['fg'], font=self.font(FONT), relief='flat')
             for name, color in self.BG_CHOICES:
                 m.add_command(label=name, command=lambda c=color: pick(c))
             m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
 
-        lb = self.button(r, menu, text='', width=10, font=FONT_SM, padx=6, pady=4)
+        lb = self.button(r, menu, text='', width=10, font=self.font(FONT_SM), padx=6, pady=4)
         lb.pack(side='right')
         self.row_label(r, '背景色（选底色，其余自动配）')
         paint()
@@ -497,13 +597,13 @@ class SettingsWindow:
         r.pack(fill='x', pady=5)
         for content, color, font in ((text, T['fg'], FONT), (hint, T['fg2'], FONT_SM)):
             if content:
-                label = tk.Label(r, text=content, bg=T['bg'], fg=color, font=font,
+                label = tk.Label(r, text=content, bg=T['bg'], fg=color, font=self.font(font),
                                  anchor='w', justify='left', wraplength=300)
                 label.pack(fill='x', pady=(0, 3))
                 label.bind('<Configure>', lambda e, w=label: w.configure(wraplength=max(60, e.width)))
         value = tk.StringVar(value=str(self.app.st.get(key) or ''))
         entry = tk.Entry(r, textvariable=value, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
-                         relief='flat', font=FONT_SM, bd=0, highlightthickness=1,
+                         relief='flat', font=self.font(FONT_SM), bd=0, highlightthickness=1,
                          highlightbackground=T['line'], highlightcolor=T['acc'])
         entry.pack(fill='x', ipady=4, pady=(2, 0))
 
@@ -543,12 +643,12 @@ class SettingsWindow:
             self.app.tip(('开机自启已开启' if not on else '开机自启已关闭')
                          if success else '开机自启设置失败（注册表不可写）')
 
-        lb = self.button(r, toggle, text='', width=5, font=FONT_B, pady=3)
+        lb = self.button(r, toggle, text='', width=5, font=self.font(FONT_B), pady=3)
         lb.pack(side='right')
         self.row_label(r, '开机自启（当前用户）')
         paint()
         self.button(master, self.open_startup, text='打开启动快捷方式文件夹',
-                    fg=T['fg2'], font=FONT_SM, padx=6, pady=4).pack(anchor='w', pady=(0, 6))
+                    fg=T['fg2'], font=self.font(FONT_SM), padx=6, pady=4).pack(anchor='w', pady=(0, 6))
 
     @staticmethod
     def open_startup():

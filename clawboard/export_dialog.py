@@ -1,12 +1,13 @@
 """Tk export adapter; workers receive only copied records and a destination."""
 import os
+import ctypes
 import tkinter as tk
 from copy import deepcopy
 from clawboard import runtime
 from threading import Event
-from clawboard.config import BASE_DIR, FONT, FONT_B, FONT_SM
+from clawboard.config import BASE_DIR, FONT, FONT_B, FONT_SM, scaled
 from clawboard.theme import T
-from clawboard.widgets import dark_top, center_on, safe_release
+from clawboard.widgets import ScrollFrame, dark_top, safe_release
 from clawboard.exports import write_items, new_export_path
 
 
@@ -27,21 +28,28 @@ class ExportDialog:
             return
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
-        dark_top(self.win, '批量导出')
+        self._bar = dark_top(self.win, '批量导出')
+        self._bar.configure(height=scaled(36))
         self.win.attributes('-topmost', True)
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         self.win.bind('<Destroy>', self._destroyed, add='+')
         self.win.bind('<Escape>', lambda e: self.close())
         self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
-        body = tk.Frame(self.win, bg=T['bg'])
-        body.pack(fill='both', expand=True, padx=14, pady=10)
+        # Reserve actions first so constrained work areas only shrink the body.
+        btns = tk.Frame(self.win, bg=T['bg'])
+        btns.pack(side='bottom', fill='x', padx=scaled(14), pady=scaled(10))
+        self._body = ScrollFrame(self.win)
+        self._body.canvas.configure(width=1, height=1)
+        self._body.pack(fill='both', expand=True, padx=scaled(14), pady=scaled(10))
+        body = self._body.inner
         tk.Label(body, text='共 %d 条待导出（多选优先，否则导出当前筛选结果）'
-                 % len(items), bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(fill='x')
+                 % len(items), bg=T['bg'], fg=T['fg'], font=FONT, anchor='w',
+                 justify='left', wraplength=scaled(440)).pack(fill='x')
         self.fmt = tk.StringVar(value='txt')
         self.rows = []
         for v, label in (('txt', 'TXT（序号/时间/来源/内容）'),
                          ('csv', 'CSV（Excel 友好，带 BOM）'),
-                         ('json', 'JSON（完整字段，可再导入）'),
+                         ('json', 'JSON（保留所选记录字段）'),
                          ('md', 'Markdown（适合归档笔记）')):
             r = tk.Frame(body, bg=T['bg'])
             r.pack(fill='x', pady=2)
@@ -59,12 +67,14 @@ class ExportDialog:
             r._v = v
             self.rows.append(r)
         self.paint()
+        tk.Label(body, text='JSON 保留所选记录字段，不包含设置、图片本体或所引用文件的正文。'
+                 '\n当前没有导入或一键恢复入口。',
+                 bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w',
+                 justify='left', wraplength=scaled(440)).pack(fill='x', pady=(6, 0))
         sens = sum(1 for x in items if x.get('sens'))
         if sens:
             tk.Label(body, text='⚠ 其中 %d 条含敏感内容，导出为明文' % sens,
                      bg=T['bg'], fg=T['danger'], font=FONT_SM, anchor='w').pack(fill='x', pady=4)
-        btns = tk.Frame(body, bg=T['bg'])
-        btns.pack(fill='x', pady=(8, 0))
         b = tk.Label(btns, text='导出到本目录', bg=T['acc'], fg=T.get('on_acc', '#fff'), font=FONT_B,
                      padx=14, pady=5, cursor='hand2')
         b.pack(side='right')
@@ -74,7 +84,39 @@ class ExportDialog:
                       padx=14, pady=5, cursor='hand2')
         b2.pack(side='right', padx=(0, 6))
         b2.bind('<Button-1>', lambda e: self.close())
-        center_on(self.win, app.root, 480, 340)
+        self._cancel_button = b2
+        self._body.bind_wheel_tree()
+        self._fit_window(btns)
+        # The first native map can reset a Toplevel's position on another DPI.
+        self.app.root.after(80, lambda: self._fit_window(btns) if self._alive() else None)
+
+    def _fit_window(self, footer):
+        self.win.update_idletasks()
+        parent = self.app.root
+        area = (0, 0, parent.winfo_screenwidth(), parent.winfo_screenheight())
+        try:
+            from clawboard.windows_api import u32, MONITORINFO, MONITOR_DEFAULTTONEAREST
+            from clawboard.windows_geometry import top_hwnd
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(info)
+            monitor = u32.MonitorFromWindow(top_hwnd(parent), MONITOR_DEFAULTTONEAREST)
+            if u32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                r = info.rcWork
+                area = (r.left, r.top, r.right, r.bottom)
+        except (ImportError, AttributeError, OSError):
+            pass
+        left, top, right, bottom = area
+        margin = scaled(8)
+        width = min(right - left - margin * 2, max(scaled(480),
+                    self._body.inner.winfo_reqwidth() + scaled(36),
+                    footer.winfo_reqwidth() + scaled(28)))
+        height = min(bottom - top - margin * 2, self._bar.winfo_reqheight()
+                     + self._body.inner.winfo_reqheight() + footer.winfo_reqheight() + scaled(40))
+        x = max(left + margin, min(parent.winfo_rootx() + (parent.winfo_width() - width) // 2,
+                                  right - width - margin))
+        y = max(top + margin, min(parent.winfo_rooty() + (parent.winfo_height() - height) // 2,
+                                 bottom - height - margin))
+        self.win.geometry('%dx%d%+d%+d' % (max(1, width), max(1, height), x, y))
 
     def paint(self):
         cur = self.fmt.get()
