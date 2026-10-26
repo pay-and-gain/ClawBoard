@@ -163,7 +163,8 @@ def viewport_class():
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'VirtualList')
     ns = dict(tk=types.SimpleNamespace(Frame=object), scaled=scaled,
               ITEM_H=ITEM_H, CARD_GAP=CARD_GAP, T=T, preview=preview,
-              FONT=FONT, FONT_MONO=FONT_MONO, FONT_SM=FONT_SM)
+              FONT=FONT, FONT_MONO=FONT_MONO, FONT_SM=FONT_SM,
+              get_icon=lambda *args: 'synthetic-icon')
     exec(compile(ast.Module(body=[cls], type_ignores=[]), 'clawboard/vlist.py', 'exec'), ns)
     return ns['VirtualList']
 
@@ -184,7 +185,7 @@ class ViewportTests(unittest.TestCase):
         def make_row(index):
             frame = FakeWidget()
             frame._idx, frame._vw, frame._numw = index, 0, 16
-            for name in ('_row', '_num', '_l1a', '_l1b', '_l1c', '_l2', '_badge'):
+            for name in ('_row', '_num', '_type', '_l1a', '_l1b', '_l1c', '_l2', '_badge'):
                 setattr(frame, name, FakeWidget())
             self.frames.append(frame)
             return frame

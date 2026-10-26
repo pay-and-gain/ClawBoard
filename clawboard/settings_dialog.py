@@ -3,15 +3,17 @@ import os
 import subprocess
 import time
 import tkinter as tk
+import tkinter.font as tkfont
 from copy import deepcopy
 from threading import Event
-from clawboard import runtime, update
+from clawboard import config, runtime, update
 from clawboard.config import (APP_NAME, APP_VER, BASE_DIR, DATA_FILE, DEFAULT_SETTINGS,
                               FONT, FONT_B, FONT_SM, UI_SCALE_LEVELS)
 from clawboard.theme import T, set_theme
 from clawboard.win32 import get_autostart, set_autostart
-from clawboard.widgets import ScrollFrame, dark_top, center_on, safe_release
+from clawboard.widgets import dark_top, safe_release
 from clawboard.exports import write_payload, new_export_path
+from clawboard.settings_layout import SettingsLayout
 
 
 class SettingsWindow:
@@ -27,88 +29,153 @@ class SettingsWindow:
         st = app.st
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
+        self._scale = self._window_scale(app.root)
+        self._fonts = {}
+        self._scale_job = None
+        self._focus_job = None
         dark_top(self.win, '设置')
         self.win.attributes('-topmost', True)
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         self.win.bind('<Destroy>', self._destroyed, add='+')
-        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
-        # 内容放进可滚动容器：选项变多了也不怕窗口装不下。
-        # 注意：**先不 pack** —— 固定尺寸的底部区（数据管理 + 按钮）必须先 pack 到底部，
-        # 否则带 expand 的滚动区会先把空间吃掉，底部按钮被压成 17px（实测踩过）。
-        self.sc = ScrollFrame(self.win)
-        body = self.sc.inner
-        self.row_switch(body, '监听剪贴板', 'listen')
-        self.row_switch(body, '单击后自动粘贴到上一窗口', 'autopaste')
-        self.row_switch(body, '粘贴时去掉首尾空白（PDF/网页复制常带前导空格）', 'trim_paste')
-        self.row_switch(body, '敏感内容打码显示', 'mask_sensitive')
-        self.row_switch(body, '敏感内容不入库', 'skip_sensitive')
-        self.row_switch(body, '列表中显示时间', 'show_time')
-        self.row_switch(body, '记录来源窗口标题（隐私）', 'record_title')
-        self.row_switch(body, '靠边自动隐藏（贴屏幕边缘自动收起）', 'edge_hide')
-        self.row_autostart_switch(body)
-        self.row_close_action(body)
-        self.row_theme(body)
-        self.row_bgcolor(body)
-        self.row_switch(body, '窗口圆角（Win11 质感）', 'rounded',
-                        after=self.app.apply_effects)
-        self.row_switch(body, '毛玻璃背景（Acrylic，观感依赖桌面壁纸）', 'frosted',
-                        after=self.app.apply_effects)
-        self.row_switch(body, '复制后弹出提示（行数/字符数）', 'show_toast')
-        # P1-2 音效：盲操（不看屏幕）时的听觉确认，默认关、两个开关互相独立
-        self.row_switch(body, '复制音（剪贴板记下新内容时轻响一声）', 'sound_copy')
-        self.row_switch(body, '粘贴音（成功粘贴后轻响一声）', 'sound_paste')
-        self.row_switch(body, '键盘浏览时角落显示完整内容', 'show_preview')
-        self.row_switch(body, '触发词快速粘贴（在常用语里设触发词，如 dz→地址）',
-                        'trigger_enabled', after=self.app.apply_trigger_setting)
-        self.row_ui_scale(body)
-        self.row_switch(body, '折叠时贴到屏幕右下角', 'collapse_to_corner')
-        self.row_hotkey(body)
-        self.row_int(body, '历史最大条数（10-5000）', 'max_items')
-        self.row_int(body, '捕获长度下限（0=不限）', 'min_len', lo=0, hi=1000)
-        self.row_int(body, '捕获长度上限（0=不限）', 'max_len', lo=0, hi=200000, width=9)
-        self.row_switch(body, '遵守「别记录我」标记（密码管理器用）', 'smart_private')
-        self.row_switch(body, '清空历史时保留收藏项', 'keep_on_clear')
-        self.row_text(body, '忽略这些程序（逗号分隔，支持 * ?）', 'ignore_apps',
-                      '例：keepass, *bitwarden*, 微信。⚠ 对「开机时补记」的剪贴板内容无效（补记无从得知来源应用），请依赖密码管理器自身的「不记录」标记')
-        self.row_text(body, '忽略标题匹配的窗口（正则，分号分隔）', 'ignore_titles',
-                      '例：密码; Password; ^私密')
-        self.row_update(body)
-        # ---- 底部按钮区（先 pack 到最底部；固定尺寸控件必须先占位，否则被 expand 挤扁）----
-        btns = tk.Frame(self.win, bg=T['bg'])
-        btns.pack(side='bottom', fill='x', padx=14, pady=(8, 10))
-        b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
-                     padx=16, pady=5, cursor='hand2')
-        b.pack(side='right')
-        b.bind('<Button-1>', lambda e: (app.save(True), safe_release(self.win),
-                                        self.win.destroy()))
-        q = tk.Label(btns, text='退出程序', bg=T['danger'], fg='#fff', font=FONT_B,
-                     padx=14, pady=5, cursor='hand2')
-        q.pack(side='left')
-        q.bind('<Button-1>', lambda e: (app.save(True), safe_release(self.win),
-                                        self.win.destroy(), app.quit_app()))
-
-        # ---- 数据管理区（在按钮区之上）：导出全部 / 彻底清理 ----
-        danger = tk.Frame(self.win, bg=T['bg'])
-        danger.pack(side='bottom', fill='x', padx=14, pady=(6, 0))
-        tk.Label(danger, text='数据', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
-                 anchor='w').pack(fill='x')
-        drow = tk.Frame(danger, bg=T['bg'])
-        drow.pack(fill='x', pady=(2, 0))
-        ex = tk.Label(drow, text='导出全部数据', bg=T['card'], fg=T['fg'],
-                      font=FONT_SM, padx=10, pady=4, cursor='hand2')
-        ex.pack(side='left')
-        ex.bind('<Button-1>', lambda e: self.export_all())
-        wb = tk.Label(drow, text='彻底清理所有数据', bg=T['danger'], fg='#fff',
-                      font=FONT_SM, padx=10, pady=4, cursor='hand2')
-        wb.pack(side='left', padx=(8, 0))
-        wb.bind('<Button-1>', lambda e: self.wipe_all())
-
-        # ---- 可滚动内容区（最后 pack，吃剩余空间）----
-        self.sc.pack(fill='both', expand=True, padx=(14, 8), pady=(10, 0))
+        self._focus_job = self.win.after(60, self._focus_later)
+        self.bar = self.win.winfo_children()[0]
+        self.bar.configure(height=self.scaled(36))
+        self.bar.winfo_children()[0].configure(font=self.font(FONT_B))
+        self._input_commits = []
+        self._switches = {}
+        self.layout = SettingsLayout(self)
+        self._metrics = self._remember_metrics(self.win)
+        self.win.bind('<Configure>', self._configured, add='+')
+        self._scale_binding = app.root.bind(
+            '<<ClawBoardUIScaleChanged>>', lambda _: self._configured(), add='+')
         self.win.bind('<Escape>', lambda e: self.close())
-        self.sc.bind_wheel_tree()          # 所有子控件接管滚轮
-        center_on(self.win, app.root, 380, 470)
-        self.win.after(80, self.sc._on_inner)
+        self._configured()
+
+    def scaled(self, value):
+        return max(1, round(value * self._scale))
+
+    def font(self, template):
+        key = tuple(template)
+        if key not in self._fonts:
+            # A Toplevel shares Tk scaling with its parent. Local pixel fonts
+            # let settings follow its own monitor without resizing the panel.
+            self._fonts[key] = tkfont.Font(self.win, font=(
+                key[0], -self.scaled(abs(key[1]) * 96 / 72), *key[2:]))
+            self._fonts[key].configure(size=-self.scaled(abs(key[1]) * 96 / 72))
+        return self._fonts[key]
+
+    def _window_scale(self, window=None):
+        try:
+            from clawboard.windows_system import dpi_scale
+            return dpi_scale(window or self.win) * config.UI_SCALE
+        except (ImportError, AttributeError, tk.TclError):
+            return config.DPI_SCALE * config.UI_SCALE
+
+    def _remember_metrics(self, parent):
+        metrics = []
+        for widget in parent.winfo_children():
+            options = {}
+            for key in ('padx', 'pady', 'borderwidth', 'highlightthickness',
+                        'insertwidth', 'selectborderwidth', 'yscrollincrement'):
+                if key in widget.keys():
+                    options[key] = float(widget.cget(key)) / self._scale
+            if isinstance(widget, (tk.Frame, tk.Canvas, tk.Scrollbar)):
+                for key in ('width', 'height'):
+                    if key in widget.keys():
+                        options[key] = float(widget.cget(key)) / self._scale
+            manager = widget.winfo_manager()
+            spacing = {}
+            if manager in ('pack', 'grid'):
+                info = getattr(widget, manager + '_info')()
+                for key in ('padx', 'pady', 'ipadx', 'ipady'):
+                    if key in info:
+                        values = info[key] if isinstance(info[key], (tuple, list)) else self.win.tk.splitlist(str(info[key]))
+                        spacing[key] = tuple(float(value) / self._scale
+                                             for value in values)
+            metrics.append((widget, options, manager, spacing))
+            metrics.extend(self._remember_metrics(widget))
+        return metrics
+
+    def _configured(self, event=None):
+        if self._closed or (event is not None and event.widget is not self.win):
+            return
+        if self._scale_job:
+            self.win.after_cancel(self._scale_job)
+        self._scale_job = self.win.after(120, self._sync_scale)
+
+    def _sync_scale(self):
+        self._scale_job = None
+        if self._closed:
+            return
+        if os.name == 'nt':
+            from clawboard.windows_api import u32
+            if u32.GetAsyncKeyState(1) & 0x8000:
+                self._configured()
+                return
+        new_scale = self._window_scale()
+        if abs(new_scale - self._scale) < .001:
+            return
+        ratio, self._scale = new_scale / self._scale, new_scale
+        scroll = {key: page.canvas.yview()[0] for key, page in self.layout.pages.items()}
+        # Keep controls alive: rebuilding would fire FocusOut and commit an
+        # unfinished input merely because the user dragged the window.
+        for template, font in self._fonts.items():
+            font.configure(size=-self.scaled(abs(template[1]) * 96 / 72))
+        for widget, options, manager, spacing in self._metrics:
+            widget.configure(**{key: round(value * new_scale) for key, value in options.items()})
+            if spacing:
+                getattr(widget, manager + '_configure')(**{
+                    key: tuple(round(value * new_scale) for value in values)
+                    for key, values in spacing.items()})
+        self.layout.fit_window(initial=False, ratio=ratio)
+        self.win.update_idletasks()
+        for key, page in self.layout.pages.items():
+            page._on_inner()
+            page.canvas.yview_moveto(scroll[key])
+
+    def select_section(self, key):
+        self.layout.select(key)
+
+    def open_backup(self):
+        from clawboard.backup_dialog import BackupWindow
+        return BackupWindow(self.app)
+
+    def open_trash(self):
+        from clawboard.trash_dialog import TrashWindow
+        return TrashWindow(self.app)
+
+    def button(self, master, command, **kwargs):
+        options = dict(bg=T['card'], fg=T['fg'], activebackground=T['card_h'],
+                       activeforeground=T['fg'], font=self.font(FONT), relief='flat', bd=0,
+                       highlightthickness=1, highlightbackground=T['line'],
+                       highlightcolor=T['acc'], takefocus=True, cursor='hand2')
+        options.update(kwargs)
+        button = tk.Button(master, command=command, **options)
+        button.bind('<Return>', lambda e: (button.invoke(), 'break')[1])
+        return button
+
+    def row_label(self, master, text):
+        label = tk.Label(master, text=text, bg=T['bg'], fg=T['fg'], font=self.font(FONT),
+                         anchor='w', justify='left', wraplength=260)
+        label.pack(side='left', fill='x', expand=True, padx=(0, 8))
+        label.bind('<Configure>', lambda e: label.configure(wraplength=max(60, e.width)))
+        return label
+
+    def _commit_inputs(self):
+        for widget, commit in getattr(self, '_input_commits', ()):
+            if widget.winfo_exists():
+                commit()
+
+    def save_and_close(self):
+        self._commit_inputs()
+        self.app.save(True)
+        self.close()
+
+    def save_and_quit(self):
+        self._commit_inputs()
+        self.app.save(True)
+        self.close()
+        self.app.quit_app()
 
     def _alive(self):
         if getattr(self, '_closed', False):
@@ -118,8 +185,15 @@ class SettingsWindow:
         except tk.TclError:
             return False
 
+    def _focus_later(self):
+        self._focus_job = None
+        if self._alive():
+            self.win.lift()
+            self.win.focus_force()
+
     def _destroyed(self, event):
         if event.widget is self.win:
+            self._cancel_scale_job()
             self._closed = True
             self._export_cancel.set()
             self.app.application.tasks.invalidate(self._export_key)
@@ -128,10 +202,31 @@ class SettingsWindow:
         if getattr(self, '_closed', False):
             return
         self._closed = True
+        self._cancel_scale_job()
         self._export_cancel.set()
         self.app.application.tasks.invalidate(self._export_key)
+        self._commit_inputs()
         safe_release(self.win)
         self.win.destroy()
+
+    def _cancel_scale_job(self):
+        # Destroying a widget deletes its Tcl command, but not an after script
+        # that still names it. Cancel before destruction, including fast Esc.
+        for name in ('_scale_job', '_focus_job'):
+            job = getattr(self, name, None)
+            setattr(self, name, None)
+            if job:
+                try:
+                    self.win.after_cancel(job)
+                except tk.TclError:
+                    pass
+        binding = getattr(self, '_scale_binding', None)
+        self._scale_binding = None
+        if binding:
+            try:
+                self.app.root.unbind('<<ClawBoardUIScaleChanged>>', binding)
+            except tk.TclError:
+                pass
 
     def export_all(self):
         if runtime.NO_SAVE:
@@ -233,6 +328,7 @@ class SettingsWindow:
             self.app.data['groups'] = [{'name': '默认', 'items': []}]
             self.app.data['gi'] = 0
             self.app.data['search_history'] = []
+            self.app.data.pop('trash', None)
             self.app.data['geom'] = None
             application.search.clear()
             application.mark_changed()
@@ -257,97 +353,90 @@ class SettingsWindow:
 
         self.app.confirm(
             '确定要彻底清理吗？此操作不可撤销：\n\n'
-            '· 删除全部剪贴板历史与常用语\n'
+            '· 删除全部剪贴板历史、常用语与回收站\n'
             '· 关闭开机自启（清理注册表项）\n'
-            '· 删除本地全部数据文件与备份\n\n'
-            '清理完成后，直接删除程序文件夹即彻底卸载。', do)
+            '· 删除当前库、图片及迁移备份\n'
+            '· 另存的完整备份包会保留\n\n'
+            '该操作无法撤销，请先确认已有需要的完整备份。', do)
 
     def row_ui_scale(self, master):
-        """界面等比缩放：点击在 50%/75%/100%/125%/150% 间循环切换"""
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text='界面缩放（整体等比缩放，Ctrl+= / Ctrl+- 也可调）',
-                 bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(side='left')
-        lb = tk.Label(r, text='', bg=T['card'], fg=T['fg'], font=FONT_SM,
-                      padx=8, pady=2, cursor='hand2')
-        lb.pack(side='right')
+        r.pack(fill='x', pady=5)
 
         def paint():
-            v = float(self.app.st.get('ui_scale') or 1.0)
-            lb.configure(text='%d%%' % int(v * 100))
+            value = float(self.app.st.get('ui_scale') or 1.0)
+            lb.configure(text='%d%%' % int(value * 100))
 
-        def setv(_=None):
+        def setv():
             levels = list(UI_SCALE_LEVELS)
-            cur = float(self.app.st.get('ui_scale') or 1.0)
-            i = levels.index(cur) if cur in levels else levels.index(1.0)
-            nxt = levels[(i + 1) % len(levels)]
-            self.app.set_ui_scale(nxt)
+            current = float(self.app.st.get('ui_scale') or 1.0)
+            index = levels.index(current) if current in levels else levels.index(1.0)
+            self.app.set_ui_scale(levels[(index + 1) % len(levels)])
+            self._configured()
             paint()
 
-        lb.bind('<Button-1>', setv)
+        lb = self.button(r, setv, text='', padx=8, pady=4, font=self.font(FONT_SM))
+        lb.pack(side='right')
+        self.row_label(r, '界面缩放（Ctrl+= / Ctrl+-）')
         paint()
 
     def row_close_action(self, master):
-        """点 ✕ 的行为：默认隐藏到托盘，也可改成直接退出"""
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text='点标题栏 ✕ 时', bg=T['bg'], fg=T['fg'], font=FONT,
-                 anchor='w').pack(side='left')
-        lb = tk.Label(r, text='', bg=T['card'], fg=T['fg'], font=FONT_SM,
-                      padx=8, pady=2, cursor='hand2')
-        lb.pack(side='right')
+        r.pack(fill='x', pady=5)
 
         def paint():
-            v = self.app.st.get('close_action', 'hide')
-            lb.configure(text='隐藏到托盘' if v == 'hide' else '直接退出程序')
+            value = self.app.st.get('close_action', 'hide')
+            lb.configure(text='隐藏到托盘' if value == 'hide' else '直接退出程序')
 
-        def setv(val):
-            self.app.st['close_action'] = val
+        def setv(value):
+            self.app.st['close_action'] = value
             self.app.save(True)
             paint()
-            self.app.tip('✕ 现在会%s' % ('隐藏到托盘' if val == 'hide' else '直接退出'))
+            self.app.tip('关闭按钮现在会%s' % ('隐藏到托盘' if value == 'hide' else '直接退出'))
 
-        def menu(_=None):
+        def menu():
             m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
-                        activebackground=T['card_h'], activeforeground=T['fg'],
-                        font=FONT, relief='flat')
+                        activebackground=T['card_h'], activeforeground=T['fg'], font=self.font(FONT), relief='flat')
             m.add_command(label='隐藏到托盘（继续后台监听）', command=lambda: setv('hide'))
             m.add_command(label='直接退出程序', command=lambda: setv('quit'))
             m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
-        lb.bind('<Button-1>', menu)
+
+        lb = self.button(r, menu, text='', padx=8, pady=4, font=self.font(FONT_SM))
+        lb.pack(side='right')
+        self.row_label(r, '点标题栏关闭按钮时')
         paint()
 
     def row_switch(self, master, text, key, after=None):
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT, anchor='w').pack(side='left')
+        r.pack(fill='x', pady=5)
         st = self.app.st
-        lb = tk.Label(r, text='', bg=T['card'], font=FONT_B, width=6, cursor='hand2')
-        lb.pack(side='right')
 
         def paint():
             on = bool(st.get(key))
             lb.configure(text='开' if on else '关',
-                         fg='#fff' if on else T['fg2'],
+                         fg=T.get('on_acc', '#fff') if on else T['fg2'],
                          bg=T['acc'] if on else T['card'])
 
-        def toggle(_=None):
+        def toggle():
             if key == 'listen':
-                # The system adapter invalidates captures before a pause and
-                # owns catch-up on resume; a second local implementation races.
+                # The system adapter owns capture invalidation and catch-up.
                 self.app.toggle_listen()
                 paint()
                 return
             st[key] = not st.get(key)
             paint()
             self.app.save(True)
-            if after:                     # 需要立即生效的开关（如圆角/毛玻璃外观）
-                try:
-                    after()
-                except Exception:
-                    pass
-        lb.bind('<Button-1>', toggle)
+            if after:
+                after()
+
+        lb = self.button(r, toggle, text='', font=self.font(FONT_B), width=5, pady=3)
+        lb.pack(side='right')
+        self.row_label(r, text)
+        if not hasattr(self, '_switches'):
+            self._switches = {}
+        self._switches[key] = lb
         paint()
+        return lb
 
     # ---------- P1-3 更新区块 ----------
     def row_update(self, master):
@@ -359,26 +448,25 @@ class SettingsWindow:
         """
         r0 = tk.Frame(master, bg=T['bg'])
         r0.pack(fill='x', pady=(8, 3))
-        tk.Label(r0, text='当前版本', bg=T['bg'], fg=T['fg'], font=FONT_B,
+        tk.Label(r0, text='当前版本', bg=T['bg'], fg=T['fg'], font=self.font(FONT_B),
                  anchor='w').pack(side='left')
         tk.Label(r0, text='v%s' % APP_VER, bg=T['bg'], fg=T['fg2'],
-                 font=FONT).pack(side='right')
+                 font=self.font(FONT)).pack(side='right')
 
         self.row_switch(master, '启动时检查更新（每小时最多一次）', 'update_check')
 
         r = tk.Frame(master, bg=T['bg'])
         r.pack(fill='x', pady=3)
-        self._upd_status = tk.Label(r, text='', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+        self._upd_status = tk.Label(r, text='', bg=T['bg'], fg=T['fg2'], font=self.font(FONT_SM),
                                     anchor='w', justify='left')
-        self._upd_status.pack(side='left', fill='x', expand=True)
         # 检查按钮（先 pack 到最右 → 它永远在最右），发现新版时才在它左侧露出「去下载」
-        self._upd_btn = tk.Label(r, text=' 检查更新 ', bg=T['card'], fg=T['fg'],
-                                 font=FONT_SM, cursor='hand2', padx=6, pady=2)
+        self._upd_btn = self.button(r, self.do_update_check, text='检查更新',
+                                   font=self.font(FONT_SM), padx=6, pady=4)
         self._upd_btn.pack(side='right')
-        self._upd_btn.bind('<Button-1>', lambda e: self.do_update_check())
-        self._upd_dl = tk.Label(r, text=' 去下载 ', bg=T['acc'], fg='#fff',
-                                font=FONT_SM, cursor='hand2', padx=6, pady=2)
-        self._upd_dl.bind('<Button-1>', lambda e: self.app.open_releases())
+        self._upd_dl = self.button(r, self.app.open_releases, text='去下载',
+                                  bg=T['acc'], fg=T.get('on_acc', '#fff'),
+                                  font=self.font(FONT_SM), padx=6, pady=4)
+        self._upd_status.pack(side='left', fill='x', expand=True)
         self._upd_checking = False
         self.paint_update()
 
@@ -429,13 +517,13 @@ class SettingsWindow:
 
     def row_theme(self, master):
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text='主题', bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
+        r.pack(fill='x', pady=5)
         for name, label in (('dark', '暗色'), ('light', '亮色')):
-            lb = tk.Label(r, text=label, bg=T['card'], fg=T['fg'], font=FONT,
-                          padx=8, pady=2, cursor='hand2')
+            lb = self.button(r, lambda n=name: self.set_theme(n), text=label,
+                             bg=T['card_s'] if self.app.st.get('theme') == name else T['card'],
+                             padx=8, pady=4)
             lb.pack(side='right', padx=2)
-            lb.bind('<Button-1>', lambda e, n=name: self.set_theme(n))
+        self.row_label(r, '主题')
 
     def set_theme(self, name):
         self.app.st['theme'] = name
@@ -447,18 +535,17 @@ class SettingsWindow:
 
     def row_hotkey(self, master):
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text='全局唤起热键', bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
-        cur = [l for l, v in self.HKS if v == self.app.st.get('hotkey')]
-        lb = tk.Label(r, text=cur[0] if cur else '未设置', bg=T['card'], fg=T['fg'],
-                      font=FONT_SM, padx=8, pady=2, cursor='hand2')
+        r.pack(fill='x', pady=5)
+        current = [label for label, value in self.HKS if value == self.app.st.get('hotkey')]
+        lb = self.button(r, lambda: self.hk_menu(lb), text=current[0] if current else '未设置',
+                         font=self.font(FONT_SM), padx=8, pady=4)
         lb.pack(side='right')
-        lb.bind('<Button-1>', lambda e: self.hk_menu(lb))
+        self.row_label(r, '全局唤起热键')
 
     def hk_menu(self, anchor):
         m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
                     activebackground=T['card_h'], activeforeground=T['fg'],
-                    font=FONT, relief='flat')
+                    font=self.font(FONT), relief='flat')
         for label, val in self.HKS:
             m.add_command(label=label, command=lambda v=val: self.set_hk(v))
         m.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
@@ -474,114 +561,124 @@ class SettingsWindow:
 
     def row_int(self, master, text, key, lo=10, hi=5000, width=7):
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT).pack(side='left')
-        v = tk.StringVar(value=str(self.app.st.get(key)))
-        e = tk.Entry(r, textvariable=v, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
-                     relief='flat', font=FONT, bd=0, width=width, justify='right',
-                     highlightthickness=1, highlightbackground=T['line'],
-                     highlightcolor=T['acc'])
-        e.pack(side='right')
+        r.pack(fill='x', pady=5)
+        value = tk.StringVar(value=str(self.app.st.get(key)))
+        entry = tk.Entry(r, textvariable=value, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+                         relief='flat', font=self.font(FONT), bd=0, width=width, justify='right',
+                         highlightthickness=1, highlightbackground=T['line'], highlightcolor=T['acc'])
+        entry.pack(side='right', ipady=3)
+        self.row_label(r, text)
 
         def commit(_=None):
             try:
-                n = min(hi, max(lo, int(v.get())))
-            except Exception:
-                n = int(DEFAULT_SETTINGS[key])
-            self.app.st[key] = n
-            v.set(str(n))
-            self.app.save(True)
-        e.bind('<Return>', commit)
-        e.bind('<FocusOut>', commit)
+                number = min(hi, max(lo, int(value.get())))
+            except (ValueError, TypeError):
+                number = int(DEFAULT_SETTINGS[key])
+            changed = self.app.st.get(key) != number
+            self.app.st[key] = number
+            value.set(str(number))
+            if changed:
+                self.app.save(True)
+            return 'break'
+
+        entry.bind('<Return>', commit)
+        entry.bind('<FocusOut>', commit)
+        if not hasattr(self, '_input_commits'):
+            self._input_commits = []
+        self._input_commits.append((entry, commit))
+        if not hasattr(self, '_inputs'):
+            self._inputs = {}
+        self._inputs[key] = entry
+        return entry
 
     BG_CHOICES = (('默认（跟随主题）', ''), ('墨黑', '#12141a'), ('深蓝灰', '#1e2027'),
                   ('午夜蓝', '#16202e'), ('墨绿', '#16241f'), ('深紫', '#1d1a2b'),
                   ('浅灰', '#f4f5f8'), ('米白', '#faf7f0'), ('纯白', '#ffffff'))
 
     def row_bgcolor(self, master):
-        """换背景：只选一个底色，面板/卡片/边框/文字色由 apply_theme 自动推导"""
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text='背景色（选底色，其余自动配）', bg=T['bg'], fg=T['fg'],
-                 font=FONT).pack(side='left')
-        lb = tk.Label(r, text='', bg=T['card'], font=FONT_B, width=10, cursor='hand2')
-        lb.pack(side='right')
+        r.pack(fill='x', pady=5)
 
         def paint():
-            cur = (self.app.st.get('bg_color') or '').strip().lower()
-            lb.configure(text=next((n for n, c in self.BG_CHOICES
-                                    if c.lower() == cur), '默认'))
+            current = (self.app.st.get('bg_color') or '').strip().lower()
+            lb.configure(text=next((name for name, color in self.BG_CHOICES
+                                    if color.lower() == current), '默认'))
 
-        def pick(c):
-            self.app.st['bg_color'] = c
+        def pick(color):
+            self.app.st['bg_color'] = color
             self.app.save(True)
             self.app.rebuild()
-            self.app.tip('背景已更换' if c else '已恢复主题默认背景')
+            self.app.tip('背景已更换' if color else '已恢复主题默认背景')
 
-        def menu(_=None):
+        def menu():
             m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
-                        activebackground=T['card_h'], activeforeground=T['fg'],
-                        font=FONT, relief='flat')
-            for name, c in self.BG_CHOICES:
-                m.add_command(label=name, command=lambda cc=c: pick(cc))
+                        activebackground=T['card_h'], activeforeground=T['fg'], font=self.font(FONT), relief='flat')
+            for name, color in self.BG_CHOICES:
+                m.add_command(label=name, command=lambda c=color: pick(c))
             m.tk_popup(lb.winfo_rootx(), lb.winfo_rooty() + lb.winfo_height())
-        lb.bind('<Button-1>', menu)
+
+        lb = self.button(r, menu, text='', width=10, font=self.font(FONT_SM), padx=6, pady=4)
+        lb.pack(side='right')
+        self.row_label(r, '背景色（选底色，其余自动配）')
         paint()
 
     def row_text(self, master, text, key, hint=''):
-        """文本型设置：忽略名单这类可能写很长，占一整行，回车或失焦时提交"""
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text=text, bg=T['bg'], fg=T['fg'], font=FONT,
-                 anchor='w').pack(fill='x')
-        if hint:
-            tk.Label(r, text=hint, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
-                     anchor='w', justify='left', wraplength=340).pack(fill='x')
-        v = tk.StringVar(value=str(self.app.st.get(key) or ''))
-        e = tk.Entry(r, textvariable=v, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
-                     relief='flat', font=FONT_SM, bd=0, highlightthickness=1,
-                     highlightbackground=T['line'], highlightcolor=T['acc'])
-        e.pack(fill='x', ipady=3, pady=(2, 0))
+        r.pack(fill='x', pady=5)
+        for content, color, font in ((text, T['fg'], FONT), (hint, T['fg2'], FONT_SM)):
+            if content:
+                label = tk.Label(r, text=content, bg=T['bg'], fg=color, font=self.font(font),
+                                 anchor='w', justify='left', wraplength=300)
+                label.pack(fill='x', pady=(0, 3))
+                label.bind('<Configure>', lambda e, w=label: w.configure(wraplength=max(60, e.width)))
+        value = tk.StringVar(value=str(self.app.st.get(key) or ''))
+        entry = tk.Entry(r, textvariable=value, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+                         relief='flat', font=self.font(FONT_SM), bd=0, highlightthickness=1,
+                         highlightbackground=T['line'], highlightcolor=T['acc'])
+        entry.pack(fill='x', ipady=4, pady=(2, 0))
 
         def commit(_=None):
-            self.app.st[key] = v.get().strip()
-            self.app.save(True)
-        e.bind('<Return>', commit)
-        e.bind('<FocusOut>', commit)
-        return e
+            text_value = value.get().strip()
+            if self.app.st.get(key) != text_value:
+                self.app.st[key] = text_value
+                self.app.save(True)
+            return 'break'
+
+        entry.bind('<Return>', commit)
+        entry.bind('<FocusOut>', commit)
+        if not hasattr(self, '_input_commits'):
+            self._input_commits = []
+        self._input_commits.append((entry, commit))
+        if not hasattr(self, '_inputs'):
+            self._inputs = {}
+        self._inputs[key] = entry
+        return entry
 
     def row_autostart_switch(self, master):
-        """开机自启：直接读写当前用户注册表 Run 项，状态以注册表真实值为准"""
         r = tk.Frame(master, bg=T['bg'])
-        r.pack(fill='x', pady=3)
-        tk.Label(r, text='开机自启（写当前用户注册表，可随时关）', bg=T['bg'],
-                 fg=T['fg'], font=FONT, anchor='w').pack(side='left')
-        lb = tk.Label(r, text='', bg=T['card'], font=FONT_B, width=6, cursor='hand2')
-        lb.pack(side='right')
+        r.pack(fill='x', pady=5)
 
         def paint():
             on, _ = get_autostart()
-            lb.configure(text='开' if on else '关',
-                         fg='#fff' if on else T['fg2'],
+            lb.configure(text='开' if on else '关', fg=T.get('on_acc', '#fff') if on else T['fg2'],
                          bg=T['acc'] if on else T['card'])
 
-        def toggle(_=None):
+        def toggle():
+            if runtime.NO_SAVE:
+                self.app.tip('自测模式不改动开机自启')
+                return
             on, _ = get_autostart()
-            ok = set_autostart(not on)
+            success = set_autostart(not on)
             paint()
-            if not ok:
-                self.app.tip('开机自启设置失败（注册表不可写）')
-            else:
-                self.app.tip('开机自启已开启' if not on else '开机自启已关闭')
-        lb.bind('<Button-1>', toggle)
-        paint()
+            self.app.tip(('开机自启已开启' if not on else '开机自启已关闭')
+                         if success else '开机自启设置失败（注册表不可写）')
 
-        r2 = tk.Frame(master, bg=T['bg'])
-        r2.pack(fill='x', pady=(0, 4))
-        b = tk.Label(r2, text='开启后程序常驻后台，能减少“程序没运行时复制的内容被漏记”；不想改注册表？点此手动放快捷方式',
-                     bg=T['bg'], fg=T['fg2'], font=FONT_SM, cursor='hand2', anchor='w', justify='left', wraplength=340)
-        b.pack(anchor='w')
-        b.bind('<Button-1>', lambda e: self.open_startup())
+        lb = self.button(r, toggle, text='', width=5, font=self.font(FONT_B), pady=3)
+        lb.pack(side='right')
+        self.row_label(r, '开机自启（当前用户）')
+        paint()
+        self.button(master, self.open_startup, text='打开启动快捷方式文件夹',
+                    fg=T['fg2'], font=self.font(FONT_SM), padx=6, pady=4).pack(anchor='w', pady=(0, 6))
 
     @staticmethod
     def open_startup():

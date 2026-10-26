@@ -4,24 +4,24 @@
 
 ClawBoard 用来找回复制过的内容，并把常用文字放在随时可用的面板里。先用一段无敏感信息的测试文字，走完一次“复制 → 找到 → 粘贴”。
 
-> 本指南适用于 **v2.7.0**。旧 v2.6.1 不包含本轮输入法和权限保护，仍使用旧版时请关闭触发词；升级前备份数据文件和图片目录。
+> 本指南适用于 **v3.0.0**。旧 v2.6.1 不包含本轮输入法和权限保护，仍使用旧版时请关闭触发词；升级前备份数据文件和图片目录。
 
 ## 1. 选择运行方式
 
-**直接使用正式版**：到 [v2.7.0 发布页](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0)，选择便携包或安装包。两种打包形式都不需要安装 Python。
+**直接使用正式版**：到 [v3.0.0 发布页](https://github.com/pay-and-gain/ClawBoard/releases/tag/v3.0.0)，选择便携包或安装包。两种打包形式都不需要安装 Python。
 
-- [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip)：完整解压到一个可写文件夹，再双击 `ClawBoard.exe`。以后保持 exe 与数据文件同层。
-- [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe)：按向导选择安装位置；桌面快捷方式是可选项。
+- [ClawBoard-3.0.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v3.0.0/ClawBoard-3.0.0-portable.zip)：完整解压到一个可写文件夹，再双击 `ClawBoard.exe`。以后保持 exe 与数据文件同层。
+- [ClawBoard-3.0.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v3.0.0/ClawBoard-3.0.0-setup.exe)：按向导选择安装位置；桌面快捷方式是可选项。
 
 **从源码运行**：准备 Windows 10/11、Git、Python 3.10+，安装 Python 时包含 Tcl/Tk，然后运行：
 
 ```powershell
-git clone https://github.com/pay-and-gain/ClawBoard.git
+git clone --branch v3.0.0 https://github.com/pay-and-gain/ClawBoard.git
 cd ClawBoard
 python ClawBoard.py
 ```
 
-运行只需要 Python 标准库，没有 pip 依赖。本轮源码变更见 [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1)。源码运行的数据默认写在该源码目录，开发测试使用独立临时数据。
+运行只需要 Python 标准库，没有 pip 依赖。v3 变更见[更新记录](../CHANGELOG.md)。源码运行的数据默认写在该源码目录，开发测试使用独立临时数据。
 
 ## 2. 第一次复制和粘贴
 
@@ -71,7 +71,11 @@ python ClawBoard.py
 
 选中条目后按 **Ctrl+T**，可以做 JSON 格式化、编码转换、大小写或行处理；确认结果后再复制、另存为条目或覆盖原条目。
 
-按住 **Ctrl** 点选多个条目，或用 **Shift** 连选，再按 **Ctrl+E** 导出。没有多选时导出当前结果；可选择 TXT、CSV、JSON 或 Markdown。导出文件写入当前数据目录；JSON 导出不是图片目录的完整备份。
+按住 **Ctrl** 点选多个条目，或用 **Shift** 连选，再按 **Ctrl+E** 导出。没有多选时导出当前结果；可选择 TXT、CSV、JSON 或 Markdown。导出文件写入当前数据目录。普通 JSON 导出不含设置和图片本体，不能用于整库恢复；请使用设置 → 数据中的完整备份入口。
+
+## 可选的只读工作台
+
+在面板内按 **Ctrl+Shift+W**，可以在更大的窗口搜索、分类和查看完整预览，再用定位操作回到快速面板；工作台不会自动粘贴。关闭后同一进程内重新打开会保留搜索和选择，不承诺跨进程保留这些界面状态。
 
 ## 6. 数据存在哪
 
@@ -87,6 +91,12 @@ python ClawBoard.py
 
 便携版会产生这些本地文件；开启“开机自启”还会写入当前用户的 `Software\Microsoft\Windows\CurrentVersion\Run` 中的 ClawBoard 项，关闭该选项会移除此项。安装版另外有安装登记和快捷方式。
 
+## 完整备份与误删恢复
+
+打开 **设置 → 数据**，点击 **完整备份与恢复** 可创建包含历史、常用语、回收站、设置及引用图片的 ZIP。恢复前先核对预览；恢复会替换当前库和设置，先保留原库安全备份，再重启程序。文件路径记录仍只保留路径，不包含原文件正文。见[完整备份说明](backup-and-restore.md)。
+
+**回收站**可以预览并恢复手动删除的内容，最多保留 **30 天**，最多 **5000 条**；满额会拒绝新的移入，保留源内容。自动超出历史条数的裁剪不进入回收站。永久删除需要确认，另存的完整备份仍可能包含旧内容。见[回收站说明](recycle-bin.md)。
+
 ## 备份、升级与迁移
 
 1. 用 **Ctrl+Q** 或托盘菜单退出 ClawBoard。
@@ -96,7 +106,7 @@ python ClawBoard.py
 
 安装包升级前也先备份；卸载默认保留数据，静默卸载也保留数据。已验证本机独立目录的静默安装与保留数据卸载，范围见 [Windows 验证记录](WINDOWS_VALIDATION.md)。
 
-Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现前同样先退出并备份。旧 2.6.1 预览包与正式 v2.7.0 是不同构建。
+Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现前同样先退出并备份。旧 2.6.1 预览包与 v3.0.0 是不同构建。
 
 ## 7. 隐私设置
 
@@ -116,9 +126,9 @@ Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现�
 
 **目标是管理员程序。** 普通权限 ClawBoard 会停止向更高权限目标自动发键；无法确认权限时也不自动发键。若内容已成功复制，在目标框手动按 `Ctrl+V`。目标拒绝焦点或输入时，也使用这一降级方式。
 
-**触发词没有展开。** 先确认已升级到 v2.7.0、开关开启、输入位置不是 ClawBoard 面板本身，并且选的是独立标准 US 键盘。微软拼音切换到“英”仍不属于这个布局。也可直接点击常用语使用。
+**触发词没有展开。** 先确认已升级到 v3.0.0、开关开启、输入位置不是 ClawBoard 面板本身，并且选的是独立标准 US 键盘。微软拼音切换到“英”仍不属于这个布局。也可直接点击常用语使用。
 
-**面板找不到。** 先尝试唤起，再用托盘右键的“面板找不到了？重置位置”。主面板支持跨屏缩放；已经打开的独立弹窗并不代表都有相同的跨屏适配能力。
+**面板找不到。** 先尝试唤起，再用托盘右键的“面板找不到了？重置位置”。主面板以及设置、备份、回收站窗口有独立 DPI 验证；不代表每个弹窗、物理键盘操作和完整无障碍能力均已验证。
 
 **正文首尾空白变化。** 默认粘贴时裁剪首尾空白，内部行的缩进保留；需要完整保留边缘空白时，在设置关闭这一选项。
 
@@ -135,6 +145,7 @@ Python 与 C 版兼容共享 JSON 格式，但 C 版功能更少；切换实现�
 | `Ctrl+Shift+Enter` | 纯文本粘贴 |
 | `Ctrl+T` / `Ctrl+E` | 文本变换 / 导出 |
 | `Ctrl+Shift+P` | 命令面板 |
+| `Ctrl+Shift+W` | 打开只读工作台 |
 | `Ctrl+=` / `Ctrl+-` | 调整用户缩放 |
 | `Delete` | 删除选中项 |
 | `Esc` / `Ctrl+Q` | 隐藏 / 退出 |

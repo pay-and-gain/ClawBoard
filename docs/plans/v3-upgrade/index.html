@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ClawBoard 下一版 · 交互设计提案</title>
+  <link rel="icon" href="icon-a-paw-note.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="prototype.css">
+  <script src="prototype.js" defer></script>
+</head>
+<body>
+<svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+  <symbol id="i-add" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5m4-5v5"/></symbol>
+  <symbol id="i-split" viewBox="0 0 24 24"><path d="M12 3v6m0 0L5 16m7-7 7 7M5 12v4h4m6 0h4v-4M5 21h3m8 0h3"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="m8 3 8 0-1 6 4 4H5l4-4Zm4 10v8"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M19 5v8a4 4 0 0 1-4 4H5m4-4-4 4 4 4"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6ZM14 3v5h5M9 12h7m-7 4h5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 5 5 3-3 4 4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 14 4-4M9 8l2-2a5 5 0 0 1 7 7l-2 2M8 9l-2 2a5 5 0 0 0 7 7l2-2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 3h9v11H3Z"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15A8 8 0 0 1 9 4a8.5 8.5 0 1 0 11 11Z"/></symbol>
+</defs></svg>
+<header class="site-header"><a class="wordmark" href="#"><img src="icon-a-paw-note.svg" alt="">ClawBoard <span>/ 下一版</span></a><span class="edition">设计提案 01 · 2026.10.25</span></header>
+<main>
+<section class="intro"><span class="eyebrow">YOUR LITTLE CLIPBOARD COMPANION</span><h1>把复制的小事，<br>做得顺手一点。</h1><p>安静地收好内容，需要时轻松找到。<br>简洁的界面，一点点可爱，熟悉的操作。</p></section>
+<div class="proposal-controls" aria-label="设计方案选择">
+  <button class="design-choice active" data-design="a"><span class="choice-letter">A</span><span><strong>纸感 · 爪印</strong><small>推荐 · 克制、耐看，保留紧凑操作</small></span></button>
+  <button class="design-choice" data-design="b"><span class="choice-letter">B</span><span><strong>软糖 · 小猫夹</strong><small>更可爱 · 柔和色彩，更强品牌感</small></span></button>
+  <button class="design-choice" data-design="c"><span class="choice-letter">C</span><span><strong>专注 · 工作台</strong><small>更实用 · 分栏预览，适合大量整理</small></span></button>
+</div>
+<div class="workflow-links"><span>跨领域工作流草案</span><button data-action="project-demo">项目口袋 / 续上昨天 ↗</button><button data-action="recipe-demo">小工序 / 处理配方 ↗</button></div>
+<section class="experience">
+  <aside class="rationale"><span class="section-index">01 / 可点击草案</span><h2 id="designTitle">清爽，而不空泛。</h2><p id="designDescription">用纸张白、墨绿色和轻分隔建立层次。可爱只留给爪印图标，内容始终是主角。</p><ul id="designBenefits"></ul><div class="demo-options"><label><input type="checkbox" id="darkToggle"> 深色外观</label><label><input type="checkbox" id="compactToggle"> 窄窗检查</label></div><p class="demo-notice">这里全部是合成示例。点击、搜索和删除只作用于草案，不访问真实剪贴板或历史库。方案和外观选项会在本浏览器保存。</p><p class="proposal-state" id="savedState" role="status"></p></aside>
+  <div class="stage" data-design="a" data-dark="false" id="stage">
+  <div class="app-window" id="appWindow" tabindex="-1" aria-label="ClawBoard 合成数据交互草案">
+    <header class="app-title"><img id="appIcon" src="icon-a-paw-note.svg" alt="ClawBoard"><strong>ClawBoard</strong><button class="listen" id="listenToggle" title="切换草案的监听状态"><span></span><span id="listenText">监听示意</span></button><div class="window-actions"><button data-action="pin" aria-label="置顶草案" title="置顶"><svg><use href="#i-pin"/></svg></button><button data-action="collapse" aria-label="收起草案" title="收起">−</button><button data-action="close-demo" aria-label="隐藏草案" title="隐藏">×</button></div></header>
+    <div class="app-body"><nav class="work-sidebar" aria-label="工作台分类"><small>我的内容</small><button data-tab="all" class="active"><svg><use href="#i-note"/></svg>全部记录</button><button data-tab="fav"><svg><use href="#i-star"/></svg>收藏</button><button data-tab="phrase"><svg><use href="#i-folder"/></svg>常用语</button><small>智能筛选 · 候选功能</small><button data-kind="url"><svg><use href="#i-link"/></svg>链接</button><button data-kind="image"><svg><use href="#i-image"/></svg>图片</button><div class="local-label">本机保存<br><span>随时导出，安心留存</span></div></nav>
+    <div class="main-panel"><nav class="app-tabs" aria-label="记录分类"><button class="active" data-tab="all">历史</button><button data-tab="phrase">常用语</button><button data-tab="fav">收藏</button><button class="filter-button" data-action="filters" title="展开类型筛选">筛选 <span>⌄</span></button></nav><div class="filter-chips" id="filters" hidden><button data-kind="all" class="active">全部</button><button data-kind="text">文本</button><button data-kind="url">链接</button><button data-kind="image">图片</button></div><div class="list-caption"><span id="listCaption">最近复制</span><span id="count">6 条</span></div><div class="clip-list" id="clipList" role="group" aria-label="示例记录"></div><div class="app-feedback" id="feedback" role="status"><span class="feedback-dot"></span>合成内容 · 交互模拟</div><footer class="toolbar"><div class="search-wrap"><svg><use href="#i-search"/></svg><input type="search" id="searchInput" placeholder="搜索…" aria-label="搜索示例记录"></div><div class="tool-buttons"><button data-action="add" title="新增常用语" aria-label="新增常用语"><svg><use href="#i-add"/></svg></button><button data-action="delete" title="删除所选示例，可撤销" aria-label="删除所选示例"><svg><use href="#i-trash"/></svg></button><button data-action="split" title="拆词示意" aria-label="拆词示意"><svg><use href="#i-split"/></svg></button><button data-action="more" title="更多操作" aria-label="更多操作"><svg><use href="#i-more"/></svg></button><button data-action="settings" title="设置" aria-label="设置"><svg><use href="#i-settings"/></svg></button></div></footer></div><aside class="detail-panel" id="detailPanel"><span class="detail-label">内容预览</span><div id="detailContent"></div><div class="detail-hint">选择时看清内容<br>Enter 快速粘贴</div></aside></div>
+  </div><button class="restore-demo" id="restoreDemo" hidden>重新打开 ClawBoard 草案</button><span class="stage-note">交互设计预览 · 不是运行中的 Windows 产品</span>
+  </div>
+</section>
+<section class="decision-notes"><div><span class="section-index">02 / 一致的操作</span><h3>美化，不打乱习惯。</h3><p>保留单击粘贴、删与拆相邻、底部短搜索框。来源和大小默认隐藏，开关集中在外观设置。界面提供清晰的键盘焦点，不用反复闪烁提醒。</p></div><div><span class="section-index">03 / 明确的边界</span><h3>每一步都能回到起点。</h3><p>完整竞品研究保存在项目私有目录；已筛选的方案、设计源文件和决策记录单独留档。正式重做前，用合成数据验证最小窗口、中文输入与双屏缩放。</p></div></section>
+<section class="icon-section"><div><span class="section-index">04 / 原创图标方向</span><h2>小图标，也要一眼认得出。</h2><p>可爱、清晰和小尺寸辨识度一起考虑。以下为可编辑的矢量提案；正式图标将另做托盘专用简化版本。</p></div><div class="icon-cards"><article><img src="icon-a-paw-note.svg" alt="爪印便签图标"><h3>A / 爪印便签</h3><p>内容工具 + 轻巧陪伴。<br>推荐作为主品牌。</p></article><article><img src="icon-b-cat-clip.svg" alt="小猫夹图标"><h3>B / 小猫夹</h3><p>辨识度强，偏可爱。<br>小尺寸需进一步简化。</p></article><article><img src="icon-c-stacked.svg" alt="叠页图标"><h3>C / 叠页</h3><p>稳重、工具感强。<br>适合工作场景。</p></article></div><div class="icon-size-check"><strong>托盘专用简化草案 A</strong><span class="tray-sizes"><span><img src="icon-a-tray.svg" alt="16像素托盘草案" style="width:16px;height:16px">16 px</span><span><img src="icon-a-tray.svg" alt="20像素托盘草案" style="width:20px;height:20px">20 px</span><span><img src="icon-a-tray.svg" alt="24像素托盘草案" style="width:24px;height:24px">24 px</span><span><img src="icon-a-tray.svg" alt="32像素托盘草案" style="width:32px;height:32px">32 px</span></span><p>小图标独立绘制，不把复杂头像直接缩小；暂停和错误状态仍需专项设计与 Windows 验收。</p></div></section>
+</main><footer class="site-footer"><span>ClawBoard · 本地优先，轻巧可信。</span><span>待选择方案 · 尚未替换正式界面</span></footer>
+<dialog id="settingsDialog" aria-labelledby="settingsTitle"><header><h2 id="settingsTitle">设置</h2><button id="closeSettings" aria-label="关闭设置"><svg><use href="#i-close"/></svg></button></header><div class="settings-layout"><nav id="settingsNav"><button class="active" data-section="appearance">外观</button><button data-section="capture">采集与隐私</button><button data-section="keys">快捷键</button><button data-section="data">数据与备份</button></nav><section class="settings-page" id="settingsPage"></section></div><footer>草案设置仅保存在本浏览器，不修改 ClawBoard 配置。</footer></dialog>
+<dialog id="workflowDialog" aria-labelledby="workflowTitle"><header><h2 id="workflowTitle">工作流草案</h2><button id="closeWorkflow" aria-label="关闭工作流草案"><svg><use href="#i-close"/></svg></button></header><section id="workflowBody" class="workflow-body"></section><footer id="workflowStatus">仅合成示例；不是已加入 Windows 产品的功能。</footer></dialog>
+</body></html>

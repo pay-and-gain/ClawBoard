@@ -95,7 +95,7 @@ class TransformWindow:
                          padx=10, pady=5, cursor='hand2')
             b.pack(side='left', padx=3)
             b.bind('<Button-1>', lambda e, c=cmd: c())
-        b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
+        b = tk.Label(btns, text='关闭', bg=T['acc'], fg=T.get('on_acc', '#fff'), font=FONT_B,
                      padx=14, pady=5, cursor='hand2')
         b.pack(side='right')
         b.bind('<Button-1>', lambda e: self.close())

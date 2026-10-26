@@ -4,12 +4,16 @@
 T 是可原地读写（禁止重绑定）的跨模块共享 dict，测试与业务代码都通过它共享当前配色。
 """
 
-DARK = dict(bg='#1e2027', panel='#252831', card='#2c303b', card_h='#39404f',
-            card_s='#33465f', card_m='#3d4f6b', fg='#e6e8ee', fg2='#9aa0ad',
-            acc='#4f8cff', acc2='#2f6fe0', line='#333844', danger='#e05c5c')
-LIGHT = dict(bg='#f4f5f8', panel='#e9ebf0', card='#ffffff', card_h='#eef1f7',
-             card_s='#dbe7ff', card_m='#e3edff', fg='#1f2430', fg2='#6b7280',
-             acc='#2563eb', acc2='#1d4ed8', line='#d6dae3', danger='#c0392b')
+DARK = dict(bg='#202822', panel='#252e27', card='#28332c', card_h='#303e34',
+            card_s='#354e3e', card_m='#3b5847', fg='#e6eee6', fg2='#adbdb0',
+            acc='#b2d6bc', acc2='#d0e7d6', line='#3b493f', danger='#f0a7a0',
+            on_acc='#20392b', on_danger='#3d1e1b', flash='#42624b', focus='#c5e6cf',
+            subtle='#304136', disabled='#85968a')
+LIGHT = dict(bg='#fafbf8', panel='#f0f3ed', card='#ffffff', card_h='#f0f4ee',
+             card_s='#e6efe7', card_m='#dceadb', fg='#23352c', fg2='#5c6d61',
+             acc='#235b50', acc2='#17483f', line='#dce4d6', danger='#a33f3f',
+             on_acc='#ffffff', on_danger='#ffffff', flash='#d2e8d6', focus='#235b50',
+             subtle='#eaf0e6', disabled='#7a887e')
 T = dict(DARK)
 
 
@@ -57,8 +61,8 @@ def apply_theme(st):
     if is_dark(c):
         T.update(panel=shade(c, 1.18), card=shade(c, 1.42), card_h=shade(c, 1.72),
                  card_s=shade(c, 1.55), card_m=shade(c, 1.62), line=shade(c, 1.70),
-                 fg='#e6e8ee', fg2='#9aa0ad')
+                 fg='#e6eee6', fg2='#adbdb0')
     else:
         T.update(panel=shade(c, 0.95), card=shade(c, 1.06), card_h=shade(c, 0.96),
                  card_s=shade(c, 0.86), card_m=shade(c, 0.89), line=shade(c, 0.85),
-                 fg='#1f2430', fg2='#6b7280')
+                 fg='#23352c', fg2='#5c6d61')

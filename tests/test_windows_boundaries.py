@@ -51,6 +51,7 @@ class WindowsHarness:
         config = types.ModuleType('clawboard.config')
         config.APP_NAME, config.BASE_DIR = 'ClawBoardTest', '/tmp'
         config.ICON_FILE = '/tmp/clawboard-test.ico'
+        config.UI_ASSET_DIR = '/tmp/clawboard-ui-assets'
         config.BAR_H, config.MIN_W, config.MIN_H, config.RESIZE_ZONE = 34, 280, 340, 6
         config.UI_SCALE_LEVELS, config.scaled = (0.5, 1.0, 1.5), int
         config.UI_SCALE, config.DPI_SCALE = 1.0, 1.0

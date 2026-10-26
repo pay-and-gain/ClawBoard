@@ -4,6 +4,7 @@ No App/Tk root is constructed. File tests use only TemporaryDirectory; fake
 widgets assert that completion delivery runs on the owner thread.
 """
 import ast
+from copy import deepcopy
 import csv
 import io
 import json
@@ -99,6 +100,44 @@ class ExportServiceTests(unittest.TestCase):
         self.items[0]['text'] = 'large-' * 100001
         payload = json.loads(exports.render_items(self.items, 'json'))
         self.assertEqual(payload['items'], self.items)
+
+    def test_json_keeps_image_and_file_references_without_reading_their_bodies(self):
+        records = [dict(self.items[0], content_type='image', image_path='missing.png',
+                        text='[图片]'),
+                   dict(self.items[0], content_type='files', text='C:/missing.txt')]
+        with patch('builtins.open', side_effect=AssertionError('export must not open referenced files')):
+            payload = json.loads(exports.render_items(records, 'json'))
+        self.assertEqual(set(payload), {'version', 'items'})
+        self.assertEqual(payload['items'], records)
+
+    def test_settings_export_contains_records_and_groups_but_no_settings(self):
+        submitted = []
+        data = {'clip': self.items, 'groups': [{'name': 'synthetic', 'items': self.items}],
+                'settings': {'theme': 'light', 'hotkey': 'none'}}
+        namespace = {'runtime': types.SimpleNamespace(NO_SAVE=False),
+                     'deepcopy': deepcopy, 'time': time,
+                     'APP_NAME': 'ClawBoard', 'APP_VER': 'test',
+                     'BASE_DIR': self.directory.name,
+                     'new_export_path': exports.new_export_path,
+                     'write_payload': exports.write_payload}
+        cls = adapter_class('settings_dialog.py', 'SettingsWindow', namespace)
+        dialog = cls.__new__(cls)
+        dialog.app = types.SimpleNamespace(data=data,
+            application=types.SimpleNamespace(tasks=types.SimpleNamespace(
+                submit=lambda *args, **kwargs: submitted.append(args) or object())),
+            tip=lambda message: None)
+        dialog._alive = lambda: True
+        dialog._export_pending = False
+        dialog._export_cancel = threading.Event()
+        dialog._export_key = 'synthetic-export'
+        dialog.export_all()
+        payload = submitted[0][2]
+        self.assertEqual(set(payload), {'app', 'version', 'exported_at', 'clip_count',
+                                       'phrase_count', 'clip', 'groups'})
+        self.assertEqual(payload['clip'], data['clip'])
+        self.assertEqual(payload['groups'], data['groups'])
+        self.assertIsNot(payload['clip'], data['clip'])
+        self.assertIsNot(payload['groups'], data['groups'])
 
     def test_markdown_embedded_fences_stay_inside_content(self):
         self.items[0]['text'] = '```python\nprint(1)\n```'
@@ -305,6 +344,7 @@ class SafetyAndCompatibilityTests(unittest.TestCase):
         class RowWidget(FakeWidget):
             def __init__(self, *args, **kwargs):
                 super().__init__()
+                self.options.update(kwargs)
                 self.bindings = {}
                 widgets.append(self)
 
@@ -314,11 +354,12 @@ class SafetyAndCompatibilityTests(unittest.TestCase):
             def bind(self, event, callback):
                 self.bindings[event] = callback
 
-        namespace = {'tk': types.SimpleNamespace(Frame=RowWidget, Label=RowWidget),
+        namespace = {'tk': types.SimpleNamespace(Frame=RowWidget, Label=RowWidget, Button=RowWidget),
                      'FONT': (), 'FONT_B': (),
-                     'T': {'bg': '', 'fg': '', 'fg2': '', 'acc': '', 'card': ''}}
+                     'T': {'bg': '', 'fg': '', 'fg2': '', 'acc': '', 'card': '', 'card_h': '', 'line': ''}}
         cls = adapter_class('settings_dialog.py', 'SettingsWindow', namespace)
         instance = cls.__new__(cls)
+        instance.font = lambda spec: spec
         state, calls = {'listen': True}, []
 
         def toggle():
@@ -328,7 +369,7 @@ class SafetyAndCompatibilityTests(unittest.TestCase):
         instance.app = types.SimpleNamespace(st=state, toggle_listen=toggle,
             save=lambda *args: self.fail('system entrypoint already saves'))
         instance.row_switch(None, 'listen', 'listen')
-        widgets[-1].bindings['<Button-1>']()
+        instance._switches['listen'].options['command']()
         self.assertEqual(calls, ['toggle_listen'])
         self.assertFalse(state['listen'])
 

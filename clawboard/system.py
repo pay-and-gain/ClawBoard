@@ -35,6 +35,7 @@ from clawboard.clipboard import (
 from clawboard.paste_adapter import TriggerRequest
 from clawboard.trigger import TriggerEngine, is_supported_trigger_layout
 from clawboard.windows_layout import keyboard_layout
+from clawboard.windows_focus import window_is_current_process
 from clawboard.image import clipboard_has_image, read_clipboard_dib, dib_to_png
 from clawboard.tag import detect_tags
 from clawboard.hotkey import HiddenWindow
@@ -148,6 +149,7 @@ class SystemMixin:
                 reset()
                 context[0] = current
             if (stopped.is_set() or not target or target == own
+                    or window_is_current_process(target) is not False
                     or not is_supported_trigger_layout(layout)):
                 reset()
                 return None
@@ -254,12 +256,12 @@ class SystemMixin:
                 h = u32.GetForegroundWindow()
                 own = int(self.root.winfo_id())
                 own_top = top_hwnd(self.root)
-                if h and h not in (own, own_top):
+                external = bool(h) and h not in (own, own_top) and window_is_current_process(h) is False
+                if external:
                     self.prev_hwnd = h
                 # 前台是否全屏（排除自己 / 桌面 Shell）—— 供「全屏时不再置顶」用。
                 # 这里已经有 GetForegroundWindow，顺手判一次，成本极低。
-                self._fg_fullscreen = (bool(h) and h not in (own, own_top)
-                                       and is_fullscreen_window(h, own_top))
+                self._fg_fullscreen = bool(external and is_fullscreen_window(h, own_top))
             except Exception:
                 pass
             if self._tray_menu:
@@ -487,6 +489,9 @@ class SystemMixin:
         # 记一条：事后才能区分「用户正常退出」和「进程被外部杀掉」（后者不会留下任何痕迹）
         self.note('用户触发退出（托盘 / Ctrl+Q / 设置里的退出按钮）')
         self.save()
+        workbench = getattr(self, '_workbench_window', None)
+        if workbench is not None and workbench.win.winfo_exists():
+            workbench.close()
         try:
             self.bridge.close()
         except Exception as error:
@@ -525,6 +530,7 @@ class SystemMixin:
                     activebackground=T['card_h'], activeforeground=T['fg'],
                     font=FONT, relief='flat')
         m.add_command(label='打开面板', command=self.toggle_show)
+        m.add_command(label='打开工作台', command=self.open_workbench)
         m.add_command(label=('⏸ 暂停监听' if self.st['listen'] else '▶ 恢复监听'),
                       command=self.toggle_listen)
         m.add_command(label='⚙ 设置', command=self.open_settings)
