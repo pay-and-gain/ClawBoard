@@ -10,7 +10,7 @@ import threading
 import traceback
 from ctypes import wintypes
 
-from clawboard.config import APP_NAME, ICON_FILE
+from clawboard.config import APP_NAME, ICON_FILE, UI_ASSET_DIR
 from clawboard.win32 import (
     u32, k32, sh32, WNDPROC, WNDCLASS, NOTIFYICONDATA,
     WM_HOTKEY, WM_APP_REG, WM_APP_UNREG, WM_TRAY,
@@ -231,11 +231,23 @@ class HiddenWindow(threading.Thread):
         if not self.hwnd or self._stopping.is_set():
             return False
         try:
-            if not os.path.exists(ICON_FILE):
-                make_ico(ICON_FILE)
+            icon_path = ICON_FILE
+            dark_taskbar = None
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                    r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize') as key:
+                    dark_taskbar = not bool(winreg.QueryValueEx(key, 'SystemUsesLightTheme')[0])
+            except (ImportError, OSError, AttributeError, TypeError, ValueError):
+                pass
+            tray_path = os.path.join(UI_ASSET_DIR, 'tray-dark.ico' if dark_taskbar else 'tray-light.ico')
+            if dark_taskbar is not None and os.path.isfile(tray_path):
+                icon_path = tray_path
+            if not os.path.exists(icon_path):
+                make_ico(icon_path)
             # Explorer 重建会丢掉通知区图标，不会使本进程持有的 HICON 失效。
             if not self._icon:
-                self._icon = u32.LoadImageW(None, ICON_FILE, IMAGE_ICON, 0, 0,
+                self._icon = u32.LoadImageW(None, icon_path, IMAGE_ICON, 0, 0,
                                             LR_LOADFROMFILE | LR_DEFAULTSIZE)
             nid = NOTIFYICONDATA()
             nid.cbSize = ctypes.sizeof(nid)

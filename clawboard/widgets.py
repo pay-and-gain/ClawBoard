@@ -8,7 +8,7 @@
 import re
 import tkinter as tk
 
-from clawboard.config import FONT, FONT_B, FONT_SM, FONT_MONO, WHEEL_LINES
+from clawboard.config import FONT, FONT_B, FONT_SM, FONT_MONO, WHEEL_LINES, scaled
 from clawboard.theme import T
 from clawboard.runtime import uid
 from clawboard.classify import preview
@@ -52,7 +52,25 @@ def center_on(win, parent, w, h):
     win.update_idletasks()
     px, py = parent.winfo_rootx(), parent.winfo_rooty()
     pw, ph = parent.winfo_width(), parent.winfo_height()
-    win.geometry('%dx%d+%d+%d' % (w, h, max(px + (pw - w) // 2, 0), max(py + (ph - h) // 2, 0)))
+    area = (0, 0, parent.winfo_screenwidth(), parent.winfo_screenheight())
+    try:
+        import ctypes
+        from clawboard.windows_api import u32, MONITORINFO, MONITOR_DEFAULTTONEAREST
+        from clawboard.windows_geometry import top_hwnd
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(info)
+        monitor = u32.MonitorFromWindow(top_hwnd(parent), MONITOR_DEFAULTTONEAREST)
+        if u32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            r = info.rcWork
+            area = r.left, r.top, r.right, r.bottom
+    except (ImportError, AttributeError, OSError):
+        pass
+    left, top, right, bottom = area
+    margin = min(scaled(8), max(0, (right - left - 1) // 2), max(0, (bottom - top - 1) // 2))
+    w, h = min(w, max(1, right - left - 2 * margin)), min(h, max(1, bottom - top - 2 * margin))
+    x = max(left + margin, min(px + (pw - w) // 2, right - w - margin))
+    y = max(top + margin, min(py + (ph - h) // 2, bottom - h - margin))
+    win.geometry('%dx%d%+d%+d' % (w, h, x, y))
 
 
 def safe_release(win):
@@ -70,20 +88,29 @@ class Dialog:
         self.result = None
         self.on_ok = on_ok
         self.parent = parent
+        self._closed, self._focus_job = False, None
         self.win = tk.Toplevel(parent)
         self.win.transient(parent)
-        dark_top(self.win, title)
+        self.bar = dark_top(self.win, title)
         self.win.attributes('-topmost', True)
-        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
-        body = tk.Frame(self.win, bg=T['bg'])
-        body.pack(fill='both', expand=True, padx=12, pady=10)
+        # Actions own their space before editable content can expand.
+        self.actions = tk.Frame(self.win, bg=T['bg'])
+        self.actions.pack(fill='x', padx=12, pady=(6, 0))
+        self.ok_button = self._mk_btn(self.actions, ok_text, T['acc'], self._ok)
+        self.ok_button.pack(side='right', padx=(6, 0))
+        self.cancel_button = self._mk_btn(self.actions, '取消', T['card_h'], self._cancel)
+        self.cancel_button.pack(side='right')
+        self.body = ScrollFrame(self.win)
+        self.body.canvas.configure(width=1, height=1)
+        self.body.pack(fill='both', expand=True, padx=12, pady=10)
+        body = self.body.inner
         self.vars = {}
         for label, default, multi in fields:
             if label:
                 tk.Label(body, text=label, bg=T['bg'], fg=T['fg2'], font=FONT_SM,
                          anchor='w').pack(fill='x')
             if multi:
-                w = tk.Text(body, height=5, bg=T['card'], fg=T['fg'],
+                w = tk.Text(body, width=1, height=5, bg=T['card'], fg=T['fg'],
                             insertbackground=T['fg'], relief='flat', font=FONT,
                             wrap='word', bd=0, highlightthickness=1,
                             highlightbackground=T['line'], highlightcolor=T['acc'])
@@ -98,33 +125,41 @@ class Dialog:
                              highlightcolor=T['acc'])
                 e.pack(fill='x', ipady=4, pady=(2, 8))
                 self.vars[label] = (v, None)
-        btns = tk.Frame(self.win, bg=T['bg'])
-        btns.pack(fill='x', padx=12, pady=(0, 12))
-        self._mk_btn(btns, ok_text, T['acc'], self._ok).pack(side='right', padx=(6, 0))
-        self._mk_btn(btns, '取消', T['card_h'], self._cancel).pack(side='right')
+        self.body.bind_wheel_tree()
+        for _, widget in self.vars.values():
+            if widget is not None:
+                widget.unbind('<MouseWheel>')
+        self.win.bind('<Destroy>', lambda e: self._dispose() if e.widget is self.win else None, add='+')
+        self._focus_job = self.win.after(60, self._focus_later)
         self.win.bind('<Return>', lambda e: self._ok())
         self.win.bind('<Escape>', lambda e: self._cancel())
         self.win.protocol('WM_DELETE_WINDOW', self._cancel)
 
     def _mk_btn(self, master, text, color, cmd):
-        b = tk.Label(master, text=text, bg=color, fg='#ffffff', font=FONT_B,
-                     padx=14, pady=5, cursor='hand2')
-        b.bind('<Button-1>', lambda e: cmd())
+        b = tk.Button(master, text=text, command=cmd, bg=color, fg=T.get('on_acc', '#fff') if color == T['acc'] else T.get('on_danger', '#fff') if color == T['danger'] else T['fg'], font=FONT_B,
+                      padx=14, pady=5, cursor='hand2', relief='flat', bd=0, takefocus=True)
+        b.bind('<Return>', lambda e: (cmd(), 'break')[1])
         b.bind('<Enter>', lambda e: b.configure(bg=T['acc2'] if color == T['acc'] else T['line']))
         b.bind('<Leave>', lambda e: b.configure(bg=color))
         return b
 
     def _ok(self):
+        if self._closed:
+            return
         out = [w.get('1.0', 'end-1c') if w is not None else v.get()
                for v, w in self.vars.values()]
         self.result = out
+        self._dispose()
         safe_release(self.win)
         self.win.destroy()
         if self.on_ok:
             self.on_ok(out)
 
     def _cancel(self):
+        if self._closed:
+            return
         self.result = None
+        self._dispose()
         safe_release(self.win)
         self.win.destroy()
 
@@ -132,8 +167,27 @@ class Dialog:
         if h is None:
             self.win.update_idletasks()
             h = self.win.winfo_reqheight()
-        center_on(self.win, self.parent, w, h)
+        center_on(self.win, self.parent, max(w, self.actions.winfo_reqwidth() + 24),
+                  max(h, self.bar.winfo_reqheight() + self.actions.winfo_reqheight() + scaled(80)))
+        self.win.update_idletasks()
+        self.win.minsize(min(self.win.winfo_width(), max(scaled(240), self.actions.winfo_reqwidth() + 24)),
+                         min(self.win.winfo_height(), self.bar.winfo_reqheight() + self.actions.winfo_reqheight() + scaled(80)))
         return self.result
+
+    def _focus_later(self):
+        self._focus_job = None
+        if not self._closed:
+            self.win.lift()
+            self.win.focus_force()
+
+    def _dispose(self):
+        self._closed = True
+        job, self._focus_job = self._focus_job, None
+        if job:
+            try:
+                self.win.after_cancel(job)
+            except tk.TclError:
+                pass
 
 
 class SplitDialog:
@@ -141,22 +195,39 @@ class SplitDialog:
 
     def __init__(self, app, text):
         self.app = app
+        self._closed, self._focus_job, self._action_columns = False, None, None
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
-        dark_top(self.win, '拆词')
+        self.bar = dark_top(self.win, '拆词')
+        self.bar.configure(height=scaled(30))
         self.win.attributes('-topmost', True)
-        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
+        self._focus_job = self.win.after(60, self._focus_later)
+        # 先保留操作区，再分配可伸缩内容；长预览和高 DPI 都不能挤掉取消按钮。
+        self.footer = tk.Frame(self.win, bg=T['bg'])
+        self.footer.pack(fill='x', padx=scaled(12), pady=scaled(8))
+        self.action_buttons = [self.mk(self.footer, '拆成常用语', T['acc'], self.ok),
+                               self.mk(self.footer, '预览', T['card_h'], self.do_preview),
+                               self.mk(self.footer, '取消', T['card_h'], self.cancel)]
+        self._layout_actions(1)
         body = tk.Frame(self.win, bg=T['bg'])
-        body.pack(fill='both', expand=True, padx=12, pady=8)
-        tk.Label(body, text='源文本', bg=T['bg'], fg=T['fg2'], font=FONT_SM, anchor='w').pack(fill='x')
-        self.txt = tk.Text(body, height=5, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
+        body.pack(fill='both', expand=True, padx=scaled(12), pady=scaled(8))
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(1, weight=3)
+        body.rowconfigure(4, weight=1)
+        tk.Label(body, text='源文本', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
+                 anchor='w').grid(row=0, column=0, sticky='ew')
+        source = tk.Frame(body, bg=T['bg'])
+        source.grid(row=1, column=0, sticky='nsew', pady=(scaled(2), scaled(8)))
+        self.txt = tk.Text(source, width=1, height=5, bg=T['card'], fg=T['fg'], insertbackground=T['fg'],
                            relief='flat', font=FONT, wrap='word', bd=0,
                            highlightthickness=1, highlightbackground=T['line'],
                            highlightcolor=T['acc'])
         self.txt.insert('1.0', text)
-        self.txt.pack(fill='x', pady=(2, 8))
+        source_scroll = tk.Scrollbar(source, command=self.txt.yview)
+        self.txt.configure(yscrollcommand=source_scroll.set)
+        pack_static_then_fill(source, source_scroll, self.txt)
         row = tk.Frame(body, bg=T['bg'])
-        row.pack(fill='x', pady=(0, 6))
+        row.grid(row=2, column=0, sticky='ew', pady=(0, scaled(6)))
         tk.Label(row, text='分隔方式', bg=T['bg'], fg=T['fg2'], font=FONT_SM).pack(side='left')
         self.mode = tk.StringVar(value=self.MODES[0])
         mb = tk.Label(row, text='▾ 选择', bg=T['card'], fg=T['fg'], font=FONT_SM,
@@ -167,25 +238,69 @@ class SplitDialog:
                                relief='flat', font=FONT, bd=0, highlightthickness=1,
                                highlightbackground=T['line'], highlightcolor=T['acc'])
         self.custom.insert(0, '|')
-        self.custom.pack(fill='x', pady=(0, 6))
-        self.prev = tk.Label(body, text='', bg=T['bg'], fg=T['acc'], font=FONT_SM,
-                             anchor='w', wraplength=330, justify='left')
-        self.prev.pack(fill='x', pady=(0, 6))
-        btns = tk.Frame(body, bg=T['bg'])
-        btns.pack(fill='x')
-        self.mk(btns, '拆成常用语', T['acc'], self.ok).pack(side='right', padx=(6, 0))
-        self.mk(btns, '预览', T['card_h'], self.do_preview).pack(side='right')
-        self.mk(btns, '取消', T['card_h'], self.cancel).pack(side='left')
+        self.custom.grid(row=3, column=0, sticky='ew', pady=(0, scaled(6)))
+        preview_box = tk.Frame(body, bg=T['bg'])
+        preview_box.grid(row=4, column=0, sticky='nsew')
+        self.prev = tk.Text(preview_box, width=1, height=3, bg=T['bg'], fg=T['acc'],
+                            font=FONT_SM, wrap='word', relief='flat', bd=0, state='disabled')
+        preview_scroll = tk.Scrollbar(preview_box, command=self.prev.yview)
+        self.prev.configure(yscrollcommand=preview_scroll.set)
+        pack_static_then_fill(preview_box, preview_scroll, self.prev)
         self.win.bind('<Escape>', lambda e: self.cancel())
         self.win.protocol('WM_DELETE_WINDOW', self.cancel)
+        self.win.bind('<Configure>', lambda e: self._layout_actions(e.width - scaled(24)) if e.widget is self.win else None, add='+')
+        self.win.bind('<Destroy>', lambda e: self._dispose() if e.widget is self.win else None, add='+')
         self.do_preview()
-        center_on(self.win, self.app.root, 380, 360)
+        self._fit_window()
+
+    def _fit_window(self):
+        self.win.update_idletasks()
+        parent = self.app.root
+        px, py = parent.winfo_rootx(), parent.winfo_rooty()
+        pw, ph = parent.winfo_width(), parent.winfo_height()
+        area = (px, py, px + parent.winfo_screenwidth(), py + parent.winfo_screenheight())
+        try:
+            import ctypes
+            from clawboard.windows_api import u32, MONITORINFO, MONITOR_DEFAULTTONEAREST
+            from clawboard.windows_geometry import top_hwnd
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(info)
+            monitor = u32.MonitorFromWindow(top_hwnd(parent), MONITOR_DEFAULTTONEAREST)
+            if u32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                r = info.rcWork
+                area = (r.left, r.top, r.right, r.bottom)
+        except (ImportError, AttributeError, OSError):
+            pass
+        left, top, right, bottom = area
+        margin = min(scaled(8), max(0, (right - left - 1) // 2), max(0, (bottom - top - 1) // 2))
+        aw, ah = max(1, right - left - 2 * margin), max(1, bottom - top - 2 * margin)
+        width = min(aw, max(scaled(380), self.footer.winfo_reqwidth() + scaled(24)))
+        height = min(ah, max(scaled(360), self.win.winfo_reqheight()))
+        x = max(left + margin, min(px + (pw - width) // 2, right - width - margin))
+        y = max(top + margin, min(py + (ph - height) // 2, bottom - height - margin))
+        # 负坐标属于合法副屏；不能像旧 center_on 一样直接截到主屏的 0。
+        self.win.geometry('%dx%d%+d%+d' % (width, height, x, y))
+        self.win.minsize(min(width, scaled(300)),
+                         min(height, self.bar.winfo_reqheight() + self.footer.winfo_reqheight() + scaled(160)))
 
     def mk(self, master, text, color, cmd):
-        b = tk.Label(master, text=text, bg=color, fg='#fff', font=FONT_B,
-                     padx=12, pady=5, cursor='hand2')
-        b.bind('<Button-1>', lambda e: cmd())
+        b = tk.Button(master, text=text, command=cmd, bg=color, fg=T.get('on_acc', '#fff') if color == T['acc'] else T.get('on_danger', '#fff') if color == T['danger'] else T['fg'], font=FONT_B,
+                      padx=12, pady=5, cursor='hand2', relief='flat', bd=0, takefocus=True)
+        b.bind('<Return>', lambda e: (cmd(), 'break')[1])
         return b
+
+    def _layout_actions(self, width):
+        widths = sorted((b.winfo_reqwidth() + 4 for b in self.action_buttons), reverse=True)
+        columns = 3 if width >= sum(widths) else 2 if width >= sum(widths[:2]) else 1
+        if columns == self._action_columns or self._closed:
+            return
+        self._action_columns = columns
+        for index in range(3):
+            self.footer.columnconfigure(index, weight=int(index < columns))
+        for index, button in enumerate(self.action_buttons):
+            button.grid(row=index // columns, column=index % columns, sticky='ew', padx=2, pady=2)
+
+    _focus_later, _dispose = Dialog._focus_later, Dialog._dispose
 
     def mode_menu(self, anchor):
         m = tk.Menu(self.win, tearoff=0, bg=T['panel'], fg=T['fg'], bd=0,
@@ -209,13 +324,21 @@ class SplitDialog:
 
     def do_preview(self):
         parts = self.do_split()
-        self.prev.configure(text='预览：共 %d 条 → %s' %
-                            (len(parts), ' | '.join(parts[:6]) + (' …' if len(parts) > 6 else '')))
+        self._set_preview('预览：共 %d 条 → %s' %
+                          (len(parts), ' | '.join(parts[:6]) + (' …' if len(parts) > 6 else '')))
+
+    def _set_preview(self, text, color=None):
+        self.prev.configure(state='normal', fg=color or T['acc'])
+        self.prev.delete('1.0', 'end')
+        self.prev.insert('1.0', text)
+        self.prev.configure(state='disabled')
 
     def ok(self):
+        if self._closed:
+            return
         parts = self.do_split()
         if not parts:
-            self.prev.configure(text='没拆出任何内容', fg=T['danger'])
+            self._set_preview('没拆出任何内容', T['danger'])
             return
         g = self.app.cur_group()
         for p in parts:
@@ -224,10 +347,14 @@ class SplitDialog:
         self.app.tab = 'phrase'
         self.app.render()
         self.app.tip('已拆出 %d 条常用语' % len(parts))
+        self._dispose()
         safe_release(self.win)
         self.win.destroy()
 
     def cancel(self):
+        if self._closed:
+            return
+        self._dispose()
         safe_release(self.win)
         self.win.destroy()
 
@@ -323,7 +450,10 @@ class ThinBar(tk.Canvas):
         try:
             self.delete('all')
             h = max(1, self.winfo_height())
-            self.create_rectangle(0, 0, self.w, h, fill=T['panel'], outline='')
+            # Per-window DPI refresh can resize this canvas after construction.
+            # Drawing at its initial width leaves a thin, misplaced thumb.
+            width = max(1, self.winfo_width())
+            self.create_rectangle(0, 0, width, h, fill=T['panel'], outline='')
             y, th, _ = self._geom()
             if th >= h:             # 内容不满一屏：只留一条淡轨道，不影响观感
                 return
@@ -333,7 +463,8 @@ class ThinBar(tk.Canvas):
                 col = T['fg']       # 悬停
             else:
                 col = T['fg2']      # 静默也看得见
-            self.create_rectangle(1, y + 1, self.w - 1, y + th - 1, fill=col, outline='')
+            inset = min(1, width / 2)
+            self.create_rectangle(inset, y + 1, width - inset, y + th - 1, fill=col, outline='')
         except tk.TclError:
             pass
 

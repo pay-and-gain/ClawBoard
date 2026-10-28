@@ -19,6 +19,7 @@ from clawboard.services import ClipboardService, SaveService
 from clawboard.storage import RecoveryRequiredError
 from clawboard.tasks import WorkerTasks
 from clawboard.timefmt import match_ignore
+from clawboard.trash import TrashService, TrashError, image_references
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class ApplicationController:
         self.on_capture = on_capture
         self.on_error = on_error
         self.history = HistoryService(data)
+        self.trash = TrashService(data)
         self.search = SearchService()
         self.dispatcher = EventDispatcher(on_error=self._report_error)
         self.tasks = WorkerTasks(self.dispatcher)
@@ -69,6 +71,7 @@ class ApplicationController:
         self._pending_gc = {}
         self._confirmed_gc = set()
         self._readonly_notified = False
+        self._trash_notified = False
         self.data_revision = 0
 
     @property
@@ -282,6 +285,7 @@ class ApplicationController:
         referenced = {item.get('image_path') for item in self.data.get('clip', [])}
         for group in self.data.get('groups', []):
             referenced.update(item.get('image_path') for item in group.get('items', []))
+        referenced.update(image_references(self.data))
         for saved in tuple(self._pending_gc):
             if saved <= revision:
                 self._confirmed_gc.update(self._pending_gc.pop(saved) - referenced)
@@ -330,6 +334,15 @@ class ApplicationController:
                 self._readonly_notified = True
                 self._report_error(RecoveryRequiredError('数据处于只读保护，自动保存已停止；请先恢复备份。'))
             return None
+        try:
+            expired = self.trash.expire()
+        except TrashError:
+            # Unknown future/corrupt extensions must survive a normal save.
+            if not self._trash_notified:
+                self._trash_notified = True
+                self._report_error(TrashError('回收站格式需要检查，已保留原数据且暂停到期清理。'))
+        else:
+            self.queue_image_cleanup(item.get('image_path') for item in expired)
         revision = self.saves.request(self.data)
         if self._unassigned_gc:
             self._pending_gc.setdefault(revision, set()).update(self._unassigned_gc)

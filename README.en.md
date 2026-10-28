@@ -2,118 +2,87 @@
 
 [简体中文](README.md) | **English**
 
-Clipboard history and a reusable phrases panel for Windows. Find text, screenshots and file paths you copied earlier, search for an entry, and paste it where you are working.
+Find what you copied and use it again. ClawBoard is a Windows clipboard history and phrase panel: open it with a hotkey, search, then select an item to paste.
 
-[Download v2.7.0](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0) · [Getting started](docs/getting-started.en.md) · [Changes: PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) · [Windows validation](docs/WINDOWS_VALIDATION.md)
-
-> **v2.7.0 includes service refactoring, IME deletion protection, safe fallback for elevated targets and mixed-DPI main-panel scaling.** Back up the data file and images before upgrading. Older v2.6.1 packages lack these input safeguards; keep triggers disabled while using that older build.
+[Download v4.0.0](https://github.com/pay-and-gain/ClawBoard/releases/tag/v4.0.0) · [Getting started](docs/getting-started.en.md) · [Feature tour](https://pay-and-gain.github.io/ClawBoard/) · [Changelog](CHANGELOG.md)
 
 <p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard clipboard history populated with synthetic examples" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-main.png" alt="ClawBoard v4 quick panel with synthetic sample content" width="420">
 </p>
 
-## Download and get started
+## Download and start
 
-Packaged builds do not require Python. Start with the portable package, or choose the installer or complete sharing bundle:
+Packaged builds do not require Python. Extract the complete portable archive into a writable folder and run `ClawBoard.exe`.
 
-| Option | Download or source | What you get |
+| Download | Use it for |
+|---|---|
+| [ClawBoard-4.0.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-portable.zip) | Extract and run; data stays beside the executable |
+| [ClawBoard-4.0.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-setup.exe) | Setup wizard, Start menu and uninstall entry |
+| [ClawBoard-4.0.0-windows.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-windows.zip) | Portable build, installer, instructions and checksums for sharing |
+
+[Release asset SHA256 checksums](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/SHA256SUMS.txt)
+
+1. Copy some text in another application.
+2. Return to your input field and press **Ctrl+Shift+V**.
+3. Search and select a record, then press **Enter** or click to paste. If the destination rejects automatic input, press **Ctrl+V** there manually.
+
+Closing the panel hides it to the tray by default. Use **Ctrl+Q** or the tray's Quit command to exit normally. The application currently uses Chinese labels; the English guide includes their meanings.
+
+## A small panel, with more when you need it
+
+- **Find content**: text, images and file paths; filter by keywords, Chinese pinyin, type, source, time and favorites.
+- **Reuse content**: phrase groups and shortcuts for the first ten entries; optional trigger expansion has the keyboard-layout limits below.
+- **Preview and process**: an optional workbench, complete previews, text splitting and transformations, plus TXT/CSV/JSON/Markdown export. Less frequent tools live in More, with shortcuts retained.
+- **Reach the controls**: paper-and-paw styling and light/dark themes; primary Save and Confirm actions stay at the top of small windows while content scrolls separately. Source and size labels are hidden by default.
+- **Manage your data**: complete backup/restore, selected-content merge import and a recycle bin, available from Settings → Data.
+
+<p align="center">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-search.png" alt="Search and filter synthetic clipboard entries" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-phrases.png" alt="The phrase groups interface" width="420">
+</p>
+
+<p align="center">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-workbench.png" alt="The optional workbench with a list and complete preview" width="740">
+</p>
+
+All screenshots use synthetic content. Open the workbench with **Ctrl+Shift+W** to search, inspect and locate an entry back in the quick panel. It does not paste automatically.
+
+## Three data tasks
+
+| Your goal | Entry point | What it does |
 |---|---|---|
-| Portable package | [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip) | Extract and run `ClawBoard.exe`; keep the data beside it |
-| Installer | [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe) | Setup wizard, Start menu shortcuts and an uninstall entry |
-| Complete sharing bundle | [ClawBoard-2.7.0-windows.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip) | Portable exe, installer, bilingual instructions and checksums in one file |
-
-1. Start ClawBoard and copy some sample text in another application.
-2. Return to the input field you want to use and press **Ctrl+Shift+V**.
-3. Select an entry and press **Enter**, or click it. If ClawBoard reports that the content was copied but could not be pasted automatically, press **Ctrl+V** in the target field.
-
-The close button hides the panel in the tray by default. Use **Ctrl+Q** or the tray's Quit command to exit. See the [getting started guide](docs/getting-started.en.md) for more detail.
-
-## What it does
-
-- **Find and organize:** text, images and file paths, deduplication, favorites, and filters for keywords, source, type or time. Chinese text can also be searched using pinyin.
-- **Reuse content:** grouped phrases, keyboard navigation and quick paste for the first ten visible entries. Optional trigger expansion has the layout restrictions described below.
-- **Process text:** encoding, JSON formatting, case and line operations; export selected entries as TXT, CSV, JSON or Markdown.
-- **Fit your desktop:** light and dark themes, user scaling, folding and edge hiding. The main panel adapts to a display's DPI after settling on that display.
+| Keep a complete copy or return to a saved library | Complete backup and restore | Includes history, phrases, recycle bin, settings and referenced images; previews the package and backs up the current library before restoring |
+| Add selected content from an older file | Merge import | Preview and select first; duplicates are skipped, conflicting group names get new groups, and occupied triggers are disabled; current data and settings are retained |
+| Recover an accidental deletion | Recycle bin | Manual deletions remain for up to 30 days and 5,000 entries; a full bin rejects new deletions; automatic history-limit pruning does not enter it |
 
 <p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/search-highlight.png" alt="Filtering synthetic clipboard entries with search" width="420">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/phrases.png" alt="Grouped reusable phrases" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-data.png" alt="Data management entries in Settings" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-import.png" alt="Review merge-import candidates, duplicates and conflicts" width="420">
 </p>
 
-Screenshots use sample data. Search supports expressions such as `app:chrome`, `type:url`, `is:fav` and `tag:email`; combine them with keywords or exclude a term with `-term`. Pinyin search does not expand every pronunciation of a polyphonic character.
+Ordinary JSON exports contain no image bodies. Entries with missing images cannot be imported. An import that exceeds history capacity is cancelled; it does not delete old entries or change your limit. External file entries retain paths, not the original file bodies. Read more about [merge import](docs/merge-import.md), [complete backups](docs/backup-and-restore.md) and the [recycle bin](docs/recycle-bin.md) in the linked Chinese documentation.
 
-## Data, backups and upgrades
+## Data and practical limits
 
-The data location depends on whether the executable's directory is writable:
+**Portable data follows the executable.** In a writable folder, `ClawBoard数据.json` and `images/` stay beside `ClawBoard.exe`. An unwritable folder falls back to `%APPDATA%\ClawBoard`. Check the actual location in the tray's About dialog. Quit and make a complete backup before upgrading; replace only the executable and retain your data folder.
 
-| How it runs | Default data location |
-|---|---|
-| Portable exe in a writable folder | `ClawBoard数据.json` **beside the exe**, with images in the adjacent `images/` folder |
-| Executable directory is not writable, such as Program Files under a normal account | `%APPDATA%\ClawBoard\` |
-| From source | The source repository's root directory |
+**Stored data is unencrypted.** JSON, images, exports and backups contain original content; display masking is not encryption. Private clipboard markers, exclusion rules and sensitive-content detection have limits. Capture, search and transformations run locally. The default update check contacts GitHub, can be disabled, and only notifies you and opens the download page.
 
-**Check the actual path in the tray menu's About dialog.** Quit before an upgrade or move, and back up both `ClawBoard数据.json` and the entire `images/` folder. Keep existing `.bak` files if useful. For a portable upgrade, replace the executable while keeping it beside the existing data; putting the new exe in its own subfolder creates a different data location. See [backup and upgrade instructions](docs/getting-started.en.md#backups-upgrades-and-moving-data).
+**Automatic input has limits.** Elevated destinations, or targets whose privileges cannot be confirmed, need manual Ctrl+V. Triggers expand only under a separate standard US keyboard layout. Microsoft Pinyin in either mode, other layouts and unknown layouts pause expansion; Chinese copying, searching and phrase clicks still work. The app cannot capture every intermediate state while stopped or during rapid successive copies.
 
-Portable use still creates data and log files. Enabling Start with Windows adds a Run entry to the current user's registry. The installer also creates installation records and shortcuts, so neither mode promises zero registry changes or zero leftovers.
+The [getting-started guide](docs/getting-started.en.md) covers shortcuts and troubleshooting. No account is required. Optional startup registration and installer use create their corresponding system entries.
 
-## Privacy and practical limits
+## Run from source and develop
 
-- **Storage is not encrypted:** history and settings are JSON; images are PNG files. Display masking does not encrypt files on disk. Protect backups as well.
-- **Filtering is not exhaustive:** clipboard privacy markers, application/title exclusions, sensitive display masking and optional sensitive-content skipping can help, but cannot identify every secret.
-- **Network access:** capture, search and text transforms run locally. The default update check contacts GitHub for release information and can be disabled in Settings. It only notifies and opens a download page; it does not download, install or replace the application.
-- **Triggers require a separate standard US keyboard layout:** Microsoft Pinyin in either Chinese or English mode, US International, Dvorak and unknown layouts suspend expansion. Space or supported punctuation can expand a trigger. Enter, Tab, clicks, scrolling and further typing cancel a queued replacement. Copying, searching and clicking phrases to paste remain available with Chinese input methods.
-- **Elevated targets need manual paste:** a normal-privilege process does not inject keys into a higher-privilege window; unknown integrity levels also stop key injection. Once the content is confirmed copied, press Ctrl+V in the target. Automatic input cannot guarantee that every application accepts it.
-- **History is not an audit log:** copies made while ClawBoard is closed, or intermediate states during rapid copying, may be missed. Startup catch-up can only read the current clipboard content available at that time.
-
-Tests cover browser paste, Chinese candidate protection, standard US triggers, manual paste into an elevated target, mixed-DPI main-panel moves, physical tray opening and recovery after an actual Explorer restart. Separate-directory silent installation/data-preserving uninstall and GUI save followed by a new-process reload also passed. A 15-minute search/scroll workload used 5,000 synthetic records; the interactive setup wizard and multi-day operation remain untested. See the [Windows validation record](docs/WINDOWS_VALIDATION.md), currently in Chinese.
-
-## Keyboard shortcuts
-
-Except for the global show/hide shortcut, these keys operate inside the ClawBoard panel:
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Shift+V` | Show/hide globally; Settings also offers `Alt+V` and `Ctrl+Alt+V` |
-| `Ctrl+F` | Search |
-| `↑` / `↓`, `Enter` | Select, then paste |
-| `Ctrl+1`…`Ctrl+9`, `Ctrl+0` | Paste visible entries 1–10 |
-| `Ctrl+Shift+Enter` | Paste as plain text |
-| `Ctrl+T` / `Ctrl+E` | Text transforms / export |
-| `Ctrl+Shift+P` | Command palette |
-| `Ctrl+=` / `Ctrl+-` | Change the user scaling level |
-| `Esc` / `Ctrl+Q` | Hide / quit |
-
-## Run from source
+Use Windows 10/11 and Python 3.10+ with Tcl/Tk included. The runtime uses only the Python standard library, tkinter and ctypes/Win32, with no pip dependencies. The smaller-scope [C implementation](ClawBoardC/) supports the compatible shared JSON format.
 
 ```powershell
-git clone https://github.com/pay-and-gain/ClawBoard.git
+git clone --branch v4.0.0 https://github.com/pay-and-gain/ClawBoard.git
 cd ClawBoard
 python ClawBoard.py
-```
-
-Use Windows 10/11 and Python 3.10+ with Tcl/Tk included in the Python installation. **The application uses only the standard library; no pip packages are needed to run it.** For the published build, use the packaged downloads above.
-
-Developer builds use PyInstaller, which is a build tool rather than a runtime dependency:
-
-```powershell
-python -m pip install pyinstaller
-python -m PyInstaller packaging/ClawBoard.spec --noconfirm
-```
-
-The output is `dist/ClawBoard.exe`; installer sources are in [`packaging/`](packaging/). A smaller-scope [C/Win32 implementation](ClawBoardC/) also supports the shared JSON format. Do not run two instances against the same data file.
-
-## Development and documentation
-
-```powershell
 python tests/_t44.py
-python tests/test_core.py
 ```
 
-Desktop tests can change the system clipboard or activate test windows; run them separately as described in the validation guide. Tests that construct the App must redirect data/log paths to a temporary directory before importing the application, then enable `NO_SAVE`. Never use real clipboard history as mutable test data.
+Build tools and installer sources are in [packaging/](packaging/). Run desktop tests separately. App tests must redirect data to temporary paths before imports and enable `NO_SAVE`; never use real history as a test library.
 
-- [Getting started](docs/getting-started.en.md) · [中文指南](docs/getting-started.md)
-- [Current architecture and maintenance rules](docs/REFACTOR.md) — Chinese
-- [Windows validation and remaining work](docs/WINDOWS_VALIDATION.md) — Chinese
-- [Project review and performance comparison](docs/PROJECT_REVIEW.md) — Chinese
-- [Service refactor: before and after](docs/PREVIEW_COMPARISON.md) — Chinese
-- [Changelog](CHANGELOG.md) · [MIT license](LICENSE)
+[Maintenance handoff and archive index](docs/maintenance/HANDOFF.md) · [Architecture](docs/REFACTOR.md) · [Windows validation scope](docs/WINDOWS_VALIDATION.md) · [MIT license](LICENSE)

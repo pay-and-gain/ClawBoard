@@ -10,6 +10,23 @@ from clawboard.windows_api import (
 )
 
 
+def window_is_current_process(hwnd):
+    """Exclude every owned dialog, not just the main Tk wrapper HWND.
+
+    None means the process could not be established; callers must not treat an
+    unknown window as a proven external input target.
+    """
+    if not hwnd:
+        return None
+    try:
+        pid = wintypes.DWORD()
+        if not u32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(pid)) or not pid.value:
+            return None
+        return pid.value == k32.GetCurrentProcessId()
+    except (OSError, TypeError, ValueError, AttributeError):
+        return None
+
+
 def target_focus_hwnd(hwnd_top):
     """目标窗口里真正持有焦点的控件（输入框）。发 WM_PASTE 要发给它，不是顶层窗口。"""
     hwnd_top = int(hwnd_top or 0)

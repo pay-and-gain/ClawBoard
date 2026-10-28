@@ -27,6 +27,13 @@ debug.log
 # 运行期图片缓存仅在数据目录（仓库根）下；docs/images/ 是仓库截图，必须入库，
 # 所以这里用根锚定 `/images/` 而不是 `images/`（后者会误伤 docs/images/）。
 /images/
+/.restore-jobs/
+/.clawboard-restore-*/
+/.clawboard-restore-journal.json
+/.restore-journal-*.tmp
+/.backup-*.tmp
+/ClawBoard恢复前_*.zip
+/ClawBoard-backup-*.zip
 
 # ---- 个人 / 课程材料（含身份信息，绝不开源）----
 ClawBoard制作思路.docx
@@ -42,6 +49,7 @@ _shot_narrow.py
 _ui_shot.py
 
 # ---- 临时产物 ----
+tests/*.out
 _t*.out
 _t2[0-1].out
 _p*.txt

@@ -8,7 +8,7 @@ import time
 import tkinter as tk
 from dataclasses import fields
 
-from clawboard.config import AppState, APP_NAME
+from clawboard.config import AppState, APP_NAME, ICON_FILE
 from clawboard.theme import T, apply_theme
 from clawboard.app_services import DataMixin, SystemMixin
 from clawboard.app_ui import UiMixin
@@ -47,10 +47,14 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         self.apply_ui_scale_init()
 
         root.title(APP_NAME)
+        try:
+            root.iconbitmap(default=ICON_FILE)
+        except tk.TclError:
+            pass
         root.overrideredirect(True)
         root.attributes('-topmost', True)
         self._topmost_applied = True    # 与上一行同步：供 sync_topmost 去重，避免开始时重复写
-        root.attributes('-alpha', 0.97)
+        root.attributes('-alpha', 1.0)
         root.configure(bg=T['bg'])
         root.bind('<Escape>', lambda e: self.hide())
         root.bind('<Up>', lambda e: self.move_sel(-1))
@@ -63,6 +67,7 @@ class ClawBoard(DataMixin, SystemMixin, UiMixin, GeometryMixin, InteractionMixin
         root.bind('<Control-e>', lambda e: self.open_export())
         root.bind('<Control-q>', lambda e: self.quit_app())
         root.bind('<Control-Shift-P>', lambda e: self.open_command_palette())
+        root.bind('<Control-Shift-W>', lambda e: self.open_workbench())
         # 等比缩放：Ctrl+= 放大一档 / Ctrl+- 缩小一档（Ctrl+0 已被快速粘贴占用）
         root.bind('<Control-equal>', lambda e: self.cycle_ui_scale(1))
         root.bind('<Control-minus>', lambda e: self.cycle_ui_scale(-1))

@@ -20,6 +20,7 @@ from clawboard.runtime import uid
 from clawboard.classify import human_size, preview
 from clawboard.privacy import display_text
 from clawboard.paste_adapter import PasteMixin
+from clawboard.recycle_adapter import RecycleMixin
 from clawboard.timefmt import full_time, rel_time
 from clawboard.clipboard import clip_read
 from clawboard.widgets import (Dialog, SplitDialog, CopyToast, ContentPreview,
@@ -115,7 +116,7 @@ class PhraseMixin:
         SplitDialog(self, text)
 
 
-class InteractionMixin(PhraseMixin, PasteMixin):
+class InteractionMixin(PhraseMixin, PasteMixin, RecycleMixin):
     # ---------- 交互 ----------
     def on_click_item(self, i, e=None):
         """Ctrl = 多选切换，Shift = 连选，都不触发粘贴；普通单击 = 选中并粘贴"""
@@ -330,20 +331,18 @@ class InteractionMixin(PhraseMixin, PasteMixin):
 
     def del_item(self, cid, kind):
         if kind == 'clip':
-            victim = next((x for x in self.data['clip'] if x['id'] == cid), None)
-            self._purge_image_files([victim] if victim else [])
-            self.data['clip'] = [x for x in self.data['clip'] if x['id'] != cid]
+            if not self._recycle_move([cid]):
+                return
             if self.sel_clip == cid:
                 self.sel_clip = None
         else:
             g = self.cur_group()
-            victim = next((x for x in g['items'] if x['id'] == cid), None)
-            self._purge_image_files([victim] if victim else [])
-            g['items'] = [x for x in g['items'] if x['id'] != cid]
+            if not self._recycle_move([cid], group=g):
+                return
             if self.sel_phrase == cid:
                 self.sel_phrase = None
-        self.save(True)
-        self.render()
+        self._recycle_changed()
+        self.tip('已移入回收站，可在设置 → 数据中恢复')
 
     def del_sel(self):
         guard = getattr(self, 'ensure_current_results', None)
@@ -362,25 +361,24 @@ class InteractionMixin(PhraseMixin, PasteMixin):
             def do_clear():
                 removed = ([x for x in self.data['clip'] if x not in favs]
                            if favs else self.data['clip'])
-                self._purge_image_files(removed)
-                self.data['clip'] = favs
+                if not self._recycle_move([item['id'] for item in removed]):
+                    return
                 self.sel_clip = None
-                self.save(True)
-                self.render()
-                self.tip('已清空，保留 %d 条收藏' % len(favs) if favs else '剪贴板历史已清空')
+                self._recycle_changed()
+                self.tip('已移入回收站，保留 %d 条收藏' % len(favs) if favs else '历史已移入回收站')
             extra = '，其中 %d 条收藏会保留' % len(favs) if favs else ''
-            self.confirm('清空全部剪贴板历史？共 %d 条%s，不可撤销。' %
+            self.confirm('清空全部剪贴板历史？共 %d 条%s。移入回收站后可在30天内恢复。' %
                          (len(self.data['clip']), extra), do_clear)
         else:
             g = self.cur_group()
 
             def do_clear():
-                g['items'] = []
+                if not self._recycle_move([item['id'] for item in g['items']], group=g):
+                    return
                 self.sel_phrase = None
-                self.save(True)
-                self.render()
-                self.tip('分组已清空')
-            self.confirm('清空分组「%s」？共 %d 条，不可撤销。' %
+                self._recycle_changed()
+                self.tip('常用语已移入回收站')
+            self.confirm('清空分组「%s」？共 %d 条。移入回收站后可在30天内恢复。' %
                          (g['name'], len(g['items'])), do_clear)
 
     # ---------- 设置 ----------

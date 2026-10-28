@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import List, Optional, TypedDict
 
 APP_NAME = 'ClawBoard'
-APP_VER = '2.7.0'
+APP_VER = '4.0.0'
 
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, 'frozen', False):
@@ -59,6 +59,8 @@ CRASH_LOG = os.path.join(BASE_DIR, 'crash.log')
 # onefile resources live in PyInstaller's bundle; installed directories may be
 # read-only, so tray setup must not generate an icon beside Program Files/exe.
 ICON_FILE = os.path.join(getattr(sys, '_MEIPASS', _EXE_DIR), 'ClawBoard.ico')
+UI_ASSET_DIR = (os.path.join(sys._MEIPASS, 'ui-assets') if getattr(sys, 'frozen', False)
+                else os.path.join(_EXE_DIR, 'packaging', 'ui-assets'))
 
 # 保证 query.py / transform.py 与数据文件同目录可用（frozen 模式下同样如此）。
 if _EXE_DIR not in sys.path:
@@ -129,6 +131,7 @@ CLASSIFY_MAX = 128000
 DEFAULT_SETTINGS = dict(theme='dark', hotkey='ctrl+shift+v', max_items=500,
                         listen=True, autopaste=True, mask_sensitive=True,
                         skip_sensitive=False, show_time=False, record_title=False,
+                        show_source=False, show_size=False,
                         group_by_time=False, edge_hide=False, edge_delay=8,
                         close_action='hide')      # hide=隐藏到托盘 / quit=直接退出
 # v1.4.0 补齐项（对照 Ditto / PasteBar 的同类设置）
@@ -205,6 +208,8 @@ class SettingsDict(TypedDict, total=False):
     mask_sensitive: bool
     skip_sensitive: bool
     show_time: bool
+    show_source: bool
+    show_size: bool
     record_title: bool
     group_by_time: bool
     edge_hide: bool

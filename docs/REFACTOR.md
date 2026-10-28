@@ -1,6 +1,6 @@
 # 当前源码架构与维护约定
 
-本文件描述服务重构后的 **v2.7.0** 源码，运行时仍为 Python 标准库、tkinter 与 ctypes/Win32，数据 schema 保持 3。最初的 2.6.1 重构预览与正式 v2.7.0 为不同构建，安装包版本及下载文件名同步更新。
+本文件描述服务重构后的 **v3.0.0** 源码及后续本地维护，运行时仍为 Python 标准库、tkinter 与 ctypes/Win32，数据 schema 保持 3。当前交付和待验收改动以 [升级进展](plans/v3-upgrade/PROGRESS.md) 为准；早期 2.6.1 预览与 2.7.0 构建记录保留作历史。
 
 运行产品需要 Windows 和包含 Tcl/Tk 的 Python 3.10+；纯服务与合同测试可以在 Linux 执行。项目背景、性能诊断和视觉建议见 [PROJECT_REVIEW.md](PROJECT_REVIEW.md)。[架构设计.md](架构设计.md) 和 [上下文快照.md](上下文快照.md) 保留早期设计历史，不再作为当前文件清单。
 
@@ -14,6 +14,8 @@
 | 数据模型 | `models.py`、`history.py` | 校验归一化、旧 C 枚举兼容、入库/编辑、分类与敏感元数据更新 |
 | 查询与显示 | `search.py`、`privacy.py`、`viewmodels.py` | 查询语法、按需拼音、有界缓存、统一遮罩、可见行惰性投影 |
 | 纯处理 | `classify.py`、`tag.py`、`timefmt.py`、`image.py`、`exports.py`、`transform.py` | 内容规则、时间、编解码、导出和文本变换；不需要创建窗口 |
+| 回收站 | `trash.py`、`recycle_adapter.py`、`trash_dialog.py` | 可选共享JSON扩展、手动删除与恢复、保存后图片清理接线和原生预览；不改变历史字段语义 |
+| 内容导入 | `import_source.py`、`import_merge.py`、`import_service.py`、`import_dialog.py` | 有界源文件校验、纯合并规划、原生多选预览；复用 `restore_job.py` 的正常退出协调和恢复事务，先备份再加入，保留当前设置及后续新增历史 |
 | 应用编排 | `application.py` | `ApplicationController` 持有历史、查询、任务和保存服务，提交后台采集结果与安排退出 |
 | 调度与服务 | `dispatch.py`、`tasks.py`、`services.py` | 主线程结果队列、受限工作池、剪贴板序列确认、串行保存 |
 | 文件适配器 | `storage.py`、`media.py` | 注入路径的 JSON / 图片文件读写；错误和损坏保护显式返回 |

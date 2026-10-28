@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="ClawBoard 叠页图标方案">
+  <rect x="12" y="12" width="232" height="232" rx="58" fill="#2D5274"/>
+  <rect x="52" y="52" width="118" height="140" rx="20" fill="#82A6C5"/>
+  <rect x="81" y="76" width="123" height="140" rx="20" fill="#F5F7FA"/>
+  <path d="M167 115a35 35 0 1 0 0 62" fill="none" stroke="#2D5274" stroke-width="15" stroke-linecap="round"/>
+  <path d="M112 47h47" stroke="#F5F7FA" stroke-width="12" stroke-linecap="round"/>
+</svg>

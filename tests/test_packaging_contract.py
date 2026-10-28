@@ -35,7 +35,8 @@ class PackagingTests(unittest.TestCase):
     def test_icon_is_bundled_and_read_from_bundle_directory(self):
         spec = (ROOT / 'packaging/ClawBoard.spec').read_text(encoding='utf-8')
         config = (ROOT / 'clawboard/config.py').read_text(encoding='utf-8')
-        self.assertIn("datas=[(os.path.join(_HERE, 'ClawBoard.ico'), '.')],", spec)
+        self.assertIn("(os.path.join(_HERE, 'ClawBoard.ico'), '.')", spec)
+        self.assertIn("(os.path.join(_HERE, 'ui-assets'), 'ui-assets')", spec)
         self.assertIn("getattr(sys, '_MEIPASS', _EXE_DIR)", config)
         self.assertTrue((ROOT / 'packaging/ClawBoard.ico').is_file())
 

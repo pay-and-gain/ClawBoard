@@ -1,6 +1,6 @@
 """Tk text-transform adapter with asynchronous, complete result ownership."""
 import tkinter as tk
-from clawboard.config import WHEEL_LINES, FONT, FONT_B, FONT_SM
+from clawboard.config import WHEEL_LINES, FONT, FONT_B, FONT_SM, scaled
 from clawboard.theme import T
 from clawboard.runtime import tx
 from clawboard.clipboard import clip_write
@@ -19,26 +19,41 @@ class TransformWindow:
         self._truncated = False
         self._full_result = None
         self._task_key = ('transform', id(self))
+        self._focus_job = None
         self._source_text = text
         self._source_truncated = len(text) > 200000
         self.win = tk.Toplevel(app.root)
         self.win.transient(app.root)
-        dark_top(self.win, '文本变换')
+        self.bar = dark_top(self.win, '文本变换')
         self.win.attributes('-topmost', True)
-        self.win.after(60, lambda: (self.win.lift(), self.win.focus_force()))
+        self.actions = tk.Frame(self.win, bg=T['bg'])
+        self.actions.pack(fill='x', padx=10, pady=(6, 0))
+        self.action_buttons = []
+        for label, command in (('复制到剪贴板', self.copy_out), ('存为新条目', self.save_new),
+                               ('覆盖原条目', self.overwrite), ('关闭', self.close)):
+            button = tk.Button(self.actions, text=label, command=command, bg=T['card'], fg=T['fg'],
+                               font=FONT, padx=8, pady=5, relief='flat', bd=0,
+                               highlightthickness=1, highlightbackground=T['line'],
+                               highlightcolor=T['acc'], takefocus=True)
+            button.bind('<Return>', lambda event, cmd=command: (cmd(), 'break')[1])
+            self.action_buttons.append(button)
+        self._action_columns = self._narrow = None
+        self._layout_actions(1)
         mid = tk.Frame(self.win, bg=T['bg'])
         mid.pack(fill='both', expand=True, padx=10, pady=6)
+        self.mid = mid
 
         lf = tk.Frame(mid, bg=T['bg'])
         lf.pack(side='left', fill='y')
+        self.left = lf
         self.lb = tk.Listbox(lf, bg=T['card'], fg=T['fg'], bd=0, relief='flat',
                              highlightthickness=1, highlightbackground=T['line'],
                              selectbackground=T['acc'], font=FONT_SM,
                              width=20, height=20)
         sb = ThinBar(lf, lambda f: self.lb.yview_moveto(f), width=8)
         self.lb.configure(yscrollcommand=sb.set)
-        self.lb.pack(side='left', fill='y')
-        sb.pack(side='left', fill='y', padx=(2, 0))
+        sb.pack(side='right', fill='y', padx=(2, 0))
+        self.lb.pack(side='left', fill='both', expand=True)
         # Windows 的 Tk Listbox 自带没有任何滚轮绑定，必须自己接管
         self.lb.bind('<MouseWheel>', self.lb_wheel)
         # 智能推荐：把最可能的变换排到最前（加 ★ 前缀），其余按原顺序跟在后面。
@@ -68,6 +83,7 @@ class TransformWindow:
 
         rf = tk.Frame(mid, bg=T['bg'])
         rf.pack(side='left', fill='both', expand=True, padx=(10, 0))
+        self.right = rf
         tk.Label(rf, text='原文（预览已截断，变换使用完整原文）' if self._source_truncated else '原文', bg=T['bg'], fg=T['fg2'], font=FONT_SM,
                  anchor='w').pack(fill='x')
         self.src = tk.Text(rf, height=9, bg=T['card'], fg=T['fg'],
@@ -86,23 +102,59 @@ class TransformWindow:
                            highlightbackground=T['line'], highlightcolor=T['acc'])
         self.out.pack(fill='both', expand=True)
 
-        btns = tk.Frame(self.win, bg=T['bg'])
-        btns.pack(fill='x', padx=10, pady=(0, 10))
-        for label, cmd in (('复制到剪贴板', self.copy_out),
-                           ('存为新条目', self.save_new),
-                           ('覆盖原条目', self.overwrite)):
-            b = tk.Label(btns, text=label, bg=T['card'], fg=T['fg'], font=FONT,
-                         padx=10, pady=5, cursor='hand2')
-            b.pack(side='left', padx=3)
-            b.bind('<Button-1>', lambda e, c=cmd: c())
-        b = tk.Label(btns, text='关闭', bg=T['acc'], fg='#fff', font=FONT_B,
-                     padx=14, pady=5, cursor='hand2')
-        b.pack(side='right')
-        b.bind('<Button-1>', lambda e: self.close())
         self.win.bind('<Escape>', lambda e: self.close())
         self.win.protocol('WM_DELETE_WINDOW', self.close)
         self.win.bind('<Destroy>', self._destroyed, add='+')
-        center_on(self.win, app.root, 760, 540)
+        self.win.bind('<Configure>', self._configured, add='+')
+        self.win.update_idletasks()
+        center_on(self.win, app.root, scaled(760), scaled(540))
+        self.win.update_idletasks()
+        self.win.minsize(min(self.win.winfo_width(), scaled(280)),
+                         min(self.win.winfo_height(), self.bar.winfo_reqheight() + self.actions.winfo_reqheight() + scaled(150)))
+        self._focus_job = self.win.after(60, self._focus_later)
+
+    def _layout_actions(self, width):
+        widths = [button.winfo_reqwidth() + 6 for button in self.action_buttons]
+        columns = 4 if width >= sum(widths) else 2 if width >= max(sum(widths[:2]), sum(widths[2:])) else 1
+        if columns == self._action_columns:
+            return
+        self._action_columns = columns
+        for index in range(4):
+            self.actions.columnconfigure(index, weight=1 if index < columns else 0)
+        for index, button in enumerate(self.action_buttons):
+            button.grid(row=index // columns, column=index % columns, sticky='ew', padx=3, pady=3)
+
+    def _configured(self, event):
+        if event.widget is not self.win or self._closed:
+            return
+        self._layout_actions(max(1, self.win.winfo_width() - 20))
+        narrow = self.win.winfo_width() < scaled(560)
+        if narrow == self._narrow:
+            return
+        self._narrow = narrow
+        self.left.pack_forget()
+        self.right.pack_forget()
+        self.left.pack_propagate(False)
+        self.left.configure(width=scaled(180), height=scaled(110) if narrow else 1)
+        self.left.pack(side='top' if narrow else 'left', fill='x' if narrow else 'y')
+        self.lb.pack_configure(fill='both', expand=True)
+        self.right.pack(side='top' if narrow else 'left', fill='both', expand=True,
+                        padx=0 if narrow else (10, 0))
+
+    def _focus_later(self):
+        self._focus_job = None
+        if self._alive():
+            self.win.lift()
+            self.win.focus_force()
+
+    def _cancel_focus(self):
+        job = getattr(self, '_focus_job', None)
+        self._focus_job = None
+        if job:
+            try:
+                self.win.after_cancel(job)
+            except tk.TclError:
+                pass
 
     def lb_wheel(self, e):
         """变换列表的滚轮：同样按 1/120 格累积，触控板不丢事件"""
@@ -128,12 +180,14 @@ class TransformWindow:
     def _destroyed(self, event):
         if event.widget is self.win:
             self._closed = True
+            self._cancel_focus()
             self.app.application.tasks.invalidate(self._task_key)
 
     def close(self):
         if getattr(self, '_closed', False):
             return
         self._closed = True
+        self._cancel_focus()
         self.app.application.tasks.invalidate(self._task_key)
         safe_release(self.win)
         self.win.destroy()
