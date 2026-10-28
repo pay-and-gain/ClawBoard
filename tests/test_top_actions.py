@@ -224,10 +224,17 @@ class NativeActionsTests(unittest.TestCase):
     def test_split_enter_and_space_each_execute_once(self):
         for sequence in ('<Return>', '<space>'):
             dialog = self.split()
+            # Settle the dialog's delayed initial Text focus before selecting
+            # the button; slow CI scheduling must not steal it mid-keystroke.
+            self.pump(.15)
             button = dialog.action_buttons[0]
             button.focus_force()
             self.pump()
+            if button.focus_get() is not button:
+                self.skipTest('native keyboard focus is unavailable in this desktop session')
             button.event_generate(sequence)
+            if sequence == '<space>':
+                button.event_generate('<KeyRelease-space>')
             self.pump(.2)
             self.assertEqual(self.saves, [True])
             self.assertEqual(len(self.split_group['items']), 3)
