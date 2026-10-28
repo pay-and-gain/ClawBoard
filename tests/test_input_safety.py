@@ -537,7 +537,7 @@ class TriggerSafetyTests(unittest.TestCase):
 
 
 class TriggerWiringTests(unittest.TestCase):
-    def wiring(self, triggers=None):
+    def wiring(self, triggers=None, ownership=lambda target: False):
         tree = ast.parse((ROOT / 'clawboard/system.py').read_text(encoding='utf-8'))
         cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'SystemMixin')
         nodes = [node for node in cls.body if isinstance(node, ast.FunctionDef)
@@ -552,6 +552,7 @@ class TriggerWiringTests(unittest.TestCase):
             u32=types.SimpleNamespace(GetForegroundWindow=lambda: context[0]),
             target_focus_hwnd=lambda target: context[1],
             keyboard_layout=lambda focus: context[2],
+            window_is_current_process=ownership,
             is_supported_trigger_layout=is_supported_trigger_layout)
         exec(compile(ast.fix_missing_locations(ast.Module(body=nodes, type_ignores=[])),
                      '<trigger-wiring-contract>', 'exec'), namespace)
@@ -564,6 +565,13 @@ class TriggerWiringTests(unittest.TestCase):
             setattr(app, node.name, types.MethodType(namespace[node.name], app))
         app.setup_trigger()
         return app, callbacks, posted, context
+
+    def test_owned_dialog_or_unknown_process_never_queues_expansion(self):
+        for ownership in (lambda target: True, lambda target: None):
+            app, callbacks, posted, context = self.wiring(ownership=ownership)
+            for char in 'abc ':
+                callbacks['char'](char)
+            self.assertEqual(posted, [])
 
     def test_setup_captures_original_target_and_cancels_after_further_input(self):
         app, callbacks, posted, context = self.wiring()

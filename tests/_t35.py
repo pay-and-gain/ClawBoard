@@ -90,7 +90,7 @@ def norm(ps):
 
 
 # 1. 多条路径（含中文）→ clip_read_files() 取回一致
-paths = [r'C:\Users\pay and gain\Desktop\剪切板\clawboard\clipboard.py',
+paths = [r'C:\ClawBoard合成测试\clawboard\clipboard.py',
          r'C:\Windows\notepad.exe',
          r'D:\资料\图片\示例.png']
 try:

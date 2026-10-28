@@ -1,144 +1,146 @@
-# Getting started with ClawBoard
+# ClawBoard v4 guide
 
 [简体中文](getting-started.md) | **English** · [Back to the project](../README.en.md)
 
-ClawBoard keeps a history of copied content and a panel of reusable phrases. Start with harmless sample text and try one complete copy, find and paste cycle.
+Start with harmless sample text and complete one copy → find → paste cycle. Open the other tools when you need them.
 
-The current interface uses Chinese labels: **设置** is Settings, **常用语** is Phrases, **关于** is About, and **退出** is Quit.
+The app currently uses Chinese labels: **设置** = Settings, **数据** = Data, **常用语** = Phrases, **更多** = More, **关于** = About, and **退出** = Quit.
 
-> This guide describes **v2.7.0**. Older v2.6.1 packages lack the current IME and permission safeguards; keep triggers disabled while using that older build. Back up the data file and image folder before upgrading.
+## 1. Download and start
 
-## 1. Choose how to run it
+Choose a package on the [v4.0.0 release page](https://github.com/pay-and-gain/ClawBoard/releases/tag/v4.0.0). Packaged builds do not require Python.
 
-**For the published build**, open the [v2.7.0 release](https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0). Neither packaged option requires Python.
+- [Portable](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-portable.zip): extract the entire archive into a writable folder and run `ClawBoard.exe`. Keep existing data beside the executable.
+- [Installer](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-setup.exe): follow the setup wizard; a desktop shortcut is optional.
+- [Complete sharing bundle](https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-windows.zip): portable build, installer, instructions and checksums.
 
-- [ClawBoard-2.7.0-portable.zip](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip): extract the whole archive into a writable folder and run `ClawBoard.exe`. Keep the executable beside its data files.
-- [ClawBoard-2.7.0-setup.exe](https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-setup.exe): follow the setup wizard. A desktop shortcut is optional.
+The app normally runs in the tray. Press **Ctrl+Shift+V** to show or hide the panel. Expand hidden taskbar icons if its tray icon is not visible.
 
-**To run from source**, use Windows 10/11, Git and Python 3.10+ with Tcl/Tk included in the Python installation:
+## 2. Paste once
 
-```powershell
-git clone https://github.com/pay-and-gain/ClawBoard.git
-cd ClawBoard
-python ClawBoard.py
-```
+1. Copy some harmless sample text in another app.
+2. Return to the destination field and press **Ctrl+Shift+V**.
+3. Search for the text, then click its record or press **Enter**.
 
-The application only needs the Python standard library; there are no pip dependencies to install. See [PR #1](https://github.com/pay-and-gain/ClawBoard/pull/1) for the refactor. Source runs store data in the source directory by default; development tests must use a separate temporary library.
+If the app reports that copying succeeded but the destination does not receive it, press **Ctrl+V** there. Elevated windows need this manual step; running the whole clipboard app as administrator is unnecessary.
 
-## 2. Copy and paste your first entry
+![Quick panel](https://pay-and-gain.github.io/ClawBoard/images/v4-main.png)
 
-1. Start ClawBoard. In Notepad or a browser input, type `ClawBoard test ABC`, select it and press **Ctrl+C**.
-2. Click the destination where you want the text, then press **Ctrl+Shift+V**. The panel should appear with your recent copy near the top.
-3. Select it with **↑ / ↓** and press **Enter**, or click the entry. Automatic paste is enabled by default.
-4. Check the actual destination text. If ClawBoard says the content was copied but automatic paste failed, press **Ctrl+V** in the destination yourself. A clipboard-write failure means you need to retry the copy first.
+## 3. Search, favorites and phrases
 
-<p align="center">
-  <img src="https://pay-and-gain.github.io/ClawBoard/images/main-window.png" alt="ClawBoard clipboard history populated with synthetic examples" width="420">
+**History** finds copied records; **Phrases** holds content you reuse. Phrase groups can be created and their entries named and edited. Common actions such as delete and split remain accessible; less frequent processing tools are in More or available by shortcut.
+
+Type keywords, Chinese pinyin or initials. Visual filters cover types, time and favorites. Advanced examples include `type:url`, `is:fav` and `app:chrome`, combined with normal keywords. Pinyin does not expand every pronunciation of a polyphonic character.
+
+<p>
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-search.png" alt="Search and filters" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-phrases.png" alt="Phrase groups" width="420">
 </p>
 
-The close button hides the panel in the tray by default. To exit, use **Ctrl+Q** or the tray's Quit command.
+## 4. Inspect and process content
 
-## 3. Find an older copy
+- **Workbench**: press **Ctrl+Shift+W** for a wider search and complete preview. Locate the item back in the quick panel when ready. The workbench does not paste automatically.
+- **Split text**: select text and choose the Split action (**拆**), then select the parts you want.
+- **Transform**: press **Ctrl+T**, choose a transformation and inspect the result. Previewing does not overwrite the original record.
+- **Export**: press **Ctrl+E** for TXT, CSV, JSON or Markdown. Settings → Data also offers an all-content JSON export.
+- **Command palette**: press **Ctrl+Shift+P** and search an action by name. It uses the same capabilities as the mouse entries.
 
-Press **Ctrl+F** and type a keyword. Multiple terms must all match; prefix a term with `-` to exclude it.
+Source and size labels are hidden by default and can be enabled under Appearance. Workbench metadata can be expanded separately. Primary confirmation and save actions stay at the top while content scrolls separately.
 
-| Example | Find |
+![Optional workbench](https://pay-and-gain.github.io/ClawBoard/images/v4-workbench.png)
+
+<details>
+<summary>Split, transform, export and command palette screenshots</summary>
+
+<p>
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-split.png" alt="Split window and top actions" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-transform.png" alt="Transform and result preview" width="420">
+</p>
+<p>
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-export.png" alt="Export format and top confirmation controls" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-palette.png" alt="Find actions in the command palette" width="420">
+</p>
+
+</details>
+
+## 5. Back up, import or recover a deletion
+
+Open **Settings → Data** (**设置 → 数据**) and choose by your goal.
+
+| Goal | Entry and result |
 |---|---|
-| `project address` | Entries containing both terms |
-| `app:chrome` | Copies from a particular source application |
-| `type:url` | Links |
-| `is:fav` | Favorites |
-| `tag:email` | Entries tagged as email content |
-| `time:09:00-12:00` | Records from that time range today |
+| Keep a complete copy | **完整备份与恢复** → create a complete backup. Includes history, phrases, recycle bin, settings and referenced images; wait for completion and keep the ZIP |
+| Return to a saved library | Select and preview a complete backup, then confirm Restore. Replaces the library and settings, retains a safety backup first, then restarts |
+| Add selected older content | **合并导入资料**: choose JSON or ZIP, inspect, select and confirm. Duplicates are skipped, conflicting group names become new groups, and occupied triggers are disabled; current data and settings stay |
+| Recover a manual deletion | **回收站**: preview, select and restore. Up to 30 days and 5,000 entries; automatic history-limit pruning is not included |
 
-Chinese content can also be searched by full pinyin or initials: `zhanghao` or `zh` can find “账号”. Not every pronunciation of a polyphonic character is expanded. Right-click an entry to favorite it, view details or delete it.
+Import and restore save and close the app normally; a helper performs the operation and restarts it. Merge import retains captures added after the preview opened. A changed source, save problem or insufficient history capacity cancels the operation; it does not delete old records or increase your limit.
 
-Copied pixels from a screenshot become an image entry. Copying a jpg/png **file** in Explorer records its path instead. A path entry is not a backup of the original file; moving or deleting the file can make that path unusable.
+**Ordinary JSON contains no image bodies.** Entries with missing images cannot be imported; use a complete backup ZIP to carry images. File entries contain paths rather than original file bodies. Permanent deletion and wiping the library require confirmation; separate backups may still contain older content.
 
-Startup catch-up can read the current clipboard content available at startup. It cannot recover every copy made while ClawBoard was closed, and rapid copying can lose intermediate states.
+<p>
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-data.png" alt="Data management entries" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-import.png" alt="Preview and select merge-import content" width="420">
+</p>
 
-## 4. Save a reusable phrase
+<details>
+<summary>Backup, recycle bin and detailed documentation</summary>
 
-Open the phrases tab, select a group and click **＋** at the bottom. Enter a name and the text; the trigger field can stay empty. Click the saved phrase whenever you need to copy or paste it. You can also right-click a history entry and save it as a phrase.
+<p>
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-backup.png" alt="Complete backup and restore preview" width="420">
+  <img src="https://pay-and-gain.github.io/ClawBoard/images/v4-trash.png" alt="Recycle bin and restore controls" width="420">
+</p>
 
-**Optional trigger expansion is limited to a separate standard US keyboard layout:**
+[Complete backups](backup-and-restore.md) · [Merge import](merge-import.md) · [Recycle bin](recycle-bin.md) — detailed pages are currently Chinese.
 
-1. Give a harmless phrase a trigger such as `cbqa`, then enable trigger expansion in Settings.
-2. Press **Win+Space** and select a separate **English (United States) — US** keyboard. If it is not available, leave triggers off and use the phrase list instead.
-3. In an empty, normal-privilege editor, type `cbqa` followed by one space. It should expand to the phrase text. A trigger needs a word boundary before it; it must not follow another letter, digit or underscore directly.
+</details>
 
-**Microsoft Pinyin suspends expansion in both Chinese and English modes.** US International, Dvorak and unrecognized layouts are also skipped. Enter and Tab do not expand triggers. Clicks, scrolling, additional typing, shortcuts or a layout change cancel a queued replacement. You can keep your usual input method for normal copying, searching and clicking phrases to paste.
+## 6. Data location and upgrades
 
-## 5. Transform and export text
+Check the actual data path in the tray's About dialog (**关于**).
 
-Select an entry and press **Ctrl+T** for JSON formatting, encoding, case and line operations. Review the result before copying it, saving it as a new entry or overwriting the original.
-
-Use **Ctrl+click** to select several entries, or **Shift** for a range, then press **Ctrl+E**. With no multiple selection, export uses the current results. Choose TXT, CSV, JSON or Markdown. Exports go to the current data directory; a JSON export is not a complete backup of the image folder.
-
-## 6. Locate your data
-
-Open **tray menu → About** and check the actual path to `ClawBoard数据.json`. ClawBoard prefers portable storage:
-
-| Situation | Data directory |
+| Situation | Data location |
 |---|---|
-| The executable's directory is writable | Beside the executable |
-| The executable's directory is not writable, such as Program Files under a normal account | `%APPDATA%\ClawBoard\` |
-| Running from source | The source repository's root directory |
+| Executable folder is writable | `ClawBoard数据.json` and `images/` beside the exe |
+| Executable folder is not writable | `%APPDATA%\ClawBoard\` |
+| Running from source | Project root |
 
-Images are in `images/` under that directory; the diagnostic log is `crash.log`. Installation location and process privileges can affect write access, so use the About dialog's path rather than guessing. Do not run the whole application as administrator just to make automatic paste work.
+1. Create a complete ZIP when available. With an older build, quit normally and copy the JSON plus the entire image folder.
+2. Exit using **Ctrl+Q** or the tray's Quit command.
+3. For a portable upgrade, replace only the executable in its existing location and keep the JSON and images beside it. A new subfolder starts from a different data location.
+4. When moving to another computer, copy the complete data with the destination app stopped, or use complete backup/restore.
 
-Portable use creates these local files. The optional Start with Windows setting also writes ClawBoard's entry under the current user's `Software\Microsoft\Windows\CurrentVersion\Run`; disabling it removes that entry. The installer creates installation records and shortcuts as well.
+Uninstall keeps data by default, including silent uninstall. Running the app creates data and logs. Optional autostart writes a current-user startup entry; installation adds registration and shortcuts. The Python and C editions have different capabilities. Quit and back up before switching, and never write one library from two instances.
 
-## Backups, upgrades and moving data
+## 7. Privacy and input limits
 
-1. Exit ClawBoard with **Ctrl+Q** or the tray menu.
-2. Copy **`ClawBoard数据.json` and the entire `images/` folder** from the actual data directory to your backup location. Keep existing `.bak`, `.bak.1` and `.bak.2` files if useful. Migration backups do not replace regular backups of your own.
-3. For a portable upgrade, replace `ClawBoard.exe` in its existing location and keep the data and images beside it. A new exe in a separate subfolder uses a different data location and can make the history appear missing.
-4. To move or restore data, quit the destination application first, copy the JSON and image folder to its actual data directory, then launch and check the contents. Do not let two instances write to the same library.
+- JSON, images, exports and backups are **unencrypted**. Display masking affects the interface only. Exclusions, private markers and sensitive-content detection cannot catch every secret.
+- Masking and skipping detected sensitive content are separate settings. Disable monitoring to pause capture. Detection has gaps, including an email-scanning length limit for long text.
+- Capture, search and transformations run locally. The default GitHub update check can be disabled; it only notifies you and opens a download page.
+- Triggers expand only under a **separate standard US keyboard layout**. Microsoft Pinyin in English mode is still an IME and does not expand; Chinese copy/search and phrase clicks remain usable.
+- Elevated destinations and targets with unknown privileges do not receive automatic keystrokes. Paste manually with Ctrl+V after copying. Apps may also reject focus or input.
+- Intermediate states can be missed while the app is closed or during rapid successive copying.
 
-Back up before an installer upgrade too. The uninstall data question defaults to keeping data, and silent uninstall also keeps it. Silent installation and data-preserving uninstallation were tested in a separate local directory; see the [validation record](WINDOWS_VALIDATION.md) for scope.
+## 8. Troubleshooting and shortcuts
 
-The Python and C implementations support the shared JSON format, but the C version has fewer features. Quit and back up before switching. Older 2.6.1 preview packages are different builds from the official v2.7.0 release.
+**Hotkey does not respond**: open Settings from the tray and try `Alt+V` or `Ctrl+Alt+V`. Follow the actual registration result and notification.
 
-## 7. Privacy settings
+**Panel is missing**: use the tray command to reset its position (**面板找不到了？重置位置**).
 
-History and settings are **unencrypted JSON**, and images are PNG files. Display masking only hides text on screen; original data, exports and backups still need protection.
+**Leading or trailing whitespace changes**: trimming is enabled by default while internal indentation stays. Disable trimming in Settings when edge whitespace must be retained.
 
-Review these settings for your use:
-
-- Keep clipboard privacy-marker handling enabled. Only sources that provide those markers can be skipped through that mechanism.
-- Exclude applications or window titles you do not want captured.
-- Keep sensitive display masking enabled. To avoid storing recognized sensitive content, enable the separate skip-sensitive-content option. Skipping is off by default; masking does not mean an entry was excluded from storage.
-- Do not rely on pattern recognition to keep passwords safe. Rules can miss secrets, and email detection has a scan-length limit for long text.
-- Update checks contact GitHub by default and can be disabled in Settings. Local capture, search, transforms and paste remain available. The updater only notifies and links to a download page.
-
-## 8. Troubleshooting
-
-**The global shortcut does nothing.** Open Settings from the tray and try `Alt+V` or `Ctrl+Alt+V`. ClawBoard tries alternate combinations; if none can be registered, it falls back to detecting the default `Ctrl+Shift+V`. Follow the actual combination shown in Settings or the status message.
-
-**The destination runs as administrator.** Normal-privilege ClawBoard stops key injection into higher-privilege targets; unknown integrity levels also stop key injection. If copying succeeded, press `Ctrl+V` in the destination yourself. Use the same fallback when a target refuses focus or input.
-
-**A trigger does not expand.** Check that you are using v2.7.0, the setting is enabled, the target is outside ClawBoard, and a separate standard US keyboard is selected. Microsoft Pinyin switched to English is still an IME and is skipped. Clicking the phrase remains available.
-
-**The panel is missing.** Try the global show/hide shortcut, then use the tray's Reset position command. Mixed-DPI behavior has been checked for the main panel; this does not imply every already-open dialog adapts identically across displays.
-
-**Whitespace changed when pasting.** Leading and trailing whitespace is trimmed by default; indentation within the text is retained. Turn off trimming in Settings when edge whitespace must be preserved.
-
-## 9. Shortcut reference
-
-Only the show/hide shortcut is global. The other keys apply inside the panel.
+Only Show/Hide is global; the remaining keys below work inside ClawBoard.
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+Shift+V` | Show / hide |
-| `↑` / `↓`, `Enter` | Select, then paste |
-| `Ctrl+1`…`Ctrl+9`, `Ctrl+0` | Paste visible entries 1–10 |
-| `Ctrl+F` | Search |
-| `Ctrl+Shift+Enter` | Paste as plain text |
-| `Ctrl+T` / `Ctrl+E` | Text transforms / export |
-| `Ctrl+Shift+P` | Command palette |
-| `Ctrl+=` / `Ctrl+-` | Change user scaling |
-| `Delete` | Delete the selection |
-| `Esc` / `Ctrl+Q` | Hide / quit |
+| Ctrl+Shift+V | Show/hide |
+| Ctrl+F | Search |
+| ↑ / ↓, Enter | Select and paste |
+| Ctrl+1…9, Ctrl+0 | Paste entries 1–10 |
+| Ctrl+Shift+Enter | Plain-text paste |
+| Ctrl+T / Ctrl+E | Transform / export |
+| Ctrl+Shift+P / Ctrl+Shift+W | Command palette / workbench |
+| Ctrl+= / Ctrl+- | User scaling |
+| Esc / Ctrl+Q | Hide / quit normally |
 
-See the [Windows validation record](WINDOWS_VALIDATION.md) and [current architecture](REFACTOR.md), both in Chinese, for technical boundaries. Release history is in the [changelog](../CHANGELOG.md).
+Screenshots use synthetic content. See [Windows validation](WINDOWS_VALIDATION.md) for tested builds, platform skips and remaining scope; screenshots do not replace interaction or long-term testing. Development context is in the [maintenance handoff](maintenance/HANDOFF.md).

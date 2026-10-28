@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""QA 独立复核（Edward）：CF_HDROP 文件复制 —— 用与工程师不同的数据独立验证。
+"""QA 独立复核：CF_HDROP 文件复制，使用独立合成用例。
 
 与 tests/_t35.py 的区别：
 - DROPFILES 头/偏移用独立写法（显式 struct 分解与注释），不复用其 make_dropfiles。
@@ -8,7 +8,7 @@
   断言文件路径被 ingest 成文本条目、多文件用 '\\n' 连接、图片优先分支不被破坏。
 - 写入用「重试 + 读回校验」应对在场 ClawBoard 实例的剪贴板占用。
 
-用法：C:/Python314/python.exe tests/_qa3_hdrop.py
+用法：python tests/_qa3_hdrop.py；须先正常退出日常实例。
 结果写 tests/_qa3_hdrop.out（用 os._exit 前 flush）。"""
 import ctypes
 import os
@@ -19,6 +19,9 @@ from ctypes import wintypes
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+from tools.windows_test_guard import acquire_desktop_test_lease
+acquire_desktop_test_lease()
 
 from clawboard.clipboard import clip_read_files, clip_read, clip_write
 from clawboard.win32 import u32, k32, CF_HDROP, CF_UNICODETEXT, GMEM_MOVEABLE
@@ -112,7 +115,7 @@ except Exception as e:
 
 # B2. 多个路径（3 条：中文目录 + 含空格 + emoji）
 try:
-    multi = [r'C:\Users\pay and gain\Desktop\剪切板\clawboard\clipboard.py',
+    multi = [r'C:\ClawBoard合成测试\clawboard\clipboard.py',
              r'C:\Program Files\My App\with space.jpg',
              r'D:\emoji😀目录\图片 📷 合集\照片 emoji.png']
     o, got = set_confirm(multi)

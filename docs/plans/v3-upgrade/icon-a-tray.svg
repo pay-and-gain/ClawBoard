@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-label="ClawBoard 托盘简化图标草案">
+  <path d="M4.5 2.5h7a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" fill="none" stroke="#23352c" stroke-width="1.4"/>
+  <rect x="5.5" y="1" width="5" height="3" rx="1.2" fill="#23352c"/>
+  <circle cx="5.5" cy="7" r="1" fill="#23352c"/><circle cx="8" cy="6" r="1" fill="#23352c"/><circle cx="10.5" cy="7" r="1" fill="#23352c"/>
+  <path d="M5.7 10.2C6.1 8.8 7 8 8 8s1.9.8 2.3 2.2c.5 1.4-.6 2-2.3 1.5-1.7.5-2.8-.1-2.3-1.5Z" fill="#23352c"/>
+</svg>

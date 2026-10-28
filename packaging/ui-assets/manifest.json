@@ -1,0 +1,71 @@
+{
+  "format": 1,
+  "brand": "paper-paw",
+  "action_masks": {
+    "size": 64,
+    "names": [
+      "add",
+      "delete",
+      "split",
+      "clear",
+      "transform",
+      "settings",
+      "more",
+      "pin",
+      "collapse",
+      "close",
+      "workbench",
+      "filter",
+      "text",
+      "link",
+      "image",
+      "file",
+      "code",
+      "search",
+      "copy",
+      "edit",
+      "folder",
+      "check",
+      "back",
+      "next",
+      "restore",
+      "clock"
+    ]
+  },
+  "logo_sizes": [
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20,
+    22,
+    24,
+    28,
+    30,
+    32,
+    36,
+    40,
+    48,
+    64,
+    96,
+    128,
+    256
+  ],
+  "application_ico_sizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    128,
+    256
+  ],
+  "source_masters": [
+    "docs/plans/v3-upgrade/icon-a-paw-note.svg",
+    "docs/plans/v3-upgrade/icon-a-tray.svg"
+  ]
+}

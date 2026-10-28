@@ -1,239 +1,117 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ClawBoard — 悬浮剪贴板 & 常用语面板</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="ClawBoard：Windows剪贴板历史与常用语。快速找回内容，按需打开工作台，使用完整备份、合并导入和回收站管理资料。">
+<meta name="referrer" content="no-referrer">
+<title>ClawBoard · 复制过的内容，随时用得上</title>
+<script>
+try{const t=localStorage.getItem('clawboard-site-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch{}
+</script>
 <style>
-  :root {
-    --bg: #1e2027; --panel: #252831; --card: #2c303b; --card-h: #39404f;
-    --fg: #e6e8ee; --fg2: #9aa0ad; --acc: #4f8cff; --line: #363b48;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--fg);
-    font-family: "Microsoft YaHei UI", -apple-system, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.75; font-size: 15px;
-  }
-  .wrap { max-width: 900px; margin: 0 auto; padding: 0 24px 80px; }
-  header {
-    position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);
-    background: rgba(30,32,39,.92); border-bottom: 1px solid var(--line);
-  }
-  .bar {
-    max-width: 900px; margin: 0 auto; padding: 14px 24px;
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  }
-  .logo { font-size: 19px; font-weight: 700; color: var(--fg); text-decoration: none; }
-  .logo span { color: var(--acc); }
-  .lang { display: flex; gap: 6px; }
-  .lang button {
-    background: var(--card); color: var(--fg2); border: 1px solid var(--line);
-    padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
-    font-family: inherit; transition: .15s;
-  }
-  .lang button:hover { background: var(--card-h); color: var(--fg); }
-  .lang button.on { background: var(--acc); color: #fff; border-color: var(--acc); }
-  h1 { font-size: 30px; margin: 40px 0 10px; letter-spacing: .3px; }
-  .sub { color: var(--fg2); font-size: 16px; margin-bottom: 6px; }
-  h2 {
-    font-size: 21px; margin: 46px 0 14px; padding-bottom: 8px;
-    border-bottom: 1px solid var(--line);
-  }
-  h2::before { content: "▍"; color: var(--acc); margin-right: 8px; }
-  h3 { font-size: 16px; margin: 26px 0 8px; color: var(--fg); }
-  p { color: #cfd3dc; margin: 10px 0; }
-  ul { color: #cfd3dc; padding-left: 22px; }
-  li { margin: 6px 0; }
-  code {
-    background: var(--card); padding: 2px 6px; border-radius: 4px;
-    font-family: Consolas, "Courier New", monospace; font-size: 13px; color: #8fb8ff;
-  }
-  pre {
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-    padding: 14px 16px; overflow-x: auto;
-  }
-  pre code { background: none; padding: 0; color: #cfd3dc; }
-  .shots { display: flex; flex-wrap: wrap; gap: 14px; margin: 20px 0; }
-  .shots img {
-    border: 1px solid var(--line); border-radius: 10px; height: 300px;
-    background: var(--panel);
-  }
-  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14px; }
-  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; }
-  th { background: var(--panel); color: var(--fg); font-weight: 600; }
-  td { color: #cfd3dc; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 18px 0; }
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
-  }
-  .card b { color: var(--acc); display: block; margin-bottom: 6px; font-size: 15px; }
-  .card span { color: var(--fg2); font-size: 13.5px; }
-  .links a {
-    display: inline-block; margin: 4px 10px 4px 0; padding: 8px 16px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    color: var(--acc); text-decoration: none; font-size: 14px; transition: .15s;
-  }
-  .links a:hover { background: var(--card-h); }
-  footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--fg2); font-size: 13px; }
-  /* 语言切换：只隐藏「非当前语言」的元素，当前语言保持标签默认 display，
-     这样 block / inline / table-row 各归其位，不会把表格或列表搞塌 */
-  html[lang="zh-CN"] [data-lang="en"],
-  html[lang="en"] [data-lang="zh"] { display: none !important; }
+:root{color-scheme:light;--bg:#fafbf8;--panel:#f0f3ed;--card:#fff;--fg:#23352c;--muted:#5c6d61;--acc:#235b50;--on-acc:#fff;--line:#dce4d6;--shadow:0 18px 50px #23352c0d}
+:root[data-theme=dark]{color-scheme:dark;--bg:#202822;--panel:#252e27;--card:#28332c;--fg:#e6eee6;--muted:#adbdb0;--acc:#b2d6bc;--on-acc:#20392b;--line:#3b493f;--shadow:0 18px 50px #0002}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){color-scheme:dark;--bg:#202822;--panel:#252e27;--card:#28332c;--fg:#e6eee6;--muted:#adbdb0;--acc:#b2d6bc;--on-acc:#20392b;--line:#3b493f;--shadow:0 18px 50px #0002}}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI",sans-serif}a{color:var(--acc);text-underline-offset:4px}button,a{touch-action:manipulation}button{font:inherit}button,a,input,summary{outline-offset:5px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--acc)}img{max-width:100%;height:auto;display:block}p{margin:0 0 1em}h1,h2,h3{line-height:1.2;letter-spacing:-.025em;margin:0 0 .55em}h1{font-size:clamp(2.1rem,4.8vw,4rem);max-width:14ch}h2{font-size:clamp(1.65rem,3vw,2.35rem)}h3{font-size:1.14rem}ul,ol{padding-left:1.4em}code,kbd{font:0.9em/1.5 ui-monospace,Consolas,monospace;background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:.08em .35em}kbd{white-space:nowrap}.wrap{width:min(1100px,calc(100% - 40px));margin:auto}.site-header{border-bottom:1px solid var(--line);background:var(--bg);position:sticky;top:0;z-index:5}.header-inner{display:flex;align-items:center;gap:20px;min-height:78px;flex-wrap:wrap;padding:12px 0}.brand{display:inline-flex;gap:10px;align-items:center;color:var(--fg);font-size:1.15rem;font-weight:750;text-decoration:none;margin-right:auto}.brand svg{width:35px;height:35px;color:var(--acc)}.site-nav{display:flex;gap:18px;font-size:.9rem}.site-nav a{text-decoration:none}.switches{display:flex;gap:5px;align-items:center}.switches button{padding:5px 9px;border-radius:8px;background:transparent;color:var(--muted);border:1px solid transparent;cursor:pointer;font-size:.85rem}.switches button[aria-pressed=true]{background:var(--panel);color:var(--fg);border-color:var(--line)}.switches .theme-switch{border-color:var(--line);margin-left:5px}.hero{display:grid;grid-template-columns:1.2fr 1fr;gap:65px;align-items:center;padding:72px 0 50px}.eyebrow{display:inline-block;color:var(--acc);font-weight:650;font-size:.82rem;letter-spacing:.06em;margin-bottom:16px}.lead{font-size:1.18rem;color:var(--muted);max-width:35em}.actions{display:flex;flex-wrap:wrap;gap:10px;margin:25px 0 14px}.button{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;padding:10px 17px;text-decoration:none;border:1px solid var(--line);background:var(--card);color:var(--fg);font-weight:650;font-size:.95rem}.button.primary{background:var(--acc);color:var(--on-acc);border-color:var(--acc)}.small{font-size:.88rem;color:var(--muted)}.hero-frame{padding:22px;border:1px solid var(--line);border-radius:25px;background:var(--panel);box-shadow:var(--shadow);margin:0}.hero-frame img{max-height:520px;object-fit:contain;margin:auto}.hero-frame figcaption{text-align:center;color:var(--muted);font-size:.8rem;margin-top:12px}.section{padding:44px 0}.section-head{max-width:760px;margin-bottom:25px}.section-head p{color:var(--muted)}.steps,.features{display:grid;gap:16px}.steps{grid-template-columns:repeat(3,1fr);counter-reset:steps}.step{padding:23px;border-top:2px solid var(--line);counter-increment:steps}.step:before{content:"0" counter(steps);display:block;color:var(--acc);font:600 .83rem ui-monospace,monospace;margin-bottom:14px}.step p{margin:0;color:var(--muted)}.features{grid-template-columns:repeat(3,1fr)}.feature{padding:23px;background:var(--card);border:1px solid var(--line);border-radius:15px}.feature p{color:var(--muted);font-size:.95rem;margin:0}.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.shot{margin:0;padding:18px;background:var(--panel);border:1px solid var(--line);border-radius:17px;min-width:0}.shot-wide{grid-column:1/-1}.shot a{display:flex;align-items:center;justify-content:center;min-height:220px}.shot img{max-height:420px;object-fit:contain}.shot-wide img{max-height:480px}.shot figcaption{padding-top:14px;font-size:.92rem;color:var(--muted)}.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:15px}table{width:100%;border-collapse:collapse;background:var(--card);text-align:left}th,td{padding:16px 18px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:.85rem;background:var(--panel)}tr:last-child td{border-bottom:0}td:first-child{font-weight:650;min-width:145px}td p{margin:0}details{border:1px solid var(--line);border-radius:12px;padding:15px 19px;background:var(--card)}details+details{margin-top:10px}summary{cursor:pointer;font-weight:650}details p{margin:12px 0 0;color:var(--muted)}.download-box{padding:30px;background:var(--panel);border:1px solid var(--line);border-radius:20px}.download-links{display:flex;gap:18px;flex-wrap:wrap;font-size:.9rem}.site-footer{margin-top:25px;border-top:1px solid var(--line);padding:25px 0 45px;color:var(--muted);font-size:.85rem}.footer-inner{display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}.js-only{display:none}.js .js-only{display:flex}@media(max-width:760px){.hero{grid-template-columns:1fr;gap:28px;padding-top:40px}.hero-frame{max-width:440px;width:100%;margin:auto}.features,.steps{grid-template-columns:1fr}.step{padding:17px 0}.gallery{grid-template-columns:1fr}.shot-wide{grid-column:auto}.site-nav{display:none}.header-inner{gap:10px}.hero h1{max-width:19ch}.section{padding:30px 0}}@media(max-width:380px){.wrap{width:calc(100% - 24px)}.header-inner{gap:7px}.switches button{padding:5px 7px}.brand{font-size:1rem}.brand svg{width:28px;height:28px}.button{width:100%}.shot{padding:10px}.shot a{min-height:0}.download-box{padding:20px}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
 </head>
 <body>
-
-<header>
-  <div class="bar">
-    <a class="logo" href="#"><span>⚡</span> ClawBoard</a>
-    <div class="lang">
-      <button id="btn-zh" class="on" onclick="setLang('zh-CN')">简体中文</button>
-      <button id="btn-en" onclick="setLang('en')">English</button>
-    </div>
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#" aria-label="ClawBoard">
+      <svg viewBox="0 0 40 40" fill="currentColor" aria-hidden="true"><ellipse cx="11" cy="12" rx="4" ry="5" transform="rotate(-22 11 12)"/><ellipse cx="21" cy="8" rx="4" ry="5"/><ellipse cx="31" cy="13" rx="4" ry="5" transform="rotate(22 31 13)"/><path d="M12 25c2-6 5-9 9-9s7 4 10 10c3 7-2 10-6 8-3-2-5-2-8 0-5 2-9-2-5-9Z"/></svg>
+      ClawBoard
+    </a>
+    <nav class="site-nav" aria-label="Page"><a href="#start" data-i18n="navStart">开始</a><a href="#tour" data-i18n="navTour">界面</a><a href="#data" data-i18n="navData">资料</a><a href="https://github.com/pay-and-gain/ClawBoard">GitHub</a></nav>
+    <div class="switches js-only" aria-label="Language and appearance"><button type="button" data-lang="zh" aria-pressed="true">中文</button><button type="button" data-lang="en" aria-pressed="false">EN</button><button class="theme-switch" id="theme" type="button" data-i18n="theme">亮 / 暗</button></div>
   </div>
 </header>
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <span class="eyebrow">WINDOWS · v4.0.0</span>
+      <h1 data-i18n="heroTitle">复制过的内容，随时用得上。</h1>
+      <p class="lead" data-i18n="heroLead">热键唤起，搜索，选择后粘贴。日常用一个小面板，需要时再打开完整预览、处理工具与资料管理。</p>
+      <div class="actions"><a class="button primary" href="https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-portable.zip" data-i18n="download">下载便携版</a><a class="button" data-guide href="https://github.com/pay-and-gain/ClawBoard/blob/v4.0.0/docs/getting-started.md" data-i18n="guide">使用指南</a></div>
+      <p class="small" data-i18n="heroNote">无需安装 Python · 不要求账号 · 资料保存在本机</p>
+    </div>
+    <figure class="hero-frame"><img src="images/v4-main.png" alt="使用合成资料的ClawBoard v4快速面板" data-alt-en="ClawBoard v4 quick panel with synthetic content" width="420" decoding="async"><figcaption data-i18n="heroCaption">熟悉的小面板，清楚的主要操作。</figcaption></figure>
+  </section>
 
-<div class="wrap">
+  <section class="section" id="start">
+    <div class="section-head"><h2 data-i18n="startTitle">先完成一次复制与粘贴。</h2><p data-i18n="startLead">完整解压便携包，运行 ClawBoard.exe，再用一段示例文字试一下。</p></div>
+    <div class="steps"><article class="step"><h3 data-i18n="step1Title">复制</h3><p data-i18n="step1">在其他应用复制文字、图片或文件路径。</p></article><article class="step"><h3 data-i18n="step2Title">找回</h3><p><span data-i18n="step2">回到输入位置，按</span> <kbd>Ctrl+Shift+V</kbd><span data-i18n="step2End">，搜索需要的记录。</span></p></article><article class="step"><h3 data-i18n="step3Title">粘贴</h3><p><span data-i18n="step3">单击记录或按 Enter。目标拒绝自动输入时，在目标框手动 Ctrl+V。</span></p></article></div>
+  </section>
 
-  <h1 data-lang="zh">悬浮剪贴板 &amp; 常用语面板</h1>
-  <h1 data-lang="en">Floating clipboard &amp; phrases panel</h1>
+  <section class="section" id="features">
+    <div class="section-head"><h2 data-i18n="featuresTitle">常用的直接用，更多的按需打开。</h2><p data-i18n="featuresLead">保留已有能力，收拢低频入口。主要保存和确认操作放在顶部，长内容在下面滚动。</p></div>
+    <div class="features"><article class="feature"><h3 data-i18n="feature1Title">更快找到</h3><p data-i18n="feature1">关键词、中文拼音、类型、时间与收藏筛选。来源和大小默认隐藏，内容更清楚。</p></article><article class="feature"><h3 data-i18n="feature2Title">重复使用</h3><p data-i18n="feature2">分组保存常用语；用键盘选择、快捷粘贴，或打开完整工作台查看。</p></article><article class="feature"><h3 data-i18n="feature3Title">处理与导出</h3><p data-i18n="feature3">拆词、文本变换及多格式导出集中在需要的位置，原有快捷键保留。</p></article></div>
+  </section>
 
-  <p class="sub" data-lang="zh">v2.7.0 · Windows 10/11 · 零运行时第三方依赖</p>
-  <p class="sub" data-lang="en">v2.7.0 · Windows 10/11 · No third-party runtime dependencies</p>
+  <section class="section" id="tour">
+    <div class="section-head"><h2 data-i18n="tourTitle">看看实际界面。</h2><p data-i18n="tourLead">所有截图均使用合成资料。点击图片可查看原图；详细指南还包含备份、回收站、拆词和变换窗口。</p></div>
+    <div class="gallery">
+      <figure class="shot"><a href="images/v4-search.png"><img src="images/v4-search.png" loading="lazy" decoding="async" alt="搜索和筛选示例" data-alt-en="Search and filters"></a><figcaption data-i18n="shotSearch">搜索与筛选：先找到，再使用。</figcaption></figure>
+      <figure class="shot"><a href="images/v4-phrases.png"><img src="images/v4-phrases.png" loading="lazy" decoding="async" alt="常用语分组" data-alt-en="Reusable phrase groups"></a><figcaption data-i18n="shotPhrases">常用语：反复使用的内容集中保存。</figcaption></figure>
+      <figure class="shot shot-wide"><a href="images/v4-workbench.png"><img src="images/v4-workbench.png" loading="lazy" decoding="async" alt="按需工作台和完整预览" data-alt-en="Optional workbench and complete preview"></a><figcaption data-i18n="shotWorkbench">工作台：查看完整内容，再定位回快速面板。</figcaption></figure>
+      <figure class="shot"><a href="images/v4-data.png"><img src="images/v4-data.png" loading="lazy" decoding="async" alt="设置中的资料管理" data-alt-en="Data management in Settings"></a><figcaption data-i18n="shotData">资料管理：按目的选择备份、导入或误删恢复。</figcaption></figure>
+      <figure class="shot"><a href="images/v4-import.png"><img src="images/v4-import.png" loading="lazy" decoding="async" alt="合并导入预览" data-alt-en="Preview selected content before merge import"></a><figcaption data-i18n="shotImport">合并导入：看清重复和冲突，再加入需要的资料。</figcaption></figure>
+    </div>
+  </section>
 
-  <div class="links">
-    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip" data-lang="zh">下载便携版</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-portable.zip" data-lang="en">Download portable</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip" data-lang="zh">完整分享包</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v2.7.0/ClawBoard-2.7.0-windows.zip" data-lang="en">Complete bundle</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0" data-lang="zh">安装包与更新说明</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/releases/tag/v2.7.0" data-lang="en">Installer and release notes</a>
-  </div>
+  <section class="section" id="data">
+    <div class="section-head"><h2 data-i18n="dataTitle">资料管理，按目的选择。</h2><p data-i18n="dataLead">都在“设置 → 数据”中，三种操作的结果各不相同。</p></div>
+    <div class="table-wrap"><table><thead><tr><th data-i18n="dataGoal">你的目的</th><th data-i18n="dataAction">选择的操作</th><th data-i18n="dataResult">结果</th></tr></thead><tbody>
+      <tr><td data-i18n="backupGoal">留副本，或回到整份库</td><td data-i18n="backupAction">完整备份与恢复</td><td data-i18n="backupResult">历史、常用语、回收站、设置与引用图片打成ZIP；恢复先预览、备份当前库，再替换。</td></tr>
+      <tr><td data-i18n="importGoal">挑一些旧资料加入</td><td data-i18n="importAction">合并导入资料</td><td data-i18n="importResult">从JSON或ZIP选择内容；重复跳过、同名分组另建、冲突触发词停用，保留当前内容和设置。</td></tr>
+      <tr><td data-i18n="trashGoal">找回误删记录</td><td data-i18n="trashAction">回收站</td><td data-i18n="trashResult">手动删除最多保留30天、5000条；满时拒绝新删除，自动历史裁剪不进入回收站。</td></tr>
+    </tbody></table></div>
+    <p class="small" style="margin-top:16px" data-i18n="dataNote">JSON不携带图片正文，缺图条目不能导入；导入容量不足会取消。外部文件记录只保存路径，不复制原文件正文。</p>
+  </section>
 
-  <p data-lang="zh">贴在屏幕一角的轻量面板，管两件事：<b>你复制过什么</b>、<b>你常要打什么</b>。支持搜索、文本变换、批量导出、快速粘贴，以及一整套面向隐私的剪贴板处理机制。</p>
-  <p data-lang="en">A lightweight panel docked in a corner of your screen that handles two things: <b>what you copied</b> and <b>what you type often</b>. With search, text transforms, batch export, quick paste, and a full set of privacy-oriented clipboard handling.</p>
+  <section class="section" id="limits">
+    <div class="section-head"><h2 data-i18n="limitsTitle">使用前，知道这几件事。</h2></div>
+    <details><summary data-i18n="limit1Title">升级前先备份，便携资料与exe同层</summary><p data-i18n="limit1">正常退出后替换原位置的exe，保留ClawBoard数据.json与images文件夹。目录不可写时资料回退到系统用户资料目录，在托盘“关于”可确认实际位置。</p></details>
+    <details><summary data-i18n="limit2Title">显示遮罩不等于加密</summary><p data-i18n="limit2">资料、图片、导出与备份保存原文，敏感识别也有边界。采集、搜索与变换在本机进行；默认更新检查访问GitHub，可在设置关闭。</p></details>
+    <details><summary data-i18n="limit3Title">输入法与管理员窗口有降级方式</summary><p data-i18n="limit3">触发词仅支持独立标准US键盘；微软拼音的“中”“英”模式仍暂停展开，复制、搜索和点击常用语正常可用。管理员或未知权限目标请在复制成功后手动Ctrl+V。</p></details>
+    <p class="small" style="margin-top:15px"><span data-i18n="validation">具体构建的测试与未覆盖场景，见</span> <a href="https://github.com/pay-and-gain/ClawBoard/blob/v4.0.0/docs/WINDOWS_VALIDATION.md" data-i18n="validationLink">Windows验证记录</a><span data-i18n="validationEnd">。不把截图当成全部交互、长期运行或完整无障碍验证。</span></p>
+  </section>
 
-  <div class="shots">
-    <img src="images/main-window.png" alt="main window">
-    <img src="images/search-highlight.png" alt="advanced search with highlighting">
-    <img src="images/phrases.png" alt="phrases and trigger snippets">
-  </div>
-
-  <h2 data-lang="zh">功能</h2>
-  <h2 data-lang="en">Features</h2>
-
-  <div class="cards">
-    <div class="card" data-lang="zh"><b>剪贴板历史</b><span>自动记录、去重、上限裁剪、收藏；悬停看时间，右键看详情</span></div>
-    <div class="card" data-lang="en"><b>Clipboard history</b><span>Auto capture, dedupe, configurable cap, starring; hover for time, right-click for details</span></div>
-
-    <div class="card" data-lang="zh"><b>常用语</b><span>分组管理、拆词（一段文字批量切成多条）、增删改</span></div>
-    <div class="card" data-lang="en"><b>Phrases</b><span>Groups, word split (one block → many phrases), full CRUD</span></div>
-
-    <div class="card" data-lang="zh"><b>高级搜索</b><span><code>app:</code> <code>time:</code> <code>type:</code> <code>size:</code> <code>is:</code> <code>-</code>排除，多词 AND + 高亮</span></div>
-    <div class="card" data-lang="en"><b>Advanced search</b><span><code>app:</code> <code>time:</code> <code>type:</code> <code>size:</code> <code>is:</code> <code>-</code>exclude, multi-word AND + highlighting</span></div>
-
-    <div class="card" data-lang="zh"><b>27 项文本变换</b><span>编解码、大小写、行处理、MD5/SHA1/SHA256、JSON 格式化…</span></div>
-    <div class="card" data-lang="en"><b>27 text transforms</b><span>Encode/decode, case, line ops, MD5/SHA1/SHA256, JSON formatting…</span></div>
-
-    <div class="card" data-lang="zh"><b>批量导出</b><span>TXT / CSV（带 BOM）/ JSON / Markdown</span></div>
-    <div class="card" data-lang="en"><b>Batch export</b><span>TXT / CSV (with BOM) / JSON / Markdown</span></div>
-
-    <div class="card" data-lang="zh"><b>隐私保护</b><span>遵守「别记录我」标记、忽略名单、敏感内容打码</span></div>
-    <div class="card" data-lang="en"><b>Privacy</b><span>"Don't record me" flags, ignore lists, sensitive-content masking</span></div>
-  </div>
-
-  <h2 data-lang="zh">使用指南</h2>
-  <h2 data-lang="en">Usage guide</h2>
-
-  <h3 data-lang="zh">运行</h3>
-  <h3 data-lang="en">Run</h3>
-  <pre><code>python ClawBoard.py     <span data-lang="zh"># 需要 Python 3 + tkinter</span><span data-lang="en"># requires Python 3 + tkinter</span></code></pre>
-  <p data-lang="zh">或解压便携包运行 <code>ClawBoard.exe</code>，无需安装 Python。可写便携目录的数据与 exe 同层；目录不可写时回退到 <code>%APPDATA%\ClawBoard</code>，以托盘“关于”显示的路径为准。</p>
-  <p data-lang="en">Or extract the portable package and run <code>ClawBoard.exe</code>; Python is not required. Writable portable folders keep data beside the exe. An unwritable folder falls back to <code>%APPDATA%\ClawBoard</code>; check the actual path in About.</p>
-
-  <p data-lang="zh">触发词仅对独立标准 US 键盘布局启用；中文输入法仍可正常复制、搜索和点击常用语。向管理员窗口输入时会保留复制并提示手动 Ctrl+V。升级前备份 JSON 和整个图片目录。</p>
-  <p data-lang="en">Triggers require a separate standard US keyboard layout. Chinese IMEs still support normal copy, search and phrase clicks. Elevated targets fall back to copying and manual Ctrl+V. Back up the JSON file and complete image folder before upgrading.</p>
-
-  <h3 data-lang="zh">快捷键</h3>
-  <h3 data-lang="en">Shortcuts</h3>
-  <table>
-    <tr><th data-lang="zh">按键</th><th data-lang="en">Key</th><th data-lang="zh">功能</th><th data-lang="en">Action</th></tr>
-    <tr><td><code>Ctrl+Shift+V</code></td><td data-lang="zh">唤起 / 隐藏面板</td><td data-lang="en">Show / hide the panel</td></tr>
-    <tr><td><code>Ctrl+1..9</code> / <code>Ctrl+0</code></td><td data-lang="zh">直接粘贴第 1~10 项</td><td data-lang="en">Quick-paste items 1–10</td></tr>
-    <tr><td><code>Ctrl+T</code> / <code>Ctrl+E</code></td><td data-lang="zh">文本变换 / 批量导出</td><td data-lang="en">Text transform / batch export</td></tr>
-    <tr><td><code>Ctrl+F</code></td><td data-lang="zh">聚焦搜索</td><td data-lang="en">Focus search</td></tr>
-    <tr><td><code>Ctrl+=</code> / <code>Ctrl+-</code></td><td data-lang="zh">界面等比缩放</td><td data-lang="en">Proportional UI scaling</td></tr>
-    <tr><td><code>↑</code> <code>↓</code> / <code>Enter</code></td><td data-lang="zh">移动 / 粘贴</td><td data-lang="en">Navigate / paste</td></tr>
-    <tr><td><code>Delete</code></td><td data-lang="zh">删除选中</td><td data-lang="en">Delete selected</td></tr>
-    <tr><td><code>Esc</code> / <code>Ctrl+Q</code></td><td data-lang="zh">隐藏 / 退出</td><td data-lang="en">Hide / quit</td></tr>
-  </table>
-
-  <h3 data-lang="zh">数据与安全</h3>
-  <h3 data-lang="en">Data &amp; safety</h3>
-  <ul data-lang="zh">
-    <li>数据存 <code>ClawBoard数据.json</code>，纯文本、可备份、可迁移</li>
-    <li>写文件采用「先写临时文件再原子替换」，不会写一半变成坏文件</li>
-    <li>版本升级前自动备份（保留最近 3 份）；读取时逐字段校验</li>
-    <li>Python 与精简 C 实现保持共享数据契约，功能范围不同；切换前先退出并备份</li>
-  </ul>
-  <ul data-lang="en">
-    <li>Data lives in <code>ClawBoard数据.json</code> — plain text, easy to back up and migrate</li>
-    <li>Writes go to a temp file and are atomically swapped in — no half-written file</li>
-    <li>Automatic backup before schema upgrades (keeps the last 3); per-field validation on read</li>
-    <li>Python and the smaller C implementation share a data contract, with different feature sets; quit and back up before switching</li>
-  </ul>
-
-  <h2 data-lang="zh">设计思路要点</h2>
-  <h2 data-lang="en">Design highlights</h2>
-
-  <ul data-lang="zh">
-    <li><b>先能跑 → 再跑得稳 → 最后才堆功能</b>：分三批做，第一批就能日常使用，后面每批都在可用的基础上加</li>
-    <li><b>本地工作流</b>：把历史、常用语、搜索和粘贴放在一个面板中，更新检查可关闭</li>
-    <li><b>实现取舍</b>：Python/tkinter 作为当前完整发布，C/Win32 保留精简实现和数据兼容参考</li>
-    <li><b>有界界面工作</b>：虚拟列表复用可见控件，后台查询与图片处理通过主线程队列交付结果</li>
-    <li><b>三道数据保险</b>：原子写 + 升级前备份 + 逐字段校验</li>
-  </ul>
-  <ul data-lang="en">
-    <li><b>Make it run → make it stable → then pile on features</b>: three batches; the first is already usable daily</li>
-    <li><b>A local workflow</b>: history, phrases, search and paste in one panel, with optional update checks</li>
-    <li><b>Implementation tradeoff</b>: Python/tkinter is the current full release; C/Win32 remains a smaller implementation and compatibility reference</li>
-    <li><b>Bounded UI work</b>: visible widgets are reused, while background queries and image processing deliver results through the main-thread queue</li>
-    <li><b>Three data safeguards</b>: atomic writes + pre-upgrade backup + per-field validation</li>
-  </ul>
-
-  <p data-lang="zh">完整内容见文档：</p>
-  <p data-lang="en">Full details:</p>
-  <div class="links">
-    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/getting-started.md" data-lang="zh">新手指南</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/getting-started.en.md" data-lang="en">Getting started</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/REFACTOR.md" data-lang="zh">当前架构</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/docs/REFACTOR.md" data-lang="en">Architecture</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/CHANGELOG.md">CHANGELOG</a>
-    <a href="https://github.com/pay-and-gain/ClawBoard/blob/main/LICENSE">MIT License</a>
-  </div>
-
-  <footer>
-    <span data-lang="zh">ClawBoard · MIT 许可 · 用 Python 与 C 写成的 Windows 剪贴板工具</span>
-    <span data-lang="en">ClawBoard · MIT licensed · a Windows clipboard tool written in Python and C</span>
-  </footer>
-
-</div>
-
+  <section class="section" id="download">
+    <div class="download-box"><h2 data-i18n="downloadTitle">从一个小面板开始。</h2><p data-i18n="downloadLead">便携版解压即用；也可以选择安装向导，或下载便于转发的完整分享包。</p><div class="actions"><a class="button primary" href="https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-portable.zip" data-i18n="download">下载便携版</a><a class="button" href="https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-setup.exe" data-i18n="installer">安装包</a><a class="button" href="https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/ClawBoard-4.0.0-windows.zip" data-i18n="bundle">完整分享包</a></div><div class="download-links"><a href="https://github.com/pay-and-gain/ClawBoard/releases/download/v4.0.0/SHA256SUMS.txt" data-i18n="checksums">校验清单</a><a data-guide href="https://github.com/pay-and-gain/ClawBoard/blob/v4.0.0/docs/getting-started.md" data-i18n="guide">使用指南</a><a href="https://github.com/pay-and-gain/ClawBoard/blob/v4.0.0/CHANGELOG.md" data-i18n="changelog">更新记录</a></div></div>
+  </section>
+</main>
+<footer class="site-footer"><div class="wrap footer-inner"><span>ClawBoard · Windows · MIT</span><span><a href="https://github.com/pay-and-gain/ClawBoard" data-i18n="source">项目源码</a> · <a href="https://github.com/pay-and-gain/ClawBoard/blob/v4.0.0/docs/maintenance/HANDOFF.md" data-i18n="handoff">维护与归档</a></span></div></footer>
 <script>
-function setLang(lang) {
-  document.documentElement.lang = lang;
-  document.getElementById('btn-zh').classList.toggle('on', lang === 'zh-CN');
-  document.getElementById('btn-en').classList.toggle('on', lang === 'en');
-  try { localStorage.setItem('clawboard-doc-lang', lang); } catch (e) {}
+(function(){
+'use strict';
+const copy={
+zh:{navStart:'开始',navTour:'界面',navData:'资料',theme:'亮 / 暗',heroTitle:'复制过的内容，随时用得上。',heroLead:'热键唤起，搜索，选择后粘贴。日常用一个小面板，需要时再打开完整预览、处理工具与资料管理。',download:'下载便携版',guide:'使用指南',heroNote:'无需安装 Python · 不要求账号 · 资料保存在本机',heroCaption:'熟悉的小面板，清楚的主要操作。',startTitle:'先完成一次复制与粘贴。',startLead:'完整解压便携包，运行 ClawBoard.exe，再用一段示例文字试一下。',step1Title:'复制',step1:'在其他应用复制文字、图片或文件路径。',step2Title:'找回',step2:'回到输入位置，按',step2End:'，搜索需要的记录。',step3Title:'粘贴',step3:'单击记录或按 Enter。目标拒绝自动输入时，在目标框手动 Ctrl+V。',featuresTitle:'常用的直接用，更多的按需打开。',featuresLead:'保留已有能力，收拢低频入口。主要保存和确认操作放在顶部，长内容在下面滚动。',feature1Title:'更快找到',feature1:'关键词、中文拼音、类型、时间与收藏筛选。来源和大小默认隐藏，内容更清楚。',feature2Title:'重复使用',feature2:'分组保存常用语；用键盘选择、快捷粘贴，或打开完整工作台查看。',feature3Title:'处理与导出',feature3:'拆词、文本变换及多格式导出集中在需要的位置，原有快捷键保留。',tourTitle:'看看实际界面。',tourLead:'所有截图均使用合成资料。点击图片可查看原图；详细指南还包含备份、回收站、拆词和变换窗口。',shotSearch:'搜索与筛选：先找到，再使用。',shotPhrases:'常用语：反复使用的内容集中保存。',shotWorkbench:'工作台：查看完整内容，再定位回快速面板。',shotData:'资料管理：按目的选择备份、导入或误删恢复。',shotImport:'合并导入：看清重复和冲突，再加入需要的资料。',dataTitle:'资料管理，按目的选择。',dataLead:'都在“设置 → 数据”中，三种操作的结果各不相同。',dataGoal:'你的目的',dataAction:'选择的操作',dataResult:'结果',backupGoal:'留副本，或回到整份库',backupAction:'完整备份与恢复',backupResult:'历史、常用语、回收站、设置与引用图片打成ZIP；恢复先预览、备份当前库，再替换。',importGoal:'挑一些旧资料加入',importAction:'合并导入资料',importResult:'从JSON或ZIP选择内容；重复跳过、同名分组另建、冲突触发词停用，保留当前内容和设置。',trashGoal:'找回误删记录',trashAction:'回收站',trashResult:'手动删除最多保留30天、5000条；满时拒绝新删除，自动历史裁剪不进入回收站。',dataNote:'JSON不携带图片正文，缺图条目不能导入；导入容量不足会取消。外部文件记录只保存路径，不复制原文件正文。',limitsTitle:'使用前，知道这几件事。',limit1Title:'升级前先备份，便携资料与exe同层',limit1:'正常退出后替换原位置的exe，保留ClawBoard数据.json与images文件夹。目录不可写时资料回退到系统用户资料目录，在托盘“关于”可确认实际位置。',limit2Title:'显示遮罩不等于加密',limit2:'资料、图片、导出与备份保存原文，敏感识别也有边界。采集、搜索与变换在本机进行；默认更新检查访问GitHub，可在设置关闭。',limit3Title:'输入法与管理员窗口有降级方式',limit3:'触发词仅支持独立标准US键盘；微软拼音的“中”“英”模式仍暂停展开，复制、搜索和点击常用语正常可用。管理员或未知权限目标请在复制成功后手动Ctrl+V。',validation:'具体构建的测试与未覆盖场景，见',validationLink:'Windows验证记录',validationEnd:'。不把截图当成全部交互、长期运行或完整无障碍验证。',downloadTitle:'从一个小面板开始。',downloadLead:'便携版解压即用；也可以选择安装向导，或下载便于转发的完整分享包。',installer:'安装包',bundle:'完整分享包',checksums:'校验清单',changelog:'更新记录',source:'项目源码',handoff:'维护与归档'},
+en:{navStart:'Start',navTour:'Tour',navData:'Data',theme:'Light / dark',heroTitle:'Find what you copied. Use it again.',heroLead:'Open with a hotkey, search, select and paste. Keep a small panel for everyday use; open complete previews, tools and data management when needed.',download:'Download portable',guide:'User guide',heroNote:'No Python installation · No account required · Data stored locally',heroCaption:'A familiar small panel with clear primary actions.',startTitle:'Try one copy and paste.',startLead:'Extract the complete portable archive, run ClawBoard.exe, and try some sample text.',step1Title:'Copy',step1:'Copy text, images or file paths in another app.',step2Title:'Find',step2:'Return to the destination and press',step2End:', then search for your record.',step3Title:'Paste',step3:'Click a record or press Enter. If the destination rejects automatic input, press Ctrl+V there.',featuresTitle:'Common actions first. More when needed.',featuresLead:'Keep the capabilities and simplify the entry points. Primary Save and Confirm controls stay at the top while long content scrolls below.',feature1Title:'Find content',feature1:'Search by keywords or Chinese pinyin; filter by type, time and favorites. Source and size labels are hidden by default.',feature2Title:'Reuse phrases',feature2:'Keep reusable content in groups. Select and paste by keyboard, or inspect it in the wider workbench.',feature3Title:'Process and export',feature3:'Text splitting, transformations and export formats stay available where needed, with existing shortcuts retained.',tourTitle:'See the actual interface.',tourLead:'All screenshots use synthetic content. Click to view an original image. The guide also shows backup, recycle bin, split and transform windows.',shotSearch:'Search and filters: find first, then use.',shotPhrases:'Phrases: keep reusable content together.',shotWorkbench:'Workbench: inspect full content and locate it back in the quick panel.',shotData:'Data management: choose by your backup, import or recovery goal.',shotImport:'Merge import: inspect duplicates and conflicts before adding content.',dataTitle:'Choose by your data task.',dataLead:'All three entries are under Settings → Data (设置 → 数据), with different results.',dataGoal:'Your goal',dataAction:'Entry point',dataResult:'Result',backupGoal:'Keep a copy or return to a library',backupAction:'Complete backup and restore',backupResult:'A ZIP of history, phrases, recycle bin, settings and referenced images. Restore previews the package and backs up the current library before replacing it.',importGoal:'Add selected older content',importAction:'Merge import',importResult:'Select JSON or ZIP content. Skip duplicates, create separate groups for conflicting names, and disable occupied triggers. Keep current content and settings.',trashGoal:'Recover an accidental deletion',trashAction:'Recycle bin',trashResult:'Manual deletions remain for up to 30 days and 5,000 entries. A full bin rejects new deletions; automatic history-limit pruning is excluded.',dataNote:'JSON has no image bodies, so missing-image entries cannot be imported. Insufficient capacity cancels import. External file records retain paths rather than file bodies.',limitsTitle:'A few things to know.',limit1Title:'Back up first; portable data stays beside the exe',limit1:'Quit normally, replace the executable in its existing location, and retain ClawBoard数据.json and images. Unwritable folders use the system user-data directory; confirm the actual path in About.',limit2Title:'Display masking is not encryption',limit2:'Data, images, exports and backups contain original content. Detection has limits. Capture, search and transformations run locally; the default GitHub update check can be disabled.',limit3Title:'IME and elevated-window fallbacks',limit3:'Triggers require a separate standard US keyboard layout. Microsoft Pinyin in either mode pauses expansion; copy, search and phrase clicks still work. Elevated or unknown-privilege targets require manual Ctrl+V.',validation:'For build-specific checks and remaining scope, see',validationLink:'Windows validation',validationEnd:'. Screenshots do not establish complete interaction, long-term or accessibility testing.',downloadTitle:'Start with a small panel.',downloadLead:'Extract and run the portable build, choose the setup wizard, or download the complete bundle for sharing.',installer:'Installer',bundle:'Complete bundle',checksums:'Checksums',changelog:'Changelog',source:'Source code',handoff:'Maintenance archive'}
+};
+let language='zh';
+function useLanguage(value){
+language=value==='en'?'en':'zh';
+document.documentElement.lang=language==='en'?'en':'zh-CN';
+document.querySelectorAll('[data-i18n]').forEach(el=>{const text=copy[language][el.dataset.i18n];if(text!==undefined)el.textContent=text;});
+document.querySelectorAll('[data-lang]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.lang===language)));
+document.querySelectorAll('[data-guide]').forEach(el=>{el.href='https://github.com/pay-and-gain/ClawBoard/blob/v4.0.0/docs/getting-started'+(language==='en'?'.en':'')+'.md';});
+document.querySelectorAll('img[data-alt-en]').forEach(el=>{if(!el.dataset.altZh)el.dataset.altZh=el.alt;el.alt=language==='en'?el.dataset.altEn:el.dataset.altZh;});
+document.title=language==='en'?'ClawBoard · Find what you copied':'ClawBoard · 复制过的内容，随时用得上';
+document.querySelector('meta[name=description]').content=language==='en'?'Windows clipboard history and reusable phrases. Find content, preview, merge import and keep complete backups.':'ClawBoard：Windows剪贴板历史与常用语。快速找回内容，按需打开工作台，使用完整备份、合并导入和回收站管理资料。';
+try{localStorage.setItem('clawboard-site-language',language);}catch{}
 }
-// 默认中文；若之前选过英文则沿用
-(function () {
-  var saved = null;
-  try { saved = localStorage.getItem('clawboard-doc-lang'); } catch (e) {}
-  if (saved === 'en') setLang('en');
+document.documentElement.classList.add('js');
+document.querySelectorAll('[data-lang]').forEach(el=>el.addEventListener('click',()=>useLanguage(el.dataset.lang)));
+document.getElementById('theme').addEventListener('click',()=>{
+const current=document.documentElement.dataset.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+const next=current==='dark'?'light':'dark';document.documentElement.dataset.theme=next;
+try{localStorage.setItem('clawboard-site-theme',next);}catch{}
+});
+let preferred='zh';try{preferred=localStorage.getItem('clawboard-site-language')||((navigator.language||'').startsWith('zh')?'zh':'en');}catch{}
+useLanguage(preferred);
 })();
 </script>
-
 </body>
 </html>

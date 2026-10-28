@@ -66,7 +66,7 @@ https://pay-and-gain.github.io/ClawBoard/images/xxx.png
 
 - 每加一个功能，就在 `tests/` 放一个 `_tNN.py` 回归脚本。
 - 提交前确认 `git status` 里没有意外文件（尤其是数据文件、日志、竞品分析）。
-- **发布产物落到 `C:\Users\pay and gain\Desktop\cut\`，不放桌面**（master 指定，2026-10-14 起）：
+- **发布产物落到 `%USERPROFILE%\Desktop\cut\`，不放桌面根目录**（本机交付约定）：
   新 exe 拷进 `cut\` 并删掉上一个版本的 exe；**exe 与 `ClawBoard数据.json` 必须同层** ——
   便携模式下数据跟 exe 走，拆到子目录会让程序在新位置新建空数据文件（用户会以为历史丢了）。
 

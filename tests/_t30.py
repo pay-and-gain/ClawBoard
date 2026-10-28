@@ -29,7 +29,7 @@ def check(name, cond, extra=''):
 
 # ---------- 1. 注册表完整性 ----------
 names = [c[0] for c in COMMANDS]
-check('命令条数为 9', len(COMMANDS) == 9, '实际 %d' % len(COMMANDS))
+check('命令条数为 10', len(COMMANDS) == 10, '实际 %d' % len(COMMANDS))
 check('命令名不重复', len(names) == len(set(names)))
 check('每条都是三元组', all(len(c) == 3 for c in COMMANDS))
 check('每条都有回调（可调用）', all(callable(c[2]) for c in COMMANDS))
@@ -38,17 +38,17 @@ check('描述非空', all(c[1].strip() for c in COMMANDS))
 
 
 class FakeApp:
-    """用 __getattr__ 桩掉 9 个目标方法，验证 build_registry 能正确解析。"""
+    """用 __getattr__ 桩掉 10 个目标方法，验证 build_registry 能正确解析。"""
     def __getattr__(self, name):
         return lambda: name
 
 
 reg = build_registry(FakeApp())
-check('build_registry 解析出 9 条', len(reg) == 9, '实际 %d' % len(reg))
+check('build_registry 解析出 10 条', len(reg) == 10, '实际 %d' % len(reg))
 check('build_registry 回调全部可调用', all(callable(c[2]) for c in reg))
 resolved = [c[2]() for c in reg]
 expect = ['clear_list', 'toggle_listen', 'open_export', 'open_transform',
-          'add_phrase', 'open_settings', 'toggle_pin', 'toggle_collapse', 'quit_app']
+          'add_phrase', 'open_settings', 'open_workbench', 'toggle_pin', 'toggle_collapse', 'quit_app']
 check('build_registry 回调指向正确方法', resolved == expect,
       '实际 %s' % resolved)
 

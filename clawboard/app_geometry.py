@@ -90,6 +90,7 @@ class GeometryMixin(DpiMixin):
             self.root.minsize(*self.min_size())
         self.tip('已缩放至 %d%%' % int(level * 100))
         self.save(True)
+        self.root.event_generate('<<ClawBoardUIScaleChanged>>', when='tail')
 
     def cycle_ui_scale(self, step):
         """按档位步进缩放（+1 放大一档 / -1 缩小一档），用于快捷键"""
@@ -413,6 +414,12 @@ class GeometryMixin(DpiMixin):
         副屏上 `wx + ww >= winfo_screenwidth()-4` 会恒真（那是主屏宽），窗口会被
         误判成「贴右边缘」并被搬到主屏最右（edge_hide 一开就是必现）。
         """
+        workbench = getattr(self, '_workbench_window', None)
+        if workbench is not None and workbench.win.winfo_exists() and workbench.win.winfo_ismapped():
+            self._edge_tick = 0
+            if self._edge_hidden:
+                self._edge_show()
+            return
         st = self.st
         if not st.get('edge_hide') or self.hidden or self.collapsed:
             if self._edge_hidden:

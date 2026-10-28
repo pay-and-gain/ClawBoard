@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="ClawBoard 小猫夹图标方案">
+  <rect x="12" y="12" width="232" height="232" rx="58" fill="#E9DDF5"/>
+  <path d="m70 100 5-44 37 22a77 77 0 0 1 32 0l37-22 5 44c16 16 22 37 15 56-10 28-41 43-73 43s-63-15-73-43c-7-19-1-40 15-56Z" fill="#4F4167"/>
+  <path d="M97 127v18m62-18v18" stroke="#FDF9F3" stroke-width="10" stroke-linecap="round"/>
+  <path d="m119 155 9 7 9-7" fill="none" stroke="#EFC9CB" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="109" y="33" width="38" height="78" rx="18" fill="#FDF9F3"/>
+  <path d="M120 89V53a8 8 0 0 1 16 0v36" fill="none" stroke="#B8A1D2" stroke-width="5" stroke-linecap="round"/>
+</svg>

@@ -24,6 +24,7 @@ COMMANDS = [
     ('文本变换', '对选中内容做大小写/JSON 等变换', lambda app: app.open_transform),
     ('新增常用语', '把当前剪贴板内容存为常用语', lambda app: app.add_phrase),
     ('打开设置', '打开设置面板', lambda app: app.open_settings),
+    ('打开工作台', '搜索和预览内容，按需回到快速面板', lambda app: app.open_workbench),
     ('面板置顶开关', '切换窗口是否始终置顶', lambda app: app.toggle_pin),
     ('折叠/展开面板', '把面板收成标题栏或展开', lambda app: app.toggle_collapse),
     ('退出程序', '退出 ClawBoard', lambda app: app.quit_app),
@@ -91,7 +92,7 @@ class CommandPalette:
         # 输入框持有焦点时依然可见。
         self.lb = tk.Listbox(self.win, bg=T['card'], fg=T['fg'], bd=0, relief='flat',
                              highlightthickness=1, highlightbackground=T['line'],
-                             selectbackground=T['acc'], selectforeground='#ffffff',
+                             selectbackground=T['acc'], selectforeground=T.get('on_acc', '#ffffff'),
                              font=FONT_SM, activestyle='none', exportselection=False,
                              selectmode='browse')
         self.lb.pack(fill='both', expand=True, padx=12, pady=(0, 12))
