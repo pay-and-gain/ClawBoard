@@ -59,6 +59,7 @@ a = Analysis(
         'clawboard.data_adapter',
         'clawboard.dialogs',
         'clawboard.dispatch',
+        'clawboard.email_match',
         'clawboard.export_dialog',
         'clawboard.exports',
         'clawboard.history',

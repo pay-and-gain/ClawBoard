@@ -158,10 +158,10 @@ class TrashWindow:
     def _display_body(self, item, limit):
         raw = item.get('text')
         raw = raw if isinstance(raw, str) else ''
-        # A bounded look-ahead lets masking finish tokens crossing the preview
-        # boundary, without processing every long record while listing 5000 rows.
-        visible = display_text(raw[:limit + 512], item.get('sens') or None,
-            masked=bool(self.app.st.get('mask_sensitive', True)), reveal=bool(item.get('mask_off')))
+        # Mask before clipping: the @ of a long local part can be beyond any
+        # fixed preview look-ahead. Email matching is linear even for long rows.
+        visible = display_text(raw, item.get('sens') or None,
+            masked=bool(self.app.st.get('mask_sensitive', False)), reveal=bool(item.get('mask_off')))
         return visible[:limit], len(raw) > limit
 
     def _position(self, entry):
@@ -169,7 +169,7 @@ class TrashWindow:
         if group is None:
             return '剪贴板历史'
         name = group.get('name', '') if isinstance(group, dict) else ''
-        name = display_text(str(name)[:256], masked=bool(self.app.st.get('mask_sensitive', True)))
+        name = display_text(str(name), masked=bool(self.app.st.get('mask_sensitive', False)))
         return '常用语 · ' + (name[:80] or '原分组')
 
     @staticmethod

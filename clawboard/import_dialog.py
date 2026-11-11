@@ -213,7 +213,7 @@ class ImportWindow(BackupWindow):
 
     def _masked(self, text):
         # Imported mask_off/sens fields are untrusted display preferences.
-        return display_text(text, masked=bool(self.app.st.get('mask_sensitive', True)))
+        return display_text(text, masked=bool(self.app.st.get('mask_sensitive', False)))
 
     def _show_preview(self, preview):
         self.preview = preview

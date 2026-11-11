@@ -115,7 +115,7 @@ Uninstall keeps data by default, including silent uninstall. Running the app cre
 ## 7. Privacy and input limits
 
 - JSON, images, exports and backups are **unencrypted**. Display masking affects the interface only. Exclusions, private markers and sensitive-content detection cannot catch every secret.
-- Masking and skipping detected sensitive content are separate settings. Disable monitoring to pause capture. Detection has gaps, including an email-scanning length limit for long text.
+- Masking and skipping detected sensitive content are separate settings. Disable monitoring to pause capture. Detection can miss secrets. The original v4.0.0 package has an email-scanning length limit; a subsequent local source patch removes that limit. See the [patch handoff](maintenance/PRIVACY_PATCH.md) for its delivery status.
 - Capture, search and transformations run locally. The default GitHub update check can be disabled; it only notifies you and opens a download page.
 - Triggers expand only under a **separate standard US keyboard layout**. Microsoft Pinyin in English mode is still an IME and does not expand; Chinese copy/search and phrase clicks remain usable.
 - Elevated destinations and targets with unknown privileges do not receive automatic keystrokes. Paste manually with Ctrl+V after copying. Apps may also reject focus or input.

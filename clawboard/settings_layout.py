@@ -115,7 +115,8 @@ class SettingsLayout:
         self.note(body, '面板内：Ctrl+F 搜索；↑ / ↓ 选择；Enter 粘贴；Ctrl+Shift+Enter 纯文本粘贴；Esc 隐藏。')
 
         body = self.pages['privacy'].inner
-        d.row_switch(body, '敏感内容打码显示', 'mask_sensitive', after=app.render)
+        d.row_switch(body, '遮挡敏感内容（邮箱、手机号等）', 'mask_sensitive', after=app.render)
+        self.note(body, '关闭时按原文显示；开启时遮挡敏感内容。只影响显示，不改变正文。')
         d.row_switch(body, '敏感内容不入库', 'skip_sensitive')
         d.row_switch(body, '记录来源窗口标题', 'record_title')
         d.row_int(body, '捕获长度下限（0=不限）', 'min_len', lo=0, hi=1000)

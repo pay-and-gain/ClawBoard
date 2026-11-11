@@ -53,7 +53,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertNotIn('完整末尾', rows[0][1])
         self.assertEqual(full_preview(entry, {}), text)
         entry.record['text'] = 'password=synthetic-secret-value'
-        self.assertNotIn('synthetic-secret-value', full_preview(entry, {}))
+        self.assertNotIn('synthetic-secret-value', full_preview(entry, {'mask_sensitive': True}))
         self.assertEqual(full_preview(entry, {'mask_sensitive': False}), entry.record['text'])
 
     def test_metadata_hidden_by_default_and_explicit_expand(self):

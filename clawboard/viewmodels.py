@@ -136,7 +136,7 @@ class ViewProjection:
             bool(record.get('is_estimated')), _number(record.get('copy_count'), 1),
             bool(record.get('fav')), bool(record.get('pinned')), bool(record.get('mask_off')),
             record.get('image_w'), record.get('image_h'),
-            bool(row._settings.get('mask_sensitive', True)), show_time,
+            bool(row._settings.get('mask_sensitive', False)), show_time,
             bool(row._settings.get('show_source', False)),
             bool(row._settings.get('show_size', False)),
             _number(self.clock()) // 60_000 if show_time else None,
@@ -171,11 +171,11 @@ class ViewProjection:
         show_source = bool(settings.get('show_source', False))
         show_size = bool(settings.get('show_size', False))
         is_image = record.get('content_type') == 'image'
-        masked = bool(settings.get('mask_sensitive', True))
+        masked = bool(settings.get('mask_sensitive', False))
         reveal = bool(record.get('mask_off'))
         hits = list(_strings(record.get('sens')))
-        if not hits and masked and not reveal and not is_image:
-            hits = privacy.scan_sensitive(text)
+        if (not hits or ('邮箱' not in hits and '@' in text)) and masked and not reveal and not is_image:
+            hits = list(dict.fromkeys(hits + privacy.scan_sensitive(text)))
         # Mask before clipping: a cut through a password/token must not prevent
         # its regex from matching and expose an unmasked partial secret.
         display = ('图片 %s×%s' % (record.get('image_w'), record.get('image_h'))

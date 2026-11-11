@@ -184,7 +184,7 @@ class InteractionMixin(PhraseMixin, PasteMixin, RecycleMixin):
                       command=lambda: (self.vlist.multi.add(it['id']),
                                        self.vlist.update_view(),
                                        self.tip('已选 %d 条' % len(self.vlist.multi))))
-        if it.get('sens'):
+        if it.get('sens') or it.get('mask_off'):
             m.add_command(label='👁 切换原文/打码', command=lambda: self.toggle_sens(it['id']))
         m.add_separator()
         m.add_command(label='✕ 删除', command=lambda: self.del_item(it['id'], kind))
@@ -233,7 +233,7 @@ class InteractionMixin(PhraseMixin, PasteMixin, RecycleMixin):
             '最近粘贴：%s' % full_time(it.get('last_used_at')),
             '来源应用：%s' % src,
             '窗口标题：%s' % display_text(it.get('source_title') or '（未记录）',
-                                           masked=self.st.get('mask_sensitive', True),
+                                           masked=self.st.get('mask_sensitive', False),
                                            reveal=bool(it.get('mask_off'))),
             '类型/大小：%s / %s（%d 字符）' % (it.get('content_type'),
                                             human_size(int(it.get('content_size') or 0)),
@@ -242,7 +242,7 @@ class InteractionMixin(PhraseMixin, PasteMixin, RecycleMixin):
             '',
             '内容预览：',
             preview(display_text(it.get('text'), it.get('sens') or None,
-                                 masked=self.st.get('mask_sensitive', True),
+                                 masked=self.st.get('mask_sensitive', False),
                                  reveal=bool(it.get('mask_off'))), 200),
         ])
         Dialog(self.root, '条目详情', [('', body, True)],
@@ -481,7 +481,7 @@ class InteractionMixin(PhraseMixin, PasteMixin, RecycleMixin):
         meta = '%d 字符' % len(text)
         try:
             shown = display_text(text, (it or {}).get('sens') or None,
-                                 masked=self.st.get('mask_sensitive', True),
+                                 masked=self.st.get('mask_sensitive', False),
                                  reveal=bool((it or {}).get('mask_off')))
             self._preview = ContentPreview(self, shown, kind, meta)
         except Exception:
@@ -528,7 +528,7 @@ class InteractionMixin(PhraseMixin, PasteMixin, RecycleMixin):
                 return
             lines = t.count('\n') + 1
             chars = len(t)
-            prev = preview(display_text(t, masked=self.st.get('mask_sensitive', True)), 42)
+            prev = preview(display_text(t, masked=self.st.get('mask_sensitive', False)), 42)
             CopyToast(self, lines, chars, prev,
                       ms=int(self.st.get('toast_ms') or 1800))
         except Exception:

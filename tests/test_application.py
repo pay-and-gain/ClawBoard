@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from clawboard.application import ApplicationController
 from clawboard.media import ImageStore
 from clawboard.models import default_data
+from clawboard.privacy import display_text
 from clawboard.services import CaptureResult, ClipboardSnapshot
 from clawboard.storage import JsonStore
 
@@ -86,6 +87,42 @@ class TestApplicationController(unittest.TestCase):
         self.assertNotEqual(threads[0], owner)
         self.assertEqual(self.controller.clipboard.last_sequence, 1)
         self.assertEqual(self.store.load().data['clip'][0]['text'], 'hello')
+
+    def test_temporary_reveals_are_cleared_on_open_and_omitted_from_saves(self):
+        email = 'review@example.invalid'
+        revealed = {'text': email, 'sens': ['邮箱'], 'mask_off': True}
+        self.data['clip'] = [dict(revealed, id='history'), dict(revealed, id='deleted')]
+        self.data['groups'][0]['items'] = [dict(revealed, id='phrase')]
+        self.controller.trash.move(['deleted'])
+        self.controller.close()
+
+        # Recreate a library written by the old application.
+        self.data['extension'] = {'mask_off': 'opaque metadata'}
+        self.store.save(self.data)
+        loaded = self.store.load().data
+        self.controller = ApplicationController(loaded, self.store, self.images)
+
+        def records(data):
+            return (data['clip'][0], data['groups'][0]['items'][0],
+                    data['trash']['items'][0]['item'])
+
+        for item in records(loaded):
+            self.assertNotIn('mask_off', item)
+            self.assertNotEqual(display_text(item['text'], item['sens']), email)
+            item['mask_off'] = True
+
+        self.controller.request_save()
+        self.controller.flush()
+        for item in records(loaded):
+            self.assertEqual(display_text(item['text'], item['sens'],
+                                          reveal=item.get('mask_off', False)), email)
+
+        self.controller.close()
+        reopened = self.store.load().data
+        for item in records(reopened):
+            self.assertNotIn('mask_off', item)
+            self.assertEqual(item['text'], email)
+        self.assertEqual(reopened['extension'], {'mask_off': 'opaque metadata'})
 
     def test_busy_clipboard_read_is_retried_without_advancing_sequence(self):
         attempts = []

@@ -6,6 +6,7 @@ decode data and perform file I/O, but only the owner thread commits a record.
 """
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import chain
 import struct
 from threading import Event, Lock
 
@@ -19,7 +20,20 @@ from clawboard.services import ClipboardService, SaveService
 from clawboard.storage import RecoveryRequiredError
 from clawboard.tasks import WorkerTasks
 from clawboard.timefmt import match_ignore
-from clawboard.trash import TrashService, TrashError, image_references
+from clawboard.trash import TRASH_VERSION, TrashService, TrashError, image_references, trash_items
+
+
+def _clear_temporary_reveals(data):
+    """Reset display choices on a newly loaded library or detached save snapshot."""
+    phrases = (item for group in data['groups'] for item in group['items'])
+    items = chain(data['clip'], phrases)
+    trash = data.get('trash')
+    # Future recycle-bin formats remain opaque to this version.
+    if (isinstance(trash, dict) and type(trash.get('version')) is int
+            and trash['version'] == TRASH_VERSION):
+        items = chain(items, trash_items(data))
+    for item in items:
+        item.pop('mask_off', None)
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,7 @@ class ApplicationController:
         self.no_save = no_save
         self.on_capture = on_capture
         self.on_error = on_error
+        _clear_temporary_reveals(data)
         self.history = HistoryService(data)
         self.trash = TrashService(data)
         self.search = SearchService()
@@ -320,6 +335,7 @@ class ApplicationController:
     def _write_snapshot(self, data):
         if self.no_save():
             return False
+        _clear_temporary_reveals(data)
         return self.store.save(data)
 
     def request_save(self):

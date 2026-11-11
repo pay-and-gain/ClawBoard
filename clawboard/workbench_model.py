@@ -32,7 +32,7 @@ def full_preview(entry, settings):
     record = entry.record
     text = record.get('text')
     return display_text(text if isinstance(text, str) else '', record.get('sens') or None,
-                        masked=bool(settings.get('mask_sensitive', True)),
+                        masked=bool(settings.get('mask_sensitive', False)),
                         reveal=bool(record.get('mask_off')))
 
 

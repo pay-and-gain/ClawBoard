@@ -81,10 +81,11 @@ class ProjectionTests(unittest.TestCase):
         settings['mask_sensitive'] = True
         self.assertNotIn('synthetic_secret_value', row['disp'])
 
-    def test_default_mask_and_truncation_boundary_are_safe(self):
+    def test_enabled_mask_and_truncation_boundary_are_safe(self):
         secret = 'password=very_secret_value'
         text = 'x' * 2038 + ' ' + secret
-        row = ViewProjection().project([item(text=text, sens=['密码'])], 'clip', {})[0]
+        row = ViewProjection().project([item(text=text, sens=['密码'])], 'clip',
+                                       {'mask_sensitive': True})[0]
         self.assertNotIn('very', row['disp'])
         self.assertNotEqual(row['disp'], text[:2048])
         self.assertEqual(row['text'], text)
@@ -92,8 +93,9 @@ class ProjectionTests(unittest.TestCase):
     def test_phrase_name_and_unnamed_preview_are_masked(self):
         projection = ViewProjection()
         named = projection.project([item(name='password=synthetic_secret')], 'phrase',
-                                   {'show_size': True})[0]
-        unnamed = projection.project([item(text='password=synthetic_secret')], 'phrase', {})[0]
+                                   {'show_size': True, 'mask_sensitive': True})[0]
+        unnamed = projection.project([item(text='password=synthetic_secret')], 'phrase',
+                                     {'mask_sensitive': True})[0]
         self.assertNotIn('synthetic_secret', named['sub'])
         self.assertNotIn('synthetic_secret', unnamed['sub'])
         self.assertEqual(named['badge'], '11 B')

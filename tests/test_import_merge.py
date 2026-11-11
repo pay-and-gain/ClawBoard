@@ -185,6 +185,7 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(result.imported_count, 0)
 
     def test_import_cannot_carry_reveal_or_forged_labels_past_daily_masking(self):
+        self.current['settings']['mask_sensitive'] = True
         token = 'sk-synthetic_import_token_123456789'
         raw = 'Synthetic token: ' + token
         self.current['clip'] = [item('existing', mask_off=True, sens=['keep-original'])]

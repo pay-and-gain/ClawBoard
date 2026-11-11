@@ -8,11 +8,11 @@ import json
 import re
 
 from clawboard.classify import looks_like_code
-from clawboard.config import EMAIL_SCAN_MAXLEN
+from clawboard.email_match import EMAIL_PATTERN, search_email
 
 # 标签正则（复用敏感识别里的同款规则，但语义是中性标签）
 _TAG_PATTERNS = [
-    ('email', re.compile(r'[\w.+-]+@[\w-]+\.[\w.]{2,}')),
+    ('email', EMAIL_PATTERN),
     ('phone', re.compile(r'(?<!\d)1[3-9]\d{9}(?!\d)')),
     ('idcard', re.compile(r'(?<!\d)\d{17}[\dXx](?!\d)')),
     ('bankcard', re.compile(r'(?<!\d)\d{16,19}(?!\d)')),
@@ -45,13 +45,6 @@ _TAG_ALIASES = {
 }
 
 
-# 与敏感识别同源：这里的 email 正则 [\w.+-]+@... 有 O(n²) 风险（长且不含 @ 的文本），
-# 且补记会把它带到启动主线程。同款处理：先用 '@' 做 O(n) 预筛（零功能损失），
-# 再对超长文本设上界兜底（代价同 scan_sensitive，见 config.EMAIL_SCAN_MAXLEN 注释）。
-_TAG_PREFILTER = {'email': '@'}
-_TAG_MAXLEN = {'email': EMAIL_SCAN_MAXLEN}
-
-
 def detect_tags(text):
     """返回内容命中的标签列表（顺序按 _TAG_PATTERNS 定义序）。"""
     s = text or ''
@@ -59,13 +52,8 @@ def detect_tags(text):
         return []
     tags = []
     for name, pat in _TAG_PATTERNS:
-        need = _TAG_PREFILTER.get(name)
-        if need and need not in s:
-            continue
-        cap = _TAG_MAXLEN.get(name, 0)
-        if cap and len(s) > cap:
-            continue
-        if pat.search(s):
+        match = search_email(s) if name == 'email' else pat.search(s)
+        if match:
             tags.append(name)
     # 纯数字（数字/小数/负数/千分位）
     if re.fullmatch(r'[0-9\s.,+\-]+', s) and any(c.isdigit() for c in s):
